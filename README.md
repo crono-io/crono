@@ -1,662 +1,378 @@
 # Crono
 
-**Distributed workload automation for infrastructure and operations.**
+Distributed workload automation for infrastructure and operations.
 
-Crono is an open-source, API-first workload automation control plane for registering, scheduling, dispatching, and observing operational jobs across distributed infrastructure.
+## Introduction
+
+Crono is an open-source, API-first and messaging-first control plane for registering, versioning, triggering, scheduling, dispatching, and observing jobs on remote workers. It streams execution events, retains execution history, and will eventually compose jobs into workflows.
 
 > Define the job centrally. Execute it where the capability exists.
 
-Crono is currently an early-stage prototype.
+This document proposes the first architecture. Crono is in the design phase; the protocols and examples below are conceptual, not implemented interfaces.
 
-## Why Crono?
+## Why Crono
 
-Infrastructure automation often ends up spread across:
+Operational automation is spread across cron, systemd timers, administration hosts, CI pipelines, and custom programs. Crono gives it a common job registry, execution path, and history.
 
-- cron and systemd timers
-- shell scripts
-- Ansible control hosts
-- database maintenance servers
-- CI pipelines
-- Kubernetes jobs
-- Terraform/OpenTofu runners
-- custom operational tools
-
-Crono provides a common control plane above these tools without trying to replace them.
-
-A Crono worker can execute an Ansible playbook, run `pgBackRest`, invoke `patronictl`, execute a program, start a container, call an HTTP endpoint, or perform another registered operational task.
-
-Crono manages **when, where, and why** a job runs.
-
-The worker manages **how** it runs.
+Crono coordinates Ansible, Terraform/OpenTofu, PostgreSQL utilities, Kubernetes tooling, shell programs, backup tools, and custom executables. Those tools keep their own responsibilities. Crono decides when and where a registered job should run; the worker manages its execution environment.
 
 ## Architecture
 
+The initial runtime topology has four components: `crono-server`, `crono-worker`, PostgreSQL, and NATS with JetStream enabled.
+
 ```mermaid
 flowchart TB
-    User["Web UI / API Client"]
-
-    subgraph ControlPlane["Crono Control Plane"]
-        Server["crono-server<br/>API · Scheduler · Dispatcher<br/>Job Registry · Run Controller"]
-        PG[("PostgreSQL<br/>authoritative state")]
-        NATS["NATS JetStream<br/>internal events / dispatch"]
-
-        Server --> PG
-        Server --> NATS
+    subgraph Public["Human / public plane"]
+        Client["Browser / CLI / public API client"]
+        Server["crono-server<br/>REST API · Web UI · Job Registry<br/>Scheduler · Dispatcher · Run Controller"]
+        Client <-->|HTTPS| Server
     end
 
-    User -->|"HTTPS :443"| Server
+    PG[("PostgreSQL<br/>authoritative state")]
+    Server <--> PG
 
-    subgraph ExecutionPlane["Execution Plane"]
-        W1["crono-worker<br/>Ansible / SSH"]
-        W2["crono-worker<br/>PostgreSQL tools"]
-        W3["crono-worker<br/>Podman / Containers"]
-        W4["crono-worker<br/>Kubernetes / Terraform"]
+    subgraph Messaging["Messaging / execution plane"]
+        NATS["NATS / JetStream"]
+        W1["crono-worker<br/>Ansible control host"]
+        W2["crono-worker<br/>Database administration host"]
+        Trusted["Trusted internal service<br/>(future client)"]
+        NATS <-->|"Native NATS / TLS"| W1
+        NATS <-->|"Native NATS / TLS"| W2
+        NATS <-->|"NATS request/reply"| Trusted
     end
 
-    W1 -->|"HTTPS<br/>poll · claim · heartbeat · events"| Server
-    W2 -->|"HTTPS"| Server
-    W3 -->|"HTTPS"| Server
-    W4 -->|"HTTPS"| Server
-
-    W1 --> A["Servers"]
-    W2 --> B["Databases"]
-    W3 --> C["Local workloads"]
-    W4 --> D["Clusters / Cloud"]
+    Server <-->|"Native NATS / TLS"| NATS
 ```
 
-Workers initiate connections to the Crono control plane.
+`crono-server` is a modular monolith. Its HTTP API, scheduler, dispatcher, run controller, NATS consumers/request handlers, event processor, and persistence layer are logical Rust modules in one deployable process. The Web UI uses its public API. `crono-worker` is the separate execution process.
 
-They do **not** require inbound connectivity and do not need direct access to PostgreSQL or NATS.
+Workers connect directly to NATS. They have no PostgreSQL connection, HTTP polling loop, normal-operation HTTP server, or inbound worker ports. The browser connects only to `crono-server`.
 
-A worker only needs:
+Keep one server deployment initially. Add worker capacity through queues; split control-plane services only when measured scaling or failure-isolation needs justify the operational cost.
+
+## Communication model
+
+| Client or responsibility | Transport | Boundary |
+| --- | --- | --- |
+| Browser, human CLI, public/external API | HTTPS to `crono-server` | Public authentication and authorization |
+| Trusted automation clients, eventually | NATS request/reply to server handlers | Authorized Run requests, never dispatch publication |
+| Worker dispatch and important execution events | Native NATS with JetStream | Durable delivery and redelivery |
+| Worker claims, lease renewal, control, presence | Core NATS | Low-latency request/reply or transient messages |
+| Authoritative persistence | Server to PostgreSQL | Workers and clients never access the database |
+
+Native NATS is a distinct protocol, not HTTPS. A conceptual endpoint is `nats://nats.example.internal:4222`; production connections must require TLS, certificate verification, and authentication. TLS-secured native connectivity can use `tls://nats.example.internal:4222`, depending on client configuration. See [NATS TLS documentation](https://docs.nats.io/learn/security/encryption). WebSocket/WSS transport is outside v0.1.
+
+The browser must not receive NATS credentials or connect directly to NATS. Keeping HTTPS as its boundary centralizes authorization, simplifies browser security, and preserves a stable public API independent of messaging internals.
+
+A trusted service may eventually request `crono.request.run` with `job`, `inputs`, `request_id`, and `metadata`. The server authenticates and authorizes the caller, validates the job and inputs, creates the Run in PostgreSQL, and returns its ID after commit. Only the control plane creates executable Runs and publishes dispatch messages.
+
+Normal worker traffic flows directly between workers and NATS. The server consumes events and handles authoritative decisions; it does not proxy each message into the bus. This avoids HTTP request overhead, duplicated serialization, connection churn, and extra network hops.
+
+## Core domain model
 
 ```text
-crono-worker -> HTTPS -> crono-server
+Job -> JobVersion -> Run -> RunAttempt -> Worker -> Executor
 ```
 
-This allows workers to live close to the infrastructure they operate.
+| Concept | Meaning |
+| --- | --- |
+| Job | Logical identity, such as `postgres-backup` |
+| JobVersion | Immutable execution definition; modifying a Job creates a new version |
+| Run | One requested execution, with validated inputs and exactly one pinned JobVersion |
+| RunAttempt | One attempt to perform that Run, with its own identity, worker assignment, lease, and outcome |
+| Worker | An identified execution process serving authorized queues |
+| Executor | A generic execution primitive; initially `process` |
 
-## Core model
+For example, Run 42 may have Attempt 1 with a lost worker and Attempt 2 that succeeds, if retry is permitted. Retrying creates a new RunAttempt; it does not overwrite the old attempt or change the pinned JobVersion. Message redelivery alone does not create an attempt.
 
-Crono intentionally keeps the execution model small:
+Immutable versions make definitions auditable and support reproducibility and debugging. They do not freeze installed tools, external infrastructure, or mutable artifacts; those dependencies must also be pinned when reproducibility requires it.
+
+Queues route work. Labels and capabilities are future placement inputs, not a sophisticated scheduler in v0.1.
+
+## Job execution lifecycle
+
+### 1. Create and persist a Run
+
+`POST /api/v1/jobs/:id/runs`, future `crono.request.run` requests, and scheduling all enter the same Run creation logic and authorization rules.
+
+The server validates the request, resolves and pins the JobVersion, and commits the Run, its initial pending RunAttempt, and a dispatch/outbox record in one PostgreSQL transaction. Work becomes visible to workers only after commit. Caller-scoped request IDs must make retries return the same Run and reject conflicting payloads.
+
+### 2. Publish through the transactional outbox
+
+A database commit followed by a separate NATS publish has a crash window: the Run can exist without ever being dispatched. The outbox records the publication intent atomically with the Run.
 
 ```text
-Job
- ↓
-Job Version
- ↓
-Run
- ↓
-Queue
- ↓
-Worker
- ↓
-Executor
- ↓
-Result
+PostgreSQL transaction: Run + pending RunAttempt + outbox record
+                                    |
+                                  commit
+                                    |
+                       dispatcher publishes to JetStream
+                                    |
+                      record publication after broker confirmation
 ```
 
-### Job
+The dispatcher retries pending outbox records. A crash after publication but before recording it can produce duplicates, so publication IDs and idempotent processing remain necessary. No PostgreSQL transaction is held open while waiting for a NATS round trip or job execution.
 
-A reusable operational task.
+A small dispatch envelope identifies the committed work:
 
-Examples:
+```json
+{
+  "run_id": "...",
+  "attempt_id": "...",
+  "job_version_id": "...",
+  "queue": "postgres"
+}
+```
+
+The attempt is allocated before dispatch; claiming assigns it to a worker. A later retry creates a new attempt and outbox record atomically.
+
+### 3. Pull, claim, and obtain the execution specification
+
+A worker pulls only when it has execution capacity. Receiving a dispatch message does not authorize execution.
+
+The worker requests `crono.control.claim` over NATS with the Run and attempt identities. The server verifies the authenticated worker, queue permission, pinned version, and attempt eligibility, then atomically grants or denies ownership in PostgreSQL. At most one attempt per Run may hold an active execution lease.
+
+A grant identifies `run_id`, `attempt_id`, `worker_id`, `lease_id`, and `lease_expires_at`. A repeated claim request must not allocate another lease or authorize a second process. A timeout is not a grant; the worker must recover the decision through an idempotent request.
+
+Workers cannot read PostgreSQL, so the execution specification needs an explicit delivery path:
+
+| Approach | Benefit | Cost |
+| --- | --- | --- |
+| A: include the complete immutable specification in dispatch | No specification lookup after delivery | Repeats large definitions and inputs in durable messages and redeliveries; increases broker storage and payload exposure |
+| B: obtain it through NATS request/reply | Small dispatch messages; explicit version and access checks; stateless workers | Depends on an available server and adds a round trip if fetched separately |
+
+Recommend **B**, returning the immutable specification and validated Run inputs in the successful claim reply. The claim already requires a server/database decision, so combining the response avoids an additional fetch round trip. PostgreSQL stays canonical, workers need no HTTP or persistent cache, and every response names the pinned version. An optional bounded in-memory cache can be evaluated later.
+
+### 4. Execute
+
+After a valid claim, the worker starts the process executor. It owns process lifecycle, execution environment, timeout enforcement, stdout/stderr capture, and cancellation.
 
 ```text
-postgres-backup
-postgres-vacuum
-ansible-patching
-restart-service
-terraform-apply
-rotate-certificates
-deploy-application
+crono-worker -> process executor -> ansible-playbook / pgbackrest / patronictl / tofu / custom program
 ```
 
-### Job Version
+The worker may execute only while its confirmed lease is valid. On renewal failure it must attempt to stop the process by the lease deadline; stopping a local process cannot guarantee that a remote side effect stopped.
 
-An immutable version of a job definition.
+### 5. Publish events
 
-Every run references the exact version that was executed, making historical executions reproducible and auditable.
+Workers publish directly to NATS: `started`, `stdout`, `stderr`, `progress`, `succeeded`, `failed`, or `cancelled`. Events identify the Run, attempt, and lease, with stable event identities and per-attempt ordering information.
 
-### Run
+The server's event processor validates transitions and persists authoritative state changes promptly. Duplicate or delayed events must not regress state. Output takes a bounded buffering/batching path, described below.
 
-One invocation of a job.
+### 6. Renew leases
 
-A run contains its inputs, state, timestamps, execution attempts, worker assignment, logs, and result.
+Worker presence heartbeats and active execution lease renewal are different concerns. Presence can be transient; a heartbeat alone does not extend permission to execute.
 
-### Worker
+Active leases renew through NATS request/reply. Initially, acknowledge a new lease deadline only after its conditional PostgreSQL update commits. Validate the worker, attempt, and current unexpired lease using control-plane/database time.
 
-A long-running Crono process installed close to the infrastructure where jobs must execute.
+Presence updates may be coalesced. Later, lease updates may be batched or assisted by a short-lived in-memory view, but no acknowledged lease extension may exist only in memory. Timing margins, clock assumptions, and restart behavior must be settled before implementation.
 
-Workers advertise queues and capabilities and pull work from the control plane.
+### 7. Commit completion, then finalize delivery
 
-### Executor
+The worker publishes a durable completion event and continues lease renewal until the server confirms a durable disposition. Before applying a new completion, the server atomically validates the active attempt/lease and commits the attempt outcome, Run state, and authoritative event in PostgreSQL. A duplicate returns the already recorded outcome; stale or conflicting reports cannot replace it. Late reports remain evidence for reconciliation without reviving an expired lease.
 
-The mechanism used by a worker to execute a job.
+JetStream publication confirmation means the broker stored the event, not that PostgreSQL accepted completion. The event processor acknowledges durable events only after their database outcome is recorded. The worker obtains application-level completion confirmation over NATS, with an idempotent status request if the confirmation is lost, before acknowledging dispatch.
 
-Initial executor types are expected to be:
+A redelivered dispatch may be retired only after the control plane confirms a persisted terminal or superseded disposition. A denied claim because another worker is active is not permission to discard the work. ACK ownership, timeout/retry behavior, and rejection handling are Phase 0 protocol decisions; neither early ACK nor lost replies may silently lose work.
 
-```text
-process
-container
-http
+## NATS and JetStream
+
+Core NATS handles transient request/reply, claims, control messages, and some heartbeats. Its requests need bounded timeouts and explicit idempotent retries when responses are lost. JetStream supplies persistence and at-least-once delivery for dispatch and important execution events; every message does not need persistence.
+
+A deliberately small, provisional semantic subject hierarchy:
+
+| Subject | Purpose |
+| --- | --- |
+| `crono.dispatch.<queue>` | Durable execution envelopes |
+| `crono.request.run` | Future trusted-client Run creation |
+| `crono.control.claim` | Worker claim and execution-specification reply |
+| `crono.control.<operation>` | Registration, renewal, completion inspection, and optional cancellation control |
+| `crono.worker.heartbeat` | Worker presence |
+| `crono.run.started` | Durable attempt-start event |
+| `crono.run.event` | Output/progress, with explicit retention and loss policy |
+| `crono.run.completed` | Durable completion event |
+
+These are conventions, not a frozen wire protocol or blanket wildcard permissions. Phase 0 must settle identity scoping, targeted control delivery, and protocol versioning. Subjects express operations and events, not database tables.
+
+Conceptually, `CRONO_DISPATCH` covers `crono.dispatch.*`. Queue names are single subject tokens; a `postgres` queue maps to `crono.dispatch.postgres`. Workers for a queue share a durable pull consumer filtered to that queue, distributing work across the pool. Consumer ownership belongs to the queue, not an individual worker. See [NATS worker pools](https://docs.nats.io/learn/jetstream/worker-pool).
+
+Use explicit acknowledgments and bounded pulls. Long-running executions need delivery-progress signaling while awaiting completion; JetStream's delivery timer is separate from the PostgreSQL execution lease. Extending one does not extend the other. See [NATS acknowledgment and redelivery](https://docs.nats.io/learn/jetstream/acknowledgment).
+
+Important events use a durable server-side consumer. Retention, delivery limits, and exhausted delivery handling must preserve recovery from PostgreSQL and expose unresolved work. Stream configuration, replica counts, and production defaults are intentionally deferred.
+
+## PostgreSQL
+
+> PostgreSQL is authoritative state. NATS is transport.
+
+Conceptual persistent records include `jobs`, `job_versions`, `runs`, `run_attempts`, `run_events`, `schedules`, `workers`, `leases`, `queues`, and `outbox`. This is a responsibility map, not a schema.
+
+If NATS is rebuilt, PostgreSQL must still explain which jobs and versions exist, which Runs happened, their states, attempts, outcomes, and retained execution history. Broker acknowledgments and stream retention are not execution history.
+
+Recovery must reconcile pending dispatch and uncertain attempts against PostgreSQL before republishing eligible work. Rebuilding NATS can lose uncommitted in-flight evidence; record uncertainty instead of inventing success or blindly replaying side effects.
+
+## Workers
+
+Place workers close to the infrastructure and tools they operate: an Ansible control machine, database administration host, or Kubernetes administration host.
+
+A conceptual worker declaration:
+
+```yaml
+worker:
+  name: db-zrh-01
+  queues:
+    - postgres
+  capabilities:
+    - process
+  labels:
+    site: zrh
+    environment: production
 ```
 
-Higher-level tools such as Ansible do not require special Crono integration. They can be executed through a generic executor.
+Registration associates this declaration with a provisioned identity; a claimed name or queue is not an authorization grant. v0.1 uses explicitly assigned queues for routing, with process-capable workers. Labels and additional capabilities remain future placement inputs.
 
-## Example: Ansible
+Workers initiate persistent outbound NATS connections and pull within available capacity. They are disposable execution processes; correctness and history must not depend on worker-local storage.
 
-The Crono server does not need Ansible installed.
+## Executors
 
-A worker placed on an existing Ansible control host can execute it locally.
+The first executor is `process`. `container` and `http` are possible later primitives.
 
-```text
-                       crono-server
-                            │
-                         HTTPS
-                            │
-                            ▼
-                     crono-worker
-                            │
-                   ansible-playbook
-                            │
-                            ▼
-                      target hosts
-```
-
-Example job definition:
+Ansible, Terraform/OpenTofu, PostgreSQL utilities, `kubectl`, `pgBackRest`, and `Patroni` do not need dedicated executor implementations. They are programs available in the worker's execution environment.
 
 ```yaml
 name: patch-linux-hosts
 queue: ansible
-
 executor:
   type: process
   command: /usr/bin/ansible-playbook
   args:
-    - -i
-    - /srv/ansible/inventory/production
-    - /srv/ansible/playbooks/patch.yml
-
-timeout: 1h
+    - /srv/ansible/playbooks/site.yml
 ```
 
-Crono only needs to know how to dispatch and observe the job.
-
-The worker host owns the execution environment:
-
-```text
-/usr/bin/ansible-playbook
-/srv/ansible/
-/etc/ssh/
-/etc/ansible/
-```
-
-## Workers
-
-Workers can be specialized for different environments.
-
-For example:
-
-```yaml
-worker:
-  name: db-worker-zrh-01
-
-  queues:
-    - postgres
-    - database
-
-  capabilities:
-    - process
-    - container
-
-  labels:
-    site: zrh
-    environment: production
-```
-
-Another worker may provide Ansible:
-
-```yaml
-worker:
-  name: ansible-zrh-01
-
-  queues:
-    - ansible
-    - linux
-
-  capabilities:
-    - process
-
-  labels:
-    site: zrh
-    environment: production
-```
-
-This allows Crono to route jobs to execution environments without becoming an infrastructure inventory system itself.
-
-## Example execution
-
-A job can be started through the API:
-
-```http
-POST /api/v1/jobs/postgres-vacuum/runs
-```
-
-```json
-{
-  "inputs": {
-    "cluster": "postgres-prod-01",
-    "database": "orders"
-  }
-}
-```
-
-Crono creates a run:
-
-```json
-{
-  "id": "run_01K...",
-  "job": "postgres-vacuum",
-  "version": 4,
-  "state": "queued"
-}
-```
-
-Execution then follows:
-
-```text
-API / Schedule / Event
-        │
-        ▼
-     create Run
-        │
-        ▼
-    PostgreSQL
-        │
-        ▼
-      Queue
-        │
-        ▼
- worker claims Run
-        │
-        ▼
-     Executor
-        │
-        ▼
- operational command
-        │
-        ▼
- events / logs / result
-        │
-        ▼
-    crono-server
-```
-
-## Run lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> Pending
-    Pending --> Queued
-    Queued --> Running
-
-    Running --> Succeeded
-    Running --> Failed
-    Running --> Cancelled
-    Running --> TimedOut
-
-    Failed --> Queued: retry
-
-    Succeeded --> [*]
-    Failed --> [*]
-    Cancelled --> [*]
-    TimedOut --> [*]
-```
-
-Worker claims and state transitions are persisted in PostgreSQL.
-
-Message delivery must not be treated as proof that a job should execute. Workers atomically claim runs before starting execution so that message redelivery does not create multiple active executions of the same run.
-
-## PostgreSQL and NATS
-
-Crono uses PostgreSQL as the authoritative state store.
-
-```text
-PostgreSQL = state
-NATS       = transport/events
-```
-
-PostgreSQL stores objects such as:
-
-```text
-jobs
-job_versions
-runs
-run_attempts
-run_events
-schedules
-workers
-queues
-outbox
-```
-
-NATS JetStream can be used internally for:
-
-```text
-dispatch
-events
-notifications
-control-plane communication
-```
-
-Workers should not depend directly on NATS.
-
-`crono-server` exposes the worker protocol through HTTPS so that deployment only requires normal web connectivity.
+The server needs no Ansible installation. The worker host provides the executable, files, credentials, and infrastructure access. Examples describe intended definitions, not a finalized configuration format.
 
 ## Scheduling
 
-Schedules create runs through the same execution pipeline used by API-triggered jobs.
+Scheduling only creates Runs through the shared creation logic.
 
 ```text
-HTTP API ──────────┐
-                   │
-Cron schedule ─────┼──> Run ──> Queue ──> Worker
-                   │
-Event trigger ─────┘
+REST API --------+
+NATS request ----+--> create Run --> persist/outbox --> JetStream --> worker
+scheduler -------+
+future trigger --+
 ```
 
-Crono should eventually support both normal cron expressions and richer operational calendars.
+The scheduler remains a module inside `crono-server` and comes after the manual execution slice. Basic schedules should identify occurrences so restarts do not create duplicate Runs. Time zones and missed-occurrence policy need design before scheduling ships. Calendars and separate scheduler services are future concerns.
 
-Examples include:
+## Reliability model
 
-```text
-every weekday at 23:00
-last working day of the month
-first business day after quarter close
-business-day calendars
-```
+Crono's foundational invariants are:
 
-## Workflows
+- PostgreSQL is authoritative; NATS is transport.
+- JetStream delivery is at-least-once.
+- Executions use attempts; attempts use leases.
+- Workers are disposable; jobs are immutable by version.
+- State transitions and control requests must be idempotent.
 
-Crono is initially focused on jobs, but the data model should allow jobs to later be composed into workflows.
+Crono uses **at-least-once delivery with control-plane guarded execution**. Claims prevent the control plane from intentionally authorizing concurrent owners of the same attempt or concurrent active attempts of one Run. They do not guarantee exactly-once execution or fence arbitrary external systems.
 
-```mermaid
-flowchart LR
-    A["Extract"] --> B["Reconcile"]
-    B --> C["Backup"]
-    C --> D["Report"]
+An expired lease does not prove a process or remote operation stopped. External idempotency keys, resource fencing, or reconciliation may be needed for safe retries. Unknown outcomes must remain visible, and v0.1 must not automatically retry uncertain non-idempotent work. The exact Run/attempt state machines and recovery policy are Phase 0 work.
 
-    B -->|failure| E["Notify / Remediate"]
-```
+| Failure scenario | Expected invariant and remaining design work |
+| --- | --- |
+| Worker receives dispatch and dies before claim | No execution was authorized. Unacknowledged delivery returns to the queue; another worker can claim the pending attempt. |
+| Worker claims and dies before execution | Keep ownership until lease expiry, then record a lost/uncertain attempt. The server cannot infer that nothing started; any permitted retry uses a new attempt. |
+| Worker dies during execution | Lease expiry makes lost ownership visible. Processes or remote work may survive; retry policy must account for partial side effects. |
+| External operation completes, but worker dies before reporting success | Outcome remains unknown. Reconcile or require an explicit retry decision; message durability cannot establish success or prevent repeated effects. |
+| NATS redelivers dispatch | Check the same persisted attempt and lease. Do not start a second process, allocate a retry, or discard active work solely because it was delivered again. |
+| Server crashes after PostgreSQL commit but before publication | The outbox retains dispatch intent and resumes publication. Duplicate publication is safe to process. |
+| Duplicate completion event arrives | Return the recorded outcome without applying another transition. Conflicting/stale events cannot overwrite a newer result. |
+| Stale worker heartbeats an expired lease | Reject renewal; never revive the lease or displace a newer attempt. Worker presence alone grants no ownership. |
 
-A workflow should use the same execution primitives as an individual job:
-
-```text
-Workflow Run
-    │
-    ├── Run: extract
-    ├── Run: reconcile
-    ├── Run: backup
-    └── Run: report
-```
-
-Workflow orchestration should be layered on top of the normal job execution engine rather than implemented as a separate execution system.
+If PostgreSQL is unavailable, new claims, renewals, and completion confirmations cannot succeed. If NATS is unavailable, workers cannot obtain new authority. Existing workers act only within confirmed lease deadlines. Recovery must handle delayed events without assuming cross-subject delivery order.
 
 ## Security model
 
-Crono should not become an authenticated remote shell.
+Clients invoke registered jobs with validated inputs. Permission to register or version executable definitions is separate from permission to trigger them. Pass structured arguments to the process executor; avoid implicit shell interpolation and restrict dangerous input options. A process executor runs with its host account's privileges and is not a security sandbox.
 
-Clients invoke **registered jobs**, not arbitrary commands.
+Production NATS connections require TLS and authenticated identities. NKEYs, credentials, or JWT/accounts are possible mechanisms; v0.1 should use simple provisioned identities rather than an elaborate identity platform.
 
-For example, a registered job might define:
+Use [NATS subject-level authorization](https://docs.nats.io/learn/security/authorization) to restrict publication and subscription, including JetStream pull/ACK APIs and reply inboxes:
 
-```text
-ansible-playbook restart.yml --limit {{ host }}
-```
+- Workers consume only authorized queues and publish only permitted execution/control messages; they cannot create Runs or publish dispatch.
+- Trusted services may request permitted jobs, but cannot publish dispatch or impersonate workers.
+- Only the control plane publishes executable dispatch and handles authoritative decisions.
+- Workers do not administer streams/consumers or receive unrelated clients' replies.
 
-The caller can provide:
+Broker authentication does not by itself authenticate a self-reported `worker_id` to an application handler. Bind requests and events to a verifiable caller identity, using authenticated request credentials or identity-scoped subjects enforced by broker permissions. Choose that binding in Phase 0; broad shared subjects and payload IDs alone are insufficient.
 
-```json
-{
-  "host": "db01.example.net"
-}
-```
+Keep secrets out of job definitions, dispatch envelopes, and retained logs. Use references and worker-local credentials with least privilege; provider integrations can follow later. Limit payload sizes and redact sensitive output. An unavailable or invalid authorization decision never grants execution.
 
-but cannot replace the registered executable with an arbitrary command.
+## Performance principles
 
-Job inputs should be declared and validated before execution.
+Performance must be benchmark-driven; no throughput or latency numbers are promised.
 
-Secrets should be represented by references rather than stored directly inside job definitions:
+1. Reuse persistent PostgreSQL and NATS connections.
+2. Use async I/O without blocking runtime threads.
+3. Use NATS for high-frequency worker communication.
+4. Bound concurrent jobs, execution processes, Tokio tasks, database writes, and outstanding NATS requests.
+5. Batch work only where durability semantics permit.
+6. Keep dispatch envelopes small and bound all message sizes.
+7. Use immutable definitions and explicit version identities.
+8. Minimize serialization and network hops.
+9. Never synchronously write every stdout/stderr line to PostgreSQL.
+10. Keep database transactions short and focused on authoritative state changes.
+11. Use pull consumption for natural worker backpressure.
+12. Let workers reach NATS directly; keep the control plane focused on coordination.
 
-```yaml
-env:
-  PGPASSWORD:
-    secretRef: vault://database/production#password
-```
+Execution output follows `worker -> NATS -> event processor`. State transitions go promptly to PostgreSQL; output may be buffered and batched. Define explicit limits for worker concurrency, event batches, database pools, NATS pending messages, and log buffers without inventing production defaults.
 
-Workers can eventually resolve these references using their own machine identity.
+Reserve capacity for lease renewal and completion so output floods cannot starve control traffic. Buffer saturation must trigger a defined backpressure or truncation policy with visible gaps, never unbounded memory growth. Output retention and loss guarantees must be explicit.
+
+Large logs may eventually move to object storage, with references and metadata in PostgreSQL. Unlimited raw output storage is outside v0.1. Measure dispatch-to-start latency, claim/renewal latency, event lag, and database pressure before adding caches, services, or tuning complexity.
 
 ## v0.1
 
-The first release should prove the complete execution path without attempting to implement a full enterprise orchestration platform.
+The first milestone is one vertical slice:
 
-### Control plane
+1. Register a Job.
+2. Create an immutable JobVersion.
+3. Trigger a Run through the HTTP API.
+4. Persist the Run, pending attempt, and outbox.
+5. Dispatch through JetStream.
+6. Let a worker pull the dispatch.
+7. Claim the attempt over NATS and receive its specification.
+8. Execute a process with timeout and lease handling.
+9. Publish basic state and bounded output events.
+10. Persist the final state on the server.
+11. Inspect the result, attempts, and retained history through the API.
 
-- HTTP API
-- Web UI
-- PostgreSQL persistence
-- NATS JetStream
-- job registration
-- immutable job versions
-- run history
-- queues
-- scheduling
-- worker registry
-- worker heartbeat
-- cancellation
-- timeout handling
-- retries
-- execution events
-- live output
+This includes `crono-server`, `crono-worker`, HTTP API, PostgreSQL, NATS/JetStream, a process executor, basic worker registration/identity, and basic run events. Include cancellation only if its request, process-stop, and terminal-state semantics remain simple; it must not imply rollback of external effects.
 
-### Worker
+A full Web UI, trusted-client Run creation, scheduling, and automatic retry policies are not prerequisites for this first slice. Worker NATS control operations are required from the start.
 
-- outbound HTTPS connectivity
-- queue polling
-- atomic run claiming
-- heartbeat / leases
-- stdout/stderr streaming
-- cancellation
-- generic `process` executor
+Excluded from v0.1: workflow DAGs, graphical workflow builders, Kubernetes executors, Terraform-specific or Ansible-specific integrations, complicated RBAC, multi-tenancy, approvals, calendars, plugin frameworks, distributed scheduler services, separate microservices, large-scale log storage, and WebSocket NATS transport.
 
-### Later
+## Future direction
 
-- container executor
-- HTTP executor
-- workflows / dependencies
-- calendars
-- worker placement policies
-- RBAC
-- secrets providers
-- Vault integration
-- approvals
-- notifications
-- Kubernetes executor
-- HA control plane
-- multi-tenancy
+Workflows are not part of the first implementation milestone. Later composition should reuse ordinary Runs and attempts; no DAG engine is designed here.
 
-## Proposed API
-
-```text
-POST   /api/v1/jobs
-GET    /api/v1/jobs
-GET    /api/v1/jobs/:id
-PUT    /api/v1/jobs/:id
-
-GET    /api/v1/jobs/:id/versions
-
-POST   /api/v1/jobs/:id/runs
-
-GET    /api/v1/runs
-GET    /api/v1/runs/:id
-POST   /api/v1/runs/:id/cancel
-GET    /api/v1/runs/:id/events
-
-POST   /api/v1/schedules
-GET    /api/v1/schedules
-PATCH  /api/v1/schedules/:id
-
-GET    /api/v1/workers
-GET    /api/v1/workers/:id
-```
-
-The worker protocol can remain an internal API:
-
-```text
-POST /internal/v1/workers/register
-POST /internal/v1/workers/heartbeat
-
-GET  /internal/v1/work/next
-
-POST /internal/v1/runs/:id/claim
-POST /internal/v1/runs/:id/heartbeat
-POST /internal/v1/runs/:id/events
-POST /internal/v1/runs/:id/complete
-POST /internal/v1/runs/:id/fail
-```
-
-## Proposed implementation
-
-Crono is expected to be implemented primarily in Rust.
-
-Possible initial stack:
-
-```text
-HTTP/API          axum
-async runtime     tokio
-database          PostgreSQL
-database client   sqlx
-message bus       NATS JetStream / async-nats
-serialization     serde
-telemetry         tracing / OpenTelemetry
-API schema        OpenAPI
-```
-
-A possible workspace layout:
-
-```text
-crono/
-├── crates/
-│   ├── crono-core/
-│   ├── crono-api/
-│   ├── crono-server/
-│   ├── crono-scheduler/
-│   ├── crono-dispatcher/
-│   ├── crono-worker/
-│   └── crono-executor/
-│
-├── migrations/
-├── web/
-└── Cargo.toml
-```
-
-The initial implementation does not need to physically split every control-plane component into a separate service. A modular monolith is preferable until independent scaling or failure boundaries justify separation.
-
-## Design principles
-
-### PostgreSQL owns state
-
-NATS transports messages and events, but PostgreSQL remains the authoritative record of jobs, runs, workers, schedules, and execution state.
-
-### Workers initiate connections
-
-Workers should require outbound HTTPS access only.
-
-Crono should not require inbound firewall rules to execution hosts.
-
-### Bring workers to the infrastructure
-
-Install Crono workers where the required operational tools and network access already exist.
-
-Do not centralize infrastructure credentials and connectivity unnecessarily.
-
-### Generic execution primitives
-
-Crono provides generic executors instead of implementing every automation product directly.
-
-### Immutable execution definitions
-
-Every run references an immutable job version so that historical executions remain understandable and reproducible.
-
-### API first
-
-Anything available through the Web UI should ultimately be represented through the Crono API.
-
-### Start small
-
-Crono should first become a reliable distributed job execution system before becoming a sophisticated workflow platform.
-
-## Project direction
-
-Crono sits between local schedulers and large workload automation platforms:
-
-```text
-cron / systemd
-      │
-      │ local scheduling
-      ▼
-
-┌──────────────────────────────────────┐
-│                Crono                 │
-│                                      │
-│ distributed workload automation      │
-│ scheduling                           │
-│ workers                              │
-│ operational jobs                     │
-│ API-first control plane              │
-│ execution history                    │
-└──────────────────────────────────────┘
-
-      │
-      │ larger orchestration systems
-      ▼
-
-workflow and enterprise automation platforms
-```
-
-The goal is not to replace Ansible, Terraform, Kubernetes, PostgreSQL tooling, or other automation systems.
-
-The goal is to provide a common control plane from which they can be executed reliably.
+Possible later work includes trusted NATS clients, basic scheduling, a minimal Web UI, container/HTTP executors, explicit retry policies, placement using labels/capabilities, secrets providers, and object-backed logs. Advanced authorization, tenancy, calendars, approvals, and high availability require demonstrated needs and separate designs.
 
 ## Status
 
-Crono is currently in the design and prototyping phase.
+Architecture and documentation only. Implementation has not begun. The next step is to freeze the smallest coherent execution protocol and its failure behavior before writing application code.
 
-The first milestone is the complete vertical execution path:
+## First implementation steps
 
-```text
-register job
-    ↓
-HTTP API
-    ↓
-PostgreSQL
-    ↓
-dispatch
-    ↓
-worker
-    ↓
-process executor
-    ↓
-stream output
-    ↓
-persist result
-    ↓
-Web UI
-```
+These are ordered design milestones, not implementation delivered by this document.
 
-Once this path is reliable, additional executors and orchestration capabilities can be layered on top.
+1. **Phase 0 — architecture freeze:** settle domain terminology, Run/attempt state machines, subject conventions, identity binding, claim/lease semantics, completion and ACK rules, bounded output/loss policies, and failure scenarios.
+2. **Phase 1 — control plane skeleton:** establish the server, PostgreSQL and NATS boundaries, job/version/Run model, and transactional outbox.
+3. **Phase 2 — worker protocol:** define registration, queue-scoped JetStream pull, claim/specification response, heartbeat, lease renewal, and recovery.
+4. **Phase 3 — process executor:** start and stop processes, capture bounded stdout/stderr, enforce timeout, and commit results through the completion protocol.
+5. **Phase 4 — observability:** expose event history, Run/attempt inspection, and a minimal API; add a minimal UI when useful.
+6. **Phase 5 — scheduling:** create Runs through the same control-plane path with explicit occurrence and missed-run semantics.
 
 ## License
 
-See [LICENSE](LICENSE).
+BSD 3-Clause. See [LICENSE](LICENSE).
