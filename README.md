@@ -25,7 +25,7 @@ flowchart TB
     subgraph Public["Human / public plane"]
         Client["Browser / CLI / public API client"]
         Server["crono-server<br/>REST API · Web UI · Job Registry<br/>Scheduler · Dispatcher · Run Controller"]
-        Client <-->|HTTPS| Server
+        Client <-->|"HTTPS<br/>Public API only"| Server
     end
 
     PG[("PostgreSQL<br/>authoritative state")]
@@ -36,8 +36,8 @@ flowchart TB
         W1["crono-worker<br/>Ansible control host"]
         W2["crono-worker<br/>Database administration host"]
         Trusted["Trusted internal service<br/>(future client)"]
-        NATS <-->|"Native NATS / TLS"| W1
-        NATS <-->|"Native NATS / TLS"| W2
+        NATS <-->|"Native NATS / TLS<br/>JetStream task pull · control · events"| W1
+        NATS <-->|"Native NATS / TLS<br/>JetStream task pull · control · events"| W2
         NATS <-->|"NATS request/reply"| Trusted
     end
 
@@ -46,7 +46,7 @@ flowchart TB
 
 `crono-server` is a modular monolith. Its HTTP API, scheduler, dispatcher, run controller, NATS consumers/request handlers, event processor, and persistence layer are logical Rust modules in one deployable process. The Web UI uses its public API. `crono-worker` is the separate execution process.
 
-Workers connect directly to NATS. They have no PostgreSQL connection, HTTP polling loop, normal-operation HTTP server, or inbound worker ports. The browser connects only to `crono-server`.
+Workers receive tasks directly from NATS JetStream using durable pull consumers over persistent native NATS/TLS connections. These are NATS pull requests, not HTTPS polling. Claims, lease renewals, and execution events also travel directly over NATS. Workers have no PostgreSQL connection, normal-operation HTTP server, or inbound worker ports. The browser connects only to `crono-server` over HTTPS.
 
 Keep one server deployment initially. Add worker capacity through queues; split control-plane services only when measured scaling or failure-isolation needs justify the operational cost.
 
