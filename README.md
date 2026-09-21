@@ -8,7 +8,65 @@ Crono is an open-source, API-first and messaging-first control plane for registe
 
 > Define the job centrally. Execute it where the capability exists.
 
-This document proposes the first architecture. Crono is in the design phase; the protocols and examples below are conceptual, not implemented interfaces.
+Crono currently provides a compiling workspace scaffold: server and worker CLI shells, optional trace export, and a browser GUI placeholder. The workload runtime is still in the design phase; the protocols and examples below are conceptual, not implemented interfaces.
+
+## Workspace and development
+
+The repository follows one release version while keeping its artifacts independently buildable:
+
+| Package | Location | Responsibility |
+| --- | --- | --- |
+| `crono-server` | `services/server` | Native control-plane application |
+| `crono-worker` | `services/worker` | Native execution-worker application |
+| `crono-web` | `apps/web` | Leptos CSR browser application, built with Trunk |
+| `crono-telemetry` | `crates/telemetry` | Shared native logging and optional OTLP trace export |
+
+The root `Cargo.toml` owns the version, Rust edition, license, dependency declarations, and lint policy. Every package inherits the release version; `Cargo.lock` is shared and committed. Releases will use one `vX.Y.Z` tag for all artifacts. Bump the version in the root manifest and regenerate the lockfile together. Release versions do not define HTTP or messaging protocol compatibility. Packages are not published to crates.io initially.
+
+Use a current stable Rust toolchain with rustfmt and Clippy. The default workspace members are the server and worker; neither requires browser tooling or external infrastructure to build:
+
+```sh
+cargo build --locked -p crono-server
+cargo build --locked -p crono-worker
+cargo run --locked -p crono-server -- --help
+cargo run --locked -p crono-worker -- -V
+cargo run --locked -p crono-worker -- --version
+```
+
+Both binaries support `run` and repeatable `-v`. The `run` action intentionally reports that its runtime is not implemented and exits with status 1. It does not open an application listener, connect to PostgreSQL/NATS, or execute jobs. Help and version output work without telemetry initialization.
+
+Use `-V` for the short version (`crono-server 0.1.0`) and `--version` for the long version (`crono-server 0.1.0 - <commit>`); the worker follows the same format. The shared native build script uses `built` with `git2` to embed the full Git commit hash, falling back to `unknown` when Git metadata is unavailable. Help uses yellow headings, green usage/placeholders, and blue command names, with automatic terminal detection; piped output stays plain and `NO_COLOR` disables colors.
+
+The GUI displays the product name and inherited version. Install the WASM target and Trunk (validated with Trunk 0.21.14), then build or serve it independently:
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install --locked trunk --version 0.21.14
+cd apps/web
+trunk serve
+# Or: trunk build --release
+```
+
+Trunk produces static assets under `apps/web/dist`; these are hosted separately from the server. The GUI currently makes no API requests. See [the GUI README](apps/web/README.md) and [CLI architecture](CLI_ARCHITECTURE.md).
+
+Local structured JSON logging is always available on stderr. Logging defaults to errors; `-v`, `-vv`, and `-vvv` select info, debug, and trace. `RUST_LOG` overrides that default. Trace export requires both an optional build feature and startup configuration:
+
+```sh
+cargo build --locked -p crono-server -p crono-worker --features telemetry
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 target/debug/crono-server -v run
+```
+
+This example exports the scaffold's action span and still exits with the expected unfinished-runtime error. The exporter supports gRPC, gzip, verified HTTPS using WebPKI roots, and standard OTLP header environment variables. `OTEL_EXPORTER_OTLP_ENDPOINT` explicitly enables export and selects its destination; without it, even a telemetry-enabled binary only logs locally. Default builds ignore exporter configuration. Trace export and shutdown are bounded; shutdown failure can lose pending traces and is reported without replacing the action's exit status. More detail is in [CLI architecture](CLI_ARCHITECTURE.md#telemetry).
+
+The `.justfile` provides two recipes: `clippy` and `test`. Both check native code with default and all features; `clippy` also checks the browser WASM target.
+
+```sh
+cargo fmt --all -- --check
+just clippy
+just test
+```
+
+Native workspace checks include a tooling-only GUI entrypoint; they do not validate browser rendering. A Trunk release build and browser inspection complete the frontend checks. Telemetry integration tests use an ephemeral local gRPC collector; no external collector is required.
 
 ## Why Crono
 
@@ -18,13 +76,15 @@ Crono coordinates Ansible, Terraform/OpenTofu, PostgreSQL utilities, Kubernetes 
 
 ## Architecture
 
-The initial runtime topology has four components: `crono-server`, `crono-worker`, PostgreSQL, and NATS with JetStream enabled.
+The planned execution topology has four components: `crono-server`, `crono-worker`, PostgreSQL, and NATS with JetStream enabled. `crono-web` is an independently built and hosted browser client; the server does not embed or serve its assets.
 
 ```mermaid
 flowchart TB
     subgraph Public["Human / public plane"]
-        Client["Browser / CLI / public API client"]
-        Server["crono-server<br/>REST API · Web UI · Job Registry<br/>Scheduler · Dispatcher · Run Controller"]
+        Web["crono-web<br/>Browser GUI · separately hosted static assets"]
+        Client["CLI / public API client"]
+        Server["crono-server<br/>REST API · Job Registry<br/>Scheduler · Dispatcher · Run Controller"]
+        Web <-->|"HTTPS<br/>Public API only"| Server
         Client <-->|"HTTPS<br/>Public API only"| Server
     end
 
@@ -44,7 +104,7 @@ flowchart TB
     Server <-->|"Native NATS / TLS"| NATS
 ```
 
-`crono-server` is a modular monolith. Its HTTP API, scheduler, dispatcher, run controller, NATS consumers/request handlers, event processor, and persistence layer are logical Rust modules in one deployable process. The Web UI uses its public API. `crono-worker` is the separate execution process.
+`crono-server` remains a modular monolith. Its planned HTTP API, scheduler, dispatcher, run controller, NATS consumers/request handlers, event processor, and persistence layer are logical Rust modules in one deployable process. `crono-web` uses its public API and has no Rust dependency on the server. `crono-worker` is the separate execution process. Server and worker share a telemetry library, not a runtime process. Shared domain and protocol libraries can follow once their contracts are defined.
 
 Workers receive tasks directly from NATS JetStream using durable pull consumers over persistent native NATS/TLS connections. These are NATS pull requests, not HTTPS polling. Claims, lease renewals, and execution events also travel directly over NATS. Workers have no PostgreSQL connection, normal-operation HTTP server, or inbound worker ports. The browser connects only to `crono-server` over HTTPS.
 
@@ -360,11 +420,11 @@ Possible later work includes trusted NATS clients, basic scheduling, a minimal W
 
 ## Status
 
-Architecture and documentation only. Implementation has not begun. The next step is to freeze the smallest coherent execution protocol and its failure behavior before writing application code.
+Workspace scaffold implemented: independently buildable CLI shells, shared optional telemetry, and a Leptos GUI placeholder. PostgreSQL, NATS, job execution, and public application APIs are not implemented. The next step is to freeze the smallest coherent execution protocol and its failure behavior before implementing the runtime.
 
 ## First implementation steps
 
-These are ordered design milestones, not implementation delivered by this document.
+These are the remaining ordered design and runtime milestones; the workspace scaffold does not implement them.
 
 1. **Phase 0 — architecture freeze:** settle domain terminology, Run/attempt state machines, subject conventions, identity binding, claim/lease semantics, completion and ACK rules, bounded output/loss policies, and failure scenarios.
 2. **Phase 1 — control plane skeleton:** establish the server, PostgreSQL and NATS boundaries, job/version/Run model, and transactional outbox.

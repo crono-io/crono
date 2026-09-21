@@ -1,0 +1,32 @@
+[package]
+name = "crono-worker"
+description = "Execution worker for Crono (runtime not implemented)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+build = "../../build.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = []
+telemetry = ["crono-telemetry/telemetry"]
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+crono-telemetry.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+opentelemetry-proto.workspace = true
+tokio = { workspace = true, features = ["net", "process", "sync", "time"] }
+tokio-stream.workspace = true
+tonic.workspace = true
+
+[build-dependencies]
+built.workspace = true

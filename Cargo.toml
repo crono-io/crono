@@ -1,0 +1,56 @@
+[workspace]
+
+resolver = "3"
+
+members = [
+    "services/server",
+    "services/worker",
+    "apps/web",
+    "crates/telemetry",
+]
+default-members = ["services/server", "services/worker"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "BSD-3-Clause"
+repository = "https://github.com/crono-io/crono"
+publish = false
+
+[workspace.dependencies]
+crono-telemetry = { path = "crates/telemetry", default-features = false }
+anyhow = "1"
+built = { version = "0.8", features = ["git2"] }
+clap = "4.6"
+leptos = { version = "0.8", default-features = false, features = ["csr"] }
+opentelemetry = { version = "0.32", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "grpc-tonic", "gzip-tonic", "tls-ring", "tls-webpki-roots"] }
+opentelemetry-proto = { version = "0.32", default-features = false, features = ["gen-tonic", "trace"] }
+opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tonic = { version = "0.14", default-features = false, features = ["transport", "router", "gzip"] }
+tracing = "0.1"
+tracing-opentelemetry = { version = "0.33", default-features = false }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+url = "2.5"
+
+[workspace.lints.rust]
+warnings = "deny"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+await_holding_lock = "deny"
+needless_collect = "deny"
+large_stack_arrays = "deny"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true

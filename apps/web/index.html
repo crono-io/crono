@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101820">
+    <title>Crono</title>
+    <!-- Match wasm-opt's enabled instructions to current Rust WASM output. -->
+    <link data-trunk rel="rust" data-bin="crono-web" data-wasm-opt="z"
+      data-wasm-opt-params="--enable-bulk-memory-opt --enable-nontrapping-float-to-int">
+    <link data-trunk rel="css" href="style.css">
+  </head>
+  <body></body>
+</html>
