@@ -8,8 +8,11 @@
 
 use std::{error::Error, fmt};
 
+/// Maximum bytes accepted for canonical names and queue tokens.
+pub const MAX_NAME_LEN: usize = 63;
+
 /// Reason a Namespace or resource name was rejected.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NameError {
     /// The supplied name contained no characters.
     Empty,
@@ -22,6 +25,8 @@ pub enum NameError {
         /// Invalid character encountered during validation.
         character: char,
     },
+    /// The supplied name exceeded the public and database limit.
+    TooLong,
 }
 
 impl fmt::Display for NameError {
@@ -38,6 +43,7 @@ impl fmt::Display for NameError {
                 formatter,
                 "name contains invalid character {character:?} at byte {position}"
             ),
+            Self::TooLong => write!(formatter, "name must not exceed {MAX_NAME_LEN} bytes"),
         }
     }
 }
@@ -102,7 +108,38 @@ impl fmt::Display for ResourceName {
     }
 }
 
+/// Validated NATS queue token used as one dispatch subject segment.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct QueueName(String);
+
+impl QueueName {
+    /// Validate and own a queue token under the canonical name rules.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NameError`] for invalid or oversized subject tokens.
+    pub fn parse(value: &str) -> Result<Self, NameError> {
+        validate(value)?;
+        Ok(Self(value.to_string()))
+    }
+
+    /// Return the safe single subject token.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for QueueName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 fn validate(value: &str) -> Result<(), NameError> {
+    if value.len() > MAX_NAME_LEN {
+        return Err(NameError::TooLong);
+    }
     let mut characters = value.char_indices();
     let Some((_, first)) = characters.next() else {
         return Err(NameError::Empty);
@@ -138,7 +175,7 @@ const fn is_allowed(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{NamespaceName, ResourceName};
+    use super::{MAX_NAME_LEN, NamespaceName, QueueName, ResourceName};
     use anyhow::Result;
 
     #[test]
@@ -177,5 +214,16 @@ mod tests {
         for value in ["", "host_123", "host 123", "Host-123", ".", "../host"] {
             assert!(ResourceName::parse(value).is_err(), "{value:?}");
         }
+    }
+
+    #[test]
+    fn names_and_queues_have_one_shared_length_bound() {
+        let maximum = "a".repeat(MAX_NAME_LEN);
+        let oversized = "a".repeat(MAX_NAME_LEN + 1);
+        assert!(NamespaceName::parse(&maximum).is_ok());
+        assert!(ResourceName::parse(&maximum).is_ok());
+        assert!(QueueName::parse("database-default").is_ok());
+        assert!(QueueName::parse("database.default").is_err());
+        assert!(NamespaceName::parse(&oversized).is_err());
     }
 }

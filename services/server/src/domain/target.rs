@@ -6,7 +6,7 @@
 //! designed together before either is attached to Runs.
 
 use super::{NamespaceId, ResourceName, TargetId};
-use std::time::SystemTime;
+use time::OffsetDateTime;
 
 /// Stable identity of an execution destination or resource.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,7 +14,7 @@ pub struct Target {
     id: TargetId,
     namespace_id: NamespaceId,
     name: ResourceName,
-    created_at: SystemTime,
+    created_at: OffsetDateTime,
 }
 
 impl Target {
@@ -24,7 +24,7 @@ impl Target {
         id: TargetId,
         namespace_id: NamespaceId,
         name: ResourceName,
-        created_at: SystemTime,
+        created_at: OffsetDateTime,
     ) -> Self {
         Self {
             id,
@@ -54,7 +54,7 @@ impl Target {
 
     /// Return when the Target identity was created.
     #[must_use]
-    pub const fn created_at(&self) -> SystemTime {
+    pub const fn created_at(&self) -> OffsetDateTime {
         self.created_at
     }
 }
@@ -64,21 +64,22 @@ mod tests {
     use super::Target;
     use crate::domain::{NamespaceId, ResourceName, TargetId};
     use anyhow::Result;
-    use std::time::SystemTime;
+    use time::OffsetDateTime;
+    use uuid::Uuid;
 
     #[test]
     fn targets_capture_where_without_executor_semantics() -> Result<()> {
         let target = Target::new(
-            TargetId::new(21),
-            NamespaceId::new(1),
+            TargetId::new(Uuid::from_u128(21)),
+            NamespaceId::new(Uuid::from_u128(1)),
             ResourceName::parse("host-123")?,
-            SystemTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
         );
 
-        assert_eq!(target.id(), TargetId::new(21));
-        assert_eq!(target.namespace_id(), NamespaceId::new(1));
+        assert_eq!(target.id(), TargetId::new(Uuid::from_u128(21)));
+        assert_eq!(target.namespace_id(), NamespaceId::new(Uuid::from_u128(1)));
         assert_eq!(target.name().as_str(), "host-123");
-        assert_eq!(target.created_at(), SystemTime::UNIX_EPOCH);
+        assert_eq!(target.created_at(), OffsetDateTime::UNIX_EPOCH);
         Ok(())
     }
 }

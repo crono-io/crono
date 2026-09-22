@@ -73,7 +73,7 @@ pub fn Sidebar() -> impl IntoView {
                     }).collect_view()}
                 </nav>
 
-                <div class="mt-8 hidden border-t border-zinc-800 px-2 pt-4 text-xs text-zinc-600 lg:mt-auto lg:block">
+                <div class="mt-8 hidden border-t border-zinc-800 px-2 pt-4 text-center text-xs text-zinc-600 lg:mt-auto lg:block">
                     <span>"crono "</span>
                     <span id="version">{env!("CARGO_PKG_VERSION")}</span>
                 </div>

@@ -1,6 +1,9 @@
 //! `OpenAPI` document and route registration.
 
-use super::handlers::health;
+use super::{
+    handlers::{control_plane, health},
+    state::AppState,
+};
 use utoipa::openapi::{InfoBuilder, License, OpenApiBuilder, Tag};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -12,15 +15,33 @@ pub fn openapi() -> utoipa::openapi::OpenApi {
 }
 
 /// Register every documented API route.
-pub(crate) fn api_router() -> OpenApiRouter {
+pub(crate) fn api_router() -> OpenApiRouter<AppState> {
     let mut router = OpenApiRouter::with_openapi(cargo_openapi())
         .routes(routes!(health::live))
         .routes(routes!(health::ready))
-        .routes(routes!(health::health));
+        .routes(routes!(health::health))
+        .routes(routes!(
+            control_plane::create_namespace,
+            control_plane::list_namespaces
+        ))
+        .routes(routes!(control_plane::get_namespace))
+        .routes(routes!(control_plane::create_job, control_plane::list_jobs))
+        .routes(routes!(control_plane::get_job))
+        .routes(routes!(
+            control_plane::create_target,
+            control_plane::list_targets
+        ))
+        .routes(routes!(control_plane::get_target))
+        .routes(routes!(control_plane::create_run, control_plane::list_runs))
+        .routes(routes!(control_plane::get_run))
+        .routes(routes!(control_plane::overview));
 
     let mut health_tag = Tag::new("health");
     health_tag.description = Some("Process liveness, readiness, and health".to_string());
-    router.get_openapi_mut().tags = Some(vec![health_tag]);
+    let mut control_plane_tag = Tag::new("control-plane");
+    control_plane_tag.description =
+        Some("Authorization-checked Namespace, Job, Target, and Run operations".to_string());
+    router.get_openapi_mut().tags = Some(vec![health_tag, control_plane_tag]);
 
     router
 }

@@ -81,17 +81,10 @@ pub enum MaterialSymbol {
     Dns,
     Lan,
     LightMode,
-    Menu,
     Memory,
     PlayCircle,
-    RocketLaunch,
-    Schedule,
-    Search,
     SearchOff,
     Settings,
-    Shield,
-    Tune,
-    Visibility,
     Work,
 }
 
@@ -105,17 +98,10 @@ impl MaterialSymbol {
             Self::Dns => "dns",
             Self::Lan => "lan",
             Self::LightMode => "light_mode",
-            Self::Menu => "menu",
             Self::Memory => "memory",
             Self::PlayCircle => "play_circle",
-            Self::RocketLaunch => "rocket_launch",
-            Self::Schedule => "schedule",
-            Self::Search => "search",
             Self::SearchOff => "search_off",
             Self::Settings => "settings",
-            Self::Shield => "shield",
-            Self::Tune => "tune",
-            Self::Visibility => "visibility",
             Self::Work => "work",
         }
     }
@@ -232,17 +218,7 @@ mod tests {
 
     #[test]
     fn shell_symbols_are_explicit() {
-        let shell_symbols = [
-            MaterialSymbol::LightMode,
-            MaterialSymbol::Menu,
-            MaterialSymbol::RocketLaunch,
-            MaterialSymbol::Schedule,
-            MaterialSymbol::Search,
-            MaterialSymbol::SearchOff,
-            MaterialSymbol::Shield,
-            MaterialSymbol::Tune,
-            MaterialSymbol::Visibility,
-        ];
+        let shell_symbols = [MaterialSymbol::LightMode, MaterialSymbol::SearchOff];
 
         assert!(
             shell_symbols

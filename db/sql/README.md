@@ -6,9 +6,8 @@
 
 - `00_init.sql` creates the `crono` database, owner/runtime roles, and grants,
   then loads the schema.
-- `01_crono.sql` is the idempotent schema baseline. Domain tables will be added
-  after the conceptual model in the root README becomes an explicit schema and
-  migration plan.
+- `01_crono.sql` is the idempotent normalized schema baseline for Namespaces,
+  Jobs, immutable Job versions, Targets, Runs, and the transactional outbox.
 - `container-entrypoint.sql` lets the official PostgreSQL image run the canonical
   bootstrap while keeping relative includes working.
 - `check.sql` verifies database ownership, role safety, schema ownership, and
@@ -24,6 +23,17 @@ available at the default local URL:
 just db-bootstrap
 just db-verify
 ```
+
+For the normal workspace workflow, `just server` or `just dev-start` creates
+and starts a loopback-only `crono-postgres` container from the official
+`postgres:18` image. The recipe stores PostgreSQL 18's versioned data directory
+under the `crono-postgres-data` named volume, waits for readiness, and applies
+`00_init.sql` on every start so schema changes are picked up idempotently. This
+container uses trust authentication only for local development; do not reuse
+that configuration outside a developer workstation. `just dev-stop` stops the
+container without deleting its data. This path requires Podman but does not
+require a host installation of `psql` because the recipe runs the image's
+client inside the container.
 
 Pass another administrator URL when needed:
 
@@ -46,6 +56,13 @@ psql "postgres://<admin>@<host>:5432/postgres" \
 The application role is `crono_runtime`. It can connect and manipulate objects
 created by `crono_owner`, but it cannot create schema objects. `crono_owner` is a
 non-login role reserved for bootstrap and migrations.
+
+Names are unique inside their owning Namespace. A Run pins one immutable Job
+version and one Target, and a constraint trigger rejects cross-Namespace
+combinations even if an adapter is faulty. The Run and its versioned JSON
+dispatch envelope are inserted in one transaction. The dispatcher marks both
+the outbox row and Run only after a JetStream acknowledgement; failed sends
+remain pending with bounded operational error text.
 
 The local PostgreSQL configuration lives in `db/config/postgres/postgresql.conf`.
 When using the official image, mount `db/` at `/db` and mount

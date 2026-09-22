@@ -7,16 +7,16 @@ Crono remains fully usable through its public API and the `crono` CLI without
 the GUI.
 
 The application uses a dark infrastructure-style sidebar, compact top toolbar,
-and light routed workspace as its baseline visual language. Overview combines
-truthful zero-count resource summaries with operational empty states and concise
-first-use guidance; the remaining routes reuse the same page-header, card, icon,
-and empty-state primitives. It does not make API requests or fabricate backend
-resources.
+and light routed workspace as its baseline visual language. Overview displays
+authorized live counts. Namespaces, Jobs, and Targets provide creation and list
+workflows, while Runs submits qualified resources and displays durable dispatch
+state. Reserved pages continue to use truthful empty states.
 
 ## Development
 
 Install a stable Rust toolchain, the `wasm32-unknown-unknown` target, and Trunk
-0.21.14:
+0.21.14. The complete `dev-start` workflow also requires Podman and `curl` for
+its local PostgreSQL and NATS containers:
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -28,18 +28,29 @@ interface by default so the UI can be tested from another machine:
 
 ```sh
 just web
-just web 0.0.0.0 3000
+just web 127.0.0.1 3001
+just dev-start
 ```
 
-Open `http://<development-host>:8080` from the remote browser when using the
+Open `http://<development-host>:3000` from the remote browser when using the
 default port. Binding to `0.0.0.0` exposes the development server to reachable
 networks; use `just web 127.0.0.1` when remote access is not wanted, and keep
-host firewall rules appropriate for the environment.
+host firewall rules appropriate for the environment. `just dev-start` runs the
+frontend and `crono-server` together, using ports `3000` and `8080`
+respectively. The server recipe also ensures the local PostgreSQL 18 and NATS
+JetStream containers are initialized and running. `Trunk.toml` proxies
+same-origin `/api/v1` requests to `http://127.0.0.1:8080`, avoiding development
+CORS configuration while preserving the independently deployed client boundary.
+
+`trunk serve`, used by both `just web` and `just dev-start`, already watches the
+frontend's Rust, HTML, CSS, and asset inputs. Saving a change triggers a WASM
+rebuild and automatically reloads connected browsers, so this workflow does not
+need `cargo-watch` or a second compilation process.
 
 The equivalent direct commands from `apps/web` are:
 
 ```sh
-trunk serve --address 0.0.0.0 --port 8080
+trunk serve --address 0.0.0.0 --port 3000
 trunk build --release
 ```
 
@@ -77,20 +88,21 @@ The browser is a public API client:
 Page
   |
   v
-future API client
+browser API client
   |
   | HTTPS
   v
 crono-server
 ```
 
-Future HTTP behavior belongs in a dedicated client/service layer rather than
+HTTP behavior belongs in `src/api.rs` rather than being implemented separately
 inside pages. `crono-web` must not depend on `crono-server`, `crono-worker`,
 PostgreSQL, NATS, server repositories, or server domain/application types.
-Shared wire types can be considered only after public contracts stabilize.
+Transport-only wire types are shared through `crono-api`.
 
-Authentication is intentionally not implemented. There is no login UI, OIDC,
+Credential authentication is intentionally not implemented. There is no login UI, OIDC,
 OAuth, PKCE, cookie/session handling, token storage, JWT processing, or RBAC in
 this foundation. The toolbar leaves room for future user and theme controls but
 keeps those placeholders disabled so it does not imply an authentication or
-preference contract.
+preference contract. The server currently attaches its fixed development
+principal and executes the complete authorization interface in permit-all mode.

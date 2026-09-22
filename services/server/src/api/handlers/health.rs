@@ -2,7 +2,7 @@
 //!
 //! This module exposes three unauthenticated probes:
 //! - `/live`: process liveness only, with no dependency checks
-//! - `/ready`: process readiness for orchestrators, currently with no external dependencies
+//! - `/ready`: bounded PostgreSQL and `JetStream` readiness for orchestrators
 //! - `/health`: detailed process status and build identity as JSON
 //!
 //! Keeping liveness independent from future PostgreSQL and NATS checks prevents transient
@@ -11,7 +11,9 @@
 //! state exists. The detailed response and `X-App` header expose only build metadata so operators
 //! and reverse proxies can identify a deployment without receiving configuration or credentials.
 
+use super::super::state::AppState;
 use axum::{
+    extract::State,
     http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Json},
 };
@@ -50,13 +52,13 @@ pub async fn live() -> StatusCode {
     responses((status = 200, description = "Service is ready to receive traffic")),
     tag = "health"
 )]
-/// Report readiness after successful process startup.
-///
-/// This is deliberately process-only while the server has no initialized
-/// PostgreSQL or NATS clients. Dependency-aware `503` responses belong here
-/// once those clients participate in startup.
-pub async fn ready() -> StatusCode {
-    StatusCode::OK
+/// Report whether PostgreSQL and `JetStream` can serve control-plane traffic.
+pub async fn ready(State(state): State<AppState>) -> StatusCode {
+    if state.ready().await {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
 }
 
 #[utoipa::path(

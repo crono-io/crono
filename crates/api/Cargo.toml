@@ -1,0 +1,20 @@
+[package]
+name = "crono-api"
+description = "Transport contracts for Crono public API clients"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+openapi = ["dep:utoipa"]
+
+[dependencies]
+serde.workspace = true
+utoipa = { workspace = true, optional = true }
+uuid.workspace = true

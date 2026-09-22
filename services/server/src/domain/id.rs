@@ -1,78 +1,40 @@
-//! Strong identifiers for distinct control-plane resource kinds.
+//! Strong UUID identities for control-plane resource kinds.
 //!
-//! Each identifier wraps the same transport-neutral integer representation but
-//! remains a separate Rust type, preventing accidental interchange between
-//! Namespaces, Jobs, Targets, and Target Sets. Allocation and persistence are
-//! deliberately outside this pure domain layer.
+//! PostgreSQL 18 allocates `UUIDv7` values, while separate Rust wrappers prevent
+//! accidental interchange between Namespace, Job, `JobVersion`, Target, Run,
+//! and dispatch identities.
 
-/// Stable internal identity of a [`super::Namespace`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NamespaceId(u128);
+use uuid::Uuid;
 
-impl NamespaceId {
-    /// Construct an identifier from an allocator-provided value.
-    #[must_use]
-    pub const fn new(value: u128) -> Self {
-        Self(value)
-    }
+macro_rules! identifier {
+    ($name:ident, $description:literal) => {
+        #[doc = $description]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+        pub struct $name(Uuid);
 
-    /// Return the transport-neutral numeric representation.
-    #[must_use]
-    pub const fn get(self) -> u128 {
-        self.0
-    }
+        impl $name {
+            /// Construct an identity from an allocator-provided UUID.
+            #[must_use]
+            pub const fn new(value: Uuid) -> Self {
+                Self(value)
+            }
+
+            /// Return the transport-neutral UUID representation.
+            #[must_use]
+            pub const fn get(self) -> Uuid {
+                self.0
+            }
+        }
+    };
 }
 
-/// Stable internal identity of a [`super::Job`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct JobId(u128);
-
-impl JobId {
-    /// Construct an identifier from an allocator-provided value.
-    #[must_use]
-    pub const fn new(value: u128) -> Self {
-        Self(value)
-    }
-
-    /// Return the transport-neutral numeric representation.
-    #[must_use]
-    pub const fn get(self) -> u128 {
-        self.0
-    }
-}
-
-/// Stable internal identity of a [`super::Target`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TargetId(u128);
-
-impl TargetId {
-    /// Construct an identifier from an allocator-provided value.
-    #[must_use]
-    pub const fn new(value: u128) -> Self {
-        Self(value)
-    }
-
-    /// Return the transport-neutral numeric representation.
-    #[must_use]
-    pub const fn get(self) -> u128 {
-        self.0
-    }
-}
-
-/// Stable internal identity of a [`super::TargetSet`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TargetSetId(u128);
-
-impl TargetSetId {
-    /// Construct an identifier from an allocator-provided value.
-    #[must_use]
-    pub const fn new(value: u128) -> Self {
-        Self(value)
-    }
-
-    /// Return the transport-neutral numeric representation.
-    #[must_use]
-    pub const fn get(self) -> u128 {
-        self.0
-    }
-}
+identifier!(NamespaceId, "Stable internal identity of a Namespace.");
+identifier!(JobId, "Stable internal identity of a Job.");
+identifier!(JobVersionId, "Stable internal identity of a `JobVersion`.");
+identifier!(TargetId, "Stable internal identity of a Target.");
+identifier!(TargetSetId, "Stable internal identity of a `TargetSet`.");
+identifier!(RunId, "Stable internal identity of a Run.");
+identifier!(
+    DispatchId,
+    "Stable internal identity of an outbox dispatch."
+);

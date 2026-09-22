@@ -21,17 +21,24 @@ telemetry = ["crono-telemetry/telemetry"]
 
 [dependencies]
 anyhow.workspace = true
+async-nats.workspace = true
+async-trait.workspace = true
 axum.workspace = true
 clap.workspace = true
+crono-api = { workspace = true, features = ["openapi"] }
 crono-telemetry.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 socket2.workspace = true
+sqlx.workspace = true
+time.workspace = true
 tokio = { workspace = true, features = ["net", "signal"] }
+tokio-util.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
 utoipa.workspace = true
 utoipa-axum.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 opentelemetry-proto.workspace = true

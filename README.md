@@ -8,10 +8,10 @@ Crono is an open-source, API-first and messaging-first control plane for registe
 
 > Define the job centrally. Execute it where the capability exists.
 
-Crono currently provides an API-driven server with process health probes, a first-class human CLI
-client shell, a worker CLI scaffold, optional trace export, and a routed browser UI foundation. The
-workload runtime is still in the design phase; except for the documented health API, the protocols
-and examples below are conceptual rather than implemented interfaces.
+Crono currently provides an API-driven server with a normalized PostgreSQL catalog, a transactional
+NATS JetStream dispatch outbox, a first-class human CLI client shell, a worker CLI scaffold,
+optional trace export, and a live browser client. The first execution slice deliberately dispatches
+an immutable no-op Job definition; worker claims and execution outcomes remain in design.
 
 ## Workspace and development
 
@@ -23,20 +23,23 @@ The repository follows one release version while keeping its artifacts independe
 | `crono-worker` | `services/worker` | Execution-worker daemon |
 | `crono-cli` (`crono`) | `apps/cli` | Human CLI client for `crono-server` |
 | `crono-web` | `apps/web` | Independently deployed Leptos browser client |
+| `crono-api` | `crates/api` | Transport-only JSON contracts shared by server and public clients |
 | `crono-telemetry` | `crates/telemetry` | Shared native logging and optional OTLP trace export |
 
 The root `Cargo.toml` owns the version, Rust edition, license, dependency declarations, and lint policy. Every package inherits the release version; `Cargo.lock` is shared and committed. Releases will use one `vX.Y.Z` tag for all artifacts. Bump the version in the root manifest and regenerate the lockfile together. Release versions do not define HTTP or messaging protocol compatibility. Packages are not published to crates.io initially.
 
 Use a current stable Rust toolchain with rustfmt and Clippy. The default workspace members are the
 server, worker, and human CLI client; none requires browser tooling or external infrastructure to
-build:
+build. The complete development workflow additionally requires Podman and `curl`; its first start
+pulls the official PostgreSQL and NATS images:
 
 ```sh
 cargo build --locked -p crono-server
 cargo build --locked -p crono-worker
 cargo build --locked -p crono-cli
-cargo run --locked -p crono-server -- --help
-cargo run --locked -p crono-server -- --port 8080
+just dev-start
+cargo run --locked -p crono-server --bin crono-server -- --help
+cargo run --locked -p crono-server --bin crono-server -- --port 8080
 cargo run --locked -p crono-server --bin crono-server-openapi
 cargo run --locked -p crono-worker -- -V
 cargo run --locked -p crono-worker -- --version
@@ -49,26 +52,36 @@ target/debug/crono --version
 Select another internal HTTP port with `--port` or `CRONO_SERVER_PORT`. The listener prefers a
 dual-stack wildcard socket and falls back to IPv4. It must remain behind a TLS-terminating reverse
 proxy or equivalent trusted ingress; public clients continue to use HTTPS. Graceful SIGINT/SIGTERM
-shutdown drains the HTTP server and flushes telemetry.
+shutdown drains the HTTP server and flushes telemetry. The `just server` development recipe starts
+PostgreSQL and NATS first, applies the canonical database bootstrap, and then starts the API on port
+`8080` with info logging. Its optional arguments select another port and verbosity, such as
+`just server 9000 -vv`.
 
-The initial API exposes `GET /live`, `GET /ready`, and `GET /health`. Liveness and readiness return
-empty successful responses; readiness is process-only until PostgreSQL and NATS clients are wired.
+The API exposes `GET /live`, `GET /ready`, and `GET /health`. Liveness remains process-only, while
+readiness checks both PostgreSQL and NATS JetStream and returns `503` when either is unavailable.
 The detailed health response contains the package name, version, and source commit and includes an
 `X-App` build-identity header. `crono-server-openapi` prints the OpenAPI document generated from the
 same route registration used by the server. It does not expose runtime documentation or Swagger UI.
 
+The `/api/v1` control-plane contract creates and reads Namespaces, Namespace-scoped Jobs and
+Targets, Runs, and visible overview counts. Creating a Job also creates immutable no-op version 1.
+Creating a Run requires qualified `namespace/resource` names, pins that Job version and Target, and
+uses a client-generated request UUID as an idempotency key. The transactional outbox publishes to
+`crono.dispatch.<queue>` and changes the Run from `pending_dispatch` to `dispatched` only after a
+JetStream acknowledgement. The generated OpenAPI document is the authoritative route inventory.
+
 `crono-worker` retains its `run` subcommand and intentionally reports that its runtime is not
-implemented. Neither service connects to PostgreSQL/NATS or executes jobs yet. Help and version
-output work without telemetry initialization.
+implemented. The server publishes durable no-op dispatch envelopes, but no worker consumes or
+executes them yet. Help and version output work without telemetry initialization.
 
 The `crono-cli` package produces the `crono` executable. It resolves its future API base address in
 this order: `--address`, `CRONO_ADDR`, then the local-development default
 `http://127.0.0.1:8080`. Addresses are parsed as URLs, limited to HTTP or HTTPS, and rejected when
 they contain user-info, query strings, or fragments. Plain HTTP is accepted only for loopback
 development addresses; deployed servers use HTTPS. There is no HTTP transport, authentication,
-token storage, or operational command yet because the server has no stable job/run API contract.
-Valid configuration therefore ends with an explicit unfinished-command error and never opens a
-connection.
+token storage, or operational command yet. The server and browser now exercise the first Job/Run
+API slice, while CLI command design remains separate work. Valid CLI configuration therefore ends
+with an explicit unfinished-command error and never opens a connection.
 
 Use `-V` for short versions such as `crono 0.1.0` and `--version` for long versions such as
 `crono 0.1.0 - <commit>`; both daemons follow the same convention. The shared native build script
@@ -76,25 +89,36 @@ uses `built` with `git2` to embed the full Git commit hash, falling back to `unk
 metadata is unavailable. Help uses yellow headings, green usage/placeholders, and blue command
 names, with automatic terminal detection; piped output stays plain and `NO_COLOR` disables colors.
 
-The GUI provides a routed control-plane shell with Overview, Namespaces, Jobs, Targets, Target Sets,
-Runs, Workers, and Settings pages. Its visual baseline combines a dark infrastructure navigation
-rail, a compact toolbar, a light workspace, and restrained cards with honest zero/empty states. It
-uses Tailwind CSS v4 through Trunk's standalone Tailwind pipeline and Material Symbols Outlined for
-its icon vocabulary. Install the WASM target and Trunk (validated with Trunk 0.21.14), then build or
-serve it independently:
+The GUI provides live Overview, Namespace, Job, Target, and Run workflows alongside reserved Target
+Set, Worker, and Settings pages. It calls the public `/api/v1` contract through a browser-only client
+module; Trunk proxies that path to `127.0.0.1:8080` during development. It uses Tailwind CSS v4
+through Trunk's standalone Tailwind pipeline and Material Symbols Outlined for its icon vocabulary.
+Install the WASM target and Trunk (validated with Trunk 0.21.14), then build or serve it independently:
 
 ```sh
 rustup target add wasm32-unknown-unknown
 cargo install --locked trunk --version 0.21.14
 just web
+just dev-start
 # Or: cd apps/web && trunk build --release
 ```
 
-`just web` listens on `0.0.0.0:8080` for remote browser testing. Pass an
-address and optional port to override it, such as `just web 127.0.0.1 3000`.
+`just web` listens on `0.0.0.0:3000` for remote browser testing while leaving the API's default
+port `8080` available. Pass an address and optional port to override it, such as
+`just web 127.0.0.1 3001`. `just dev-start` is the normal full-stack entry point: it starts the web
+and API servers in parallel while the API recipe ensures local PostgreSQL and NATS services are
+ready. It accepts the web address, web port, server port, and server verbosity in that order.
+Interrupting Just stops the web and API processes; `just dev-stop` stops the infrastructure
+containers while retaining their data for the next development session.
+
+The web recipe uses Trunk's development server directly. Trunk watches the Rust, HTML, CSS, and
+asset inputs, recompiles the WASM bundle after saved changes, and reloads connected browsers. A
+separate `cargo-watch` process is unnecessary and would duplicate the frontend build watcher.
 
 Trunk produces static assets under `apps/web/dist`; these are hosted separately from the server.
-The GUI currently makes no API requests, and authentication is intentionally not implemented. See
+Development authentication currently establishes a fixed server-owned principal and grants every
+typed capability. The boundary is exercised on every use case and can be replaced without changing
+domain or persistence code; see [authentication and authorization](AUTHORIZATION.md). See also
 [the GUI README](apps/web/README.md), [CLI architecture](CLI_ARCHITECTURE.md), and [workload domain
 model](DOMAIN_MODEL.md).
 
@@ -107,9 +131,21 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 target/debug/crono-server -v -
 
 This example exports server and HTTP request spans until the process receives a shutdown signal. The exporter supports gRPC, gzip, verified HTTPS using WebPKI roots, and standard OTLP header environment variables. `OTEL_EXPORTER_OTLP_ENDPOINT` explicitly enables export and selects its destination; without it, even a telemetry-enabled binary only logs locally. Default builds ignore exporter configuration. Trace export and shutdown are bounded; shutdown failure can lose pending traces and is reported without replacing the action's exit status. More detail is in [CLI architecture](CLI_ARCHITECTURE.md#telemetry).
 
-The `.justfile` provides `clippy` and `test` recipes for code validation, plus database bootstrap and
-verification helpers. The code checks cover native code with default and all features; `clippy` also
-checks the browser WASM target.
+The `.justfile` provides `dev-start` as the complete local workflow and keeps `server`, `web`,
+`dev-infra`, `postgres`, `nats`, and `cli` available for focused work. PostgreSQL 18 uses the
+`crono-postgres-data` named volume and is bootstrapped idempotently from `db/sql/00_init.sql`. NATS
+uses the `crono-nats-data` volume, enables JetStream, serves clients at `nats://127.0.0.1:4222`, and
+exposes its development-only monitoring endpoint at `http://127.0.0.1:8222`. Both services bind to
+loopback and are intentionally unauthenticated for local development only. Run `just postgres` or
+`just nats` when only one dependency is needed.
+
+Keep `just server` running in one terminal while using `just cli --help` in another when working
+without the GUI. The CLI recipe forwards its arguments unchanged, so `--address`, `CRONO_ADDR`, and
+the local default retain their documented
+precedence. The client currently validates its configuration but has no operational API command;
+use `curl http://127.0.0.1:8080/health` to inspect the implemented API directly. Code-validation and
+database bootstrap/verification helpers remain available. The code checks cover native code with
+default and all features; `clippy` also checks the browser WASM target.
 
 ```sh
 cargo fmt --all -- --check
@@ -160,7 +196,11 @@ flowchart TB
     Server <-->|"Native NATS / TLS"| NATS
 ```
 
-`crono-server` remains a modular monolith. Its planned HTTP API, scheduler, dispatcher, run controller, NATS consumers/request handlers, event processor, and persistence layer are logical Rust modules in one deployable process. `crono` and `crono-web` use its public API and have no Rust dependency on the server. `crono-worker` is the separate execution process. Server and worker share a telemetry library, not a runtime process. Shared wire contracts can be evaluated only after the public API stabilizes.
+`crono-server` remains a modular monolith. Its HTTP API, authorization-aware application layer,
+PostgreSQL adapter, and outbox dispatcher are logical Rust modules in one deployable process;
+scheduling, worker control, and event processing remain future modules. `crono` and `crono-web` use
+its public API and have no Rust dependency on the server. `crono-api` shares transport DTOs without
+exposing server domain or persistence types. `crono-worker` remains the separate execution process.
 
 Workers receive tasks directly from NATS JetStream using durable pull consumers over persistent native NATS/TLS connections. These are NATS pull requests, not HTTPS polling. Claims, lease renewals, and execution events also travel directly over NATS. Workers have no PostgreSQL connection, normal-operation HTTP server, or inbound worker ports. The CLI and browser connect only to `crono-server` over HTTPS in deployed environments.
 
@@ -238,27 +278,26 @@ Queues route work. Labels and capabilities are future placement inputs, not a so
 
 ### 1. Create and persist a Run
 
-Public HTTP Run requests and scheduling enter the same server-side Run creation logic and authorization rules.
-
-The future server validates the request, resolves and pins the JobVersion and
-exact Target definition, and commits the Run, its initial pending RunAttempt,
-and a dispatch/outbox record in one PostgreSQL transaction. Work becomes
-visible to workers only after commit. Caller-scoped request IDs must make
-retries return the same Run and reject conflicting payloads. The required
-TargetVersion contract is not implemented yet.
+Public HTTP Run requests enter one server-side creation path. The application
+validates qualified names, authorizes Run creation, Job execution, and Target
+use, then resolves the current immutable JobVersion and Target identity. It
+commits the Run and outbox record in one PostgreSQL transaction. Reusing a
+request UUID with the same inputs returns the existing Run; different inputs
+produce an idempotency conflict. Scheduling, RunAttempt allocation, and the
+TargetVersion required for real execution are not implemented yet.
 
 ### 2. Publish through the transactional outbox
 
 A database commit followed by a separate NATS publish has a crash window: the Run can exist without ever being dispatched. The outbox records the publication intent atomically with the Run.
 
 ```text
-PostgreSQL transaction: Run + pending RunAttempt + outbox record
-                                    |
-                                  commit
-                                    |
-                       dispatcher publishes to JetStream
-                                    |
-                      record publication after broker confirmation
+PostgreSQL transaction: Run + outbox record
+                          |
+                        commit
+                          |
+             dispatcher publishes to JetStream
+                          |
+            record publication after broker confirmation
 ```
 
 The dispatcher retries pending outbox records. A crash after publication but before recording it can produce duplicates, so publication IDs and idempotent processing remain necessary. No PostgreSQL transaction is held open while waiting for a NATS round trip or job execution.
@@ -267,14 +306,18 @@ A small dispatch envelope identifies the committed work:
 
 ```json
 {
+  "schema_version": 1,
+  "dispatch_id": "...",
   "run_id": "...",
-  "attempt_id": "...",
   "job_version_id": "...",
-  "queue": "postgres"
+  "target_id": "...",
+  "queue": "default"
 }
 ```
 
-The attempt is allocated before dispatch; claiming assigns it to a worker. A later retry creates a new attempt and outbox record atomically.
+The implemented no-op slice stops at acknowledged dispatch. A future execution
+slice allocates attempts and defines how later retries create another attempt
+and outbox record atomically.
 
 ### 3. Pull, claim, and obtain the execution specification
 

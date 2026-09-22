@@ -5,7 +5,7 @@
 //! will carry executable behavior once that contract is implemented.
 
 use super::{JobId, NamespaceId, ResourceName};
-use std::time::SystemTime;
+use time::OffsetDateTime;
 
 /// Stable identity and Namespace relationship for executable behavior.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,7 +13,7 @@ pub struct Job {
     id: JobId,
     namespace_id: NamespaceId,
     name: ResourceName,
-    created_at: SystemTime,
+    created_at: OffsetDateTime,
 }
 
 impl Job {
@@ -23,7 +23,7 @@ impl Job {
         id: JobId,
         namespace_id: NamespaceId,
         name: ResourceName,
-        created_at: SystemTime,
+        created_at: OffsetDateTime,
     ) -> Self {
         Self {
             id,
@@ -53,7 +53,7 @@ impl Job {
 
     /// Return when the Job identity was created.
     #[must_use]
-    pub const fn created_at(&self) -> SystemTime {
+    pub const fn created_at(&self) -> OffsetDateTime {
         self.created_at
     }
 }
@@ -63,21 +63,22 @@ mod tests {
     use super::Job;
     use crate::domain::{JobId, NamespaceId, ResourceName};
     use anyhow::Result;
-    use std::time::SystemTime;
+    use time::OffsetDateTime;
+    use uuid::Uuid;
 
     #[test]
     fn jobs_capture_what_without_a_target_relationship() -> Result<()> {
         let job = Job::new(
-            JobId::new(11),
-            NamespaceId::new(1),
+            JobId::new(Uuid::from_u128(11)),
+            NamespaceId::new(Uuid::from_u128(1)),
             ResourceName::parse("backup")?,
-            SystemTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
         );
 
-        assert_eq!(job.id(), JobId::new(11));
-        assert_eq!(job.namespace_id(), NamespaceId::new(1));
+        assert_eq!(job.id(), JobId::new(Uuid::from_u128(11)));
+        assert_eq!(job.namespace_id(), NamespaceId::new(Uuid::from_u128(1)));
         assert_eq!(job.name().as_str(), "backup");
-        assert_eq!(job.created_at(), SystemTime::UNIX_EPOCH);
+        assert_eq!(job.created_at(), OffsetDateTime::UNIX_EPOCH);
         Ok(())
     }
 }

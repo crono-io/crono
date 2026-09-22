@@ -12,14 +12,18 @@
 
 mod id;
 mod job;
+mod job_version;
 mod name;
 mod namespace;
+mod run;
 mod target;
 mod target_set;
 
-pub use id::{JobId, NamespaceId, TargetId, TargetSetId};
+pub use id::{DispatchId, JobId, JobVersionId, NamespaceId, RunId, TargetId, TargetSetId};
 pub use job::Job;
-pub use name::{NameError, NamespaceName, ResourceName};
+pub use job_version::{ExecutorKind, JobVersion};
+pub use name::{NameError, NamespaceName, QueueName, ResourceName};
 pub use namespace::{Namespace, NamespaceMismatch, QualifiedName};
+pub use run::{Run, RunStatus};
 pub use target::Target;
 pub use target_set::TargetSet;

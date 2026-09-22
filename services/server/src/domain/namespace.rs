@@ -5,20 +5,21 @@
 //! CLI/API identity while stable typed IDs remain authoritative internally.
 
 use super::{NamespaceId, NamespaceName, ResourceName};
-use std::{error::Error, fmt, time::SystemTime};
+use std::{error::Error, fmt};
+use time::OffsetDateTime;
 
 /// Organizational boundary containing Jobs, Targets, and Target Sets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Namespace {
     id: NamespaceId,
     name: NamespaceName,
-    created_at: SystemTime,
+    created_at: OffsetDateTime,
 }
 
 impl Namespace {
     /// Construct a Namespace from validated identity and creation metadata.
     #[must_use]
-    pub const fn new(id: NamespaceId, name: NamespaceName, created_at: SystemTime) -> Self {
+    pub const fn new(id: NamespaceId, name: NamespaceName, created_at: OffsetDateTime) -> Self {
         Self {
             id,
             name,
@@ -40,7 +41,7 @@ impl Namespace {
 
     /// Return when the Namespace was created.
     #[must_use]
-    pub const fn created_at(&self) -> SystemTime {
+    pub const fn created_at(&self) -> OffsetDateTime {
         self.created_at
     }
 
@@ -131,14 +132,15 @@ mod tests {
     use super::Namespace;
     use crate::domain::{NamespaceId, NamespaceName, ResourceName};
     use anyhow::Result;
-    use std::time::SystemTime;
+    use time::OffsetDateTime;
+    use uuid::Uuid;
 
     #[test]
     fn qualified_names_are_derived_from_validated_relationships() -> Result<()> {
         let namespace = Namespace::new(
-            NamespaceId::new(1),
+            NamespaceId::new(Uuid::nil()),
             NamespaceName::parse("mariadb")?,
-            SystemTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
         );
         let job_name = ResourceName::parse("backup")?;
 
@@ -152,17 +154,18 @@ mod tests {
     #[test]
     fn qualified_names_reject_cross_namespace_relationships() -> Result<()> {
         let namespace = Namespace::new(
-            NamespaceId::new(1),
+            NamespaceId::new(Uuid::nil()),
             NamespaceName::parse("mariadb")?,
-            SystemTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
         );
         let target_name = ResourceName::parse("host-123")?;
 
-        let error = namespace.qualify(NamespaceId::new(2), &target_name);
+        let other_id = NamespaceId::new(Uuid::from_u128(2));
+        let error = namespace.qualify(other_id, &target_name);
         assert!(error.is_err());
         if let Err(error) = error {
-            assert_eq!(error.expected(), NamespaceId::new(1));
-            assert_eq!(error.actual(), NamespaceId::new(2));
+            assert_eq!(error.expected(), NamespaceId::new(Uuid::nil()));
+            assert_eq!(error.actual(), other_id);
         }
         Ok(())
     }

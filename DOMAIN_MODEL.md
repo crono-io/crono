@@ -64,11 +64,12 @@ identity and cannot be derived across mismatched Namespace relationships.
 | Worker | Identified execution process serving authorized queues |
 | Executor | Runtime adapter that interprets a pinned execution specification |
 
-The first implementation defines organizational identities and relationships
-only. `Target` deliberately has no generic JSON configuration field. When an
-executor configuration contract exists, the appropriate execution layer will
-interpret it; core types will not gain Ansible-, SSH-, database-, Kubernetes-,
-or Terraform-specific fields.
+The first vertical slice persists organizational identities and relationships,
+immutable no-op Job versions, and Runs through acknowledged dispatch. `Target`
+deliberately has no generic JSON configuration field. When an executor
+configuration contract exists, the appropriate execution layer will interpret
+it; core types will not gain Ansible-, SSH-, database-, Kubernetes-, or
+Terraform-specific fields.
 
 ## Mapping the initial Ansible use case
 
@@ -115,9 +116,10 @@ exact definition selected by the original Run.
 
 `TargetVersion` is therefore a required future invariant, but is intentionally
 not implemented in the current identity-only model. There is no target
-configuration, persistence, or Run implementation to version yet, and a shell
-version type would misleadingly suggest reproducibility is enforced. Before
-execution and retry semantics are finalized, a Run must pin the equivalent of:
+configuration to version yet, and a shell version type would misleadingly
+suggest reproducibility is enforced. The current no-op Run pins the Target
+identity only. Before execution and retry semantics are finalized, a Run must
+instead pin the equivalent of:
 
 ```text
 Run
@@ -132,7 +134,7 @@ implied by this document.
 
 ## Public client shape
 
-The future browser information architecture follows the domain rather than an
+The browser information architecture follows the domain rather than an
 executor:
 
 ```text
@@ -157,14 +159,16 @@ The eventual workflow is `Namespace -> Job -> Target or TargetSet -> Inputs ->
 Run`. Both the browser and CLI must express that workflow through the same
 public `crono-server` API and server-side application logic.
 
-Potential public resources are:
+Implemented public resource collections are:
 
 ```text
 /api/v1/namespaces
 /api/v1/namespaces/:namespace/jobs
 /api/v1/namespaces/:namespace/targets
-/api/v1/namespaces/:namespace/target-sets
+/api/v1/runs
 ```
+
+Target Set routes remain deferred with their snapshot and fan-out semantics.
 
 Potential CLI commands are:
 
@@ -185,6 +189,7 @@ crono run mariadb/backup --target mariadb/host-123
 crono run mariadb/backup --target-set mariadb/mariadb-prod
 ```
 
-These routes and commands document intended resource organization only. They
-are not implemented contracts. Neither `crono` nor `crono-web` may depend on
-server domain modules or bypass the HTTPS API.
+The CLI commands still document intended organization rather than an
+implemented CLI transport. The browser uses the implemented HTTP resources via
+the transport-only `crono-api` crate. Neither public client may depend on server
+domain modules or bypass the HTTPS API.

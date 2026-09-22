@@ -1,25 +1,36 @@
 //! HTTP API router and process lifecycle.
 
+use crate::{
+    application::{Application, ControlPlaneStore},
+    infrastructure::{NatsPublisher, run_dispatcher},
+};
 use anyhow::{Context, Result};
-use axum::Router;
+use axum::{Router, middleware};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     io::{self, ErrorKind},
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpListener},
+    sync::Arc,
 };
+use tokio_util::sync::CancellationToken;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 use utoipa_axum::router::OpenApiRouter;
 
+mod error;
 pub(crate) mod handlers;
+mod identity;
 mod openapi;
+mod state;
 
 pub use openapi::openapi;
 
 /// Build the documented API router.
 #[must_use]
-pub fn router() -> OpenApiRouter {
+fn router(state: state::AppState) -> OpenApiRouter {
     openapi::api_router()
+        .layer(middleware::from_fn(identity::establish))
+        .with_state(state)
 }
 
 /// Bind and serve the control-plane API until the process receives a shutdown signal.
@@ -27,18 +38,32 @@ pub fn router() -> OpenApiRouter {
 /// # Errors
 ///
 /// Returns an error when the listener cannot be created or the HTTP server fails.
-pub async fn serve(port: u16) -> Result<()> {
+pub async fn serve(
+    port: u16,
+    application: Application,
+    store: Arc<dyn ControlPlaneStore>,
+    publisher: NatsPublisher,
+) -> Result<()> {
     let (listener, listen_addr) = bind_listener(port)?;
     let listener = tokio::net::TcpListener::from_std(listener)
         .context("failed to create asynchronous API listener")?;
-    let (router, _openapi) = router().split_for_parts();
+    let state = state::AppState::new(application, Arc::clone(&store), publisher.clone());
+    let (router, _openapi) = router(state).split_for_parts();
     let app: Router = router.layer(TraceLayer::new_for_http());
 
+    let cancellation = CancellationToken::new();
+    let dispatcher = tokio::spawn(run_dispatcher(store, publisher, cancellation.child_token()));
+
     info!(address = %listen_addr, "Crono API listening over internal HTTP");
-    axum::serve(listener, app)
+    let server = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .context("Crono API server failed")
+        .context("Crono API server failed");
+    cancellation.cancel();
+    dispatcher
+        .await
+        .context("Run dispatch task failed during shutdown")?;
+    server
 }
 
 fn bind_listener(port: u16) -> Result<(TcpListener, SocketAddr)> {

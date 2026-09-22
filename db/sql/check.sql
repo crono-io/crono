@@ -81,4 +81,26 @@ BEGIN
 END;
 $$;
 
+DO $$
+DECLARE
+    relation text;
+BEGIN
+    FOREACH relation IN ARRAY ARRAY[
+        'crono.namespaces',
+        'crono.jobs',
+        'crono.job_versions',
+        'crono.targets',
+        'crono.runs',
+        'crono.outbox'
+    ] LOOP
+        IF to_regclass(relation) IS NULL THEN
+            RAISE EXCEPTION 'Missing relation: %', relation;
+        END IF;
+        IF NOT has_table_privilege('crono_runtime', relation, 'SELECT, INSERT, UPDATE, DELETE') THEN
+            RAISE EXCEPTION 'Missing runtime grants on relation: %', relation;
+        END IF;
+    END LOOP;
+END;
+$$;
+
 \echo 'Crono database check complete.'

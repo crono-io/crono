@@ -6,7 +6,8 @@
 //! iteration without introducing selectors, labels, or placement semantics.
 
 use super::{NamespaceId, NamespaceMismatch, ResourceName, Target, TargetId, TargetSetId};
-use std::{collections::BTreeSet, time::SystemTime};
+use std::collections::BTreeSet;
+use time::OffsetDateTime;
 
 /// Named explicit selection of Targets in one Namespace.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,7 +16,7 @@ pub struct TargetSet {
     namespace_id: NamespaceId,
     name: ResourceName,
     members: BTreeSet<TargetId>,
-    created_at: SystemTime,
+    created_at: OffsetDateTime,
 }
 
 impl TargetSet {
@@ -25,7 +26,7 @@ impl TargetSet {
         id: TargetSetId,
         namespace_id: NamespaceId,
         name: ResourceName,
-        created_at: SystemTime,
+        created_at: OffsetDateTime,
     ) -> Self {
         Self {
             id,
@@ -62,7 +63,7 @@ impl TargetSet {
 
     /// Return when the Target Set was created.
     #[must_use]
-    pub const fn created_at(&self) -> SystemTime {
+    pub const fn created_at(&self) -> OffsetDateTime {
         self.created_at
     }
 
@@ -91,25 +92,27 @@ mod tests {
     use super::TargetSet;
     use crate::domain::{NamespaceId, ResourceName, Target, TargetId, TargetSetId};
     use anyhow::Result;
-    use std::{collections::BTreeSet, time::SystemTime};
+    use std::collections::BTreeSet;
+    use time::OffsetDateTime;
+    use uuid::Uuid;
 
     fn target(id: u128, namespace_id: NamespaceId, name: &str) -> Result<Target> {
         Ok(Target::new(
-            TargetId::new(id),
+            TargetId::new(Uuid::from_u128(id)),
             namespace_id,
             ResourceName::parse(name)?,
-            SystemTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
         ))
     }
 
     #[test]
     fn membership_is_explicit_unique_and_deterministic() -> Result<()> {
-        let namespace_id = NamespaceId::new(1);
+        let namespace_id = NamespaceId::new(Uuid::from_u128(1));
         let mut set = TargetSet::new(
-            TargetSetId::new(31),
+            TargetSetId::new(Uuid::from_u128(31)),
             namespace_id,
             ResourceName::parse("mariadb-prod")?,
-            SystemTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
         );
         let host_124 = target(24, namespace_id, "host-124")?;
         let host_123 = target(23, namespace_id, "host-123")?;
@@ -119,28 +122,31 @@ mod tests {
         assert!(!set.add_target(&host_123)?);
         assert_eq!(
             set.members(),
-            &BTreeSet::from([TargetId::new(23), TargetId::new(24)])
+            &BTreeSet::from([
+                TargetId::new(Uuid::from_u128(23)),
+                TargetId::new(Uuid::from_u128(24)),
+            ])
         );
         Ok(())
     }
 
     #[test]
     fn membership_rejects_targets_from_another_namespace() -> Result<()> {
-        let namespace_id = NamespaceId::new(1);
+        let namespace_id = NamespaceId::new(Uuid::from_u128(1));
         let mut set = TargetSet::new(
-            TargetSetId::new(31),
+            TargetSetId::new(Uuid::from_u128(31)),
             namespace_id,
             ResourceName::parse("mariadb-prod")?,
-            SystemTime::UNIX_EPOCH,
+            OffsetDateTime::UNIX_EPOCH,
         );
-        let postgres = target(41, NamespaceId::new(2), "pg-cluster-01")?;
+        let postgres = target(41, NamespaceId::new(Uuid::from_u128(2)), "pg-cluster-01")?;
 
         let error = set.add_target(&postgres);
         assert!(error.is_err());
         assert!(set.members().is_empty());
         if let Err(error) = error {
             assert_eq!(error.expected(), namespace_id);
-            assert_eq!(error.actual(), NamespaceId::new(2));
+            assert_eq!(error.actual(), NamespaceId::new(Uuid::from_u128(2)));
         }
         Ok(())
     }

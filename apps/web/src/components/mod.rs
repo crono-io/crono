@@ -9,10 +9,8 @@ pub mod empty_state;
 pub mod icon;
 pub mod layout;
 pub mod page_header;
-pub mod summary_card;
 
 pub use card::Card;
 pub use empty_state::EmptyState;
 pub use icon::Icon;
 pub use page_header::PageHeader;
-pub use summary_card::{SummaryCard, SummaryTone};
