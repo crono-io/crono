@@ -1,0 +1,61 @@
+---
+name: Test & Build
+
+on:
+  push:
+    branches:
+      - '*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  coverage:
+    uses: ./.github/workflows/coverage.yml
+    secrets: inherit
+
+  build:
+    name: Build native applications
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build native workspace applications
+        run: >-
+          cargo build --release --locked --target x86_64-unknown-linux-musl
+          -p crono-server -p crono-worker -p crono-cli
+
+  frontend-build:
+    name: Build web client
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Trunk
+        run: cargo install trunk --version 0.21.14 --locked
+
+      - name: Build web client
+        working-directory: apps/web
+        run: trunk build --release
