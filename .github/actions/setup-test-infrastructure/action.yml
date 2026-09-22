@@ -9,17 +9,17 @@ runs:
       run: |
         set -euo pipefail
 
-        docker run --detach +          --name crono-postgres +          --env POSTGRES_HOST_AUTH_METHOD=trust +          --publish 127.0.0.1:5432:5432 +          --volume "${GITHUB_WORKSPACE}/db/sql:/db/sql:ro" +          postgres:18
+        docker run --detach --name crono-postgres --env POSTGRES_HOST_AUTH_METHOD=trust --publish 127.0.0.1:5432:5432 --volume "${GITHUB_WORKSPACE}/db/sql:/db/sql:ro" postgres:18
 
-        docker run --detach +          --name crono-nats +          --publish 127.0.0.1:4222:4222 +          --publish 127.0.0.1:8222:8222 +          nats:2.14-alpine +          --jetstream +          --http_port 8222
+        docker run --detach --name crono-nats --publish 127.0.0.1:4222:4222 --publish 127.0.0.1:8222:8222 nats:2.14-alpine --jetstream --http_port 8222
 
         postgres_ready=false
         nats_ready=false
         for _ in {1..30}; do
-          if docker exec crono-postgres +            pg_isready --username postgres --dbname postgres >/dev/null 2>&1; then
+          if docker exec crono-postgres pg_isready --username postgres --dbname postgres >/dev/null 2>&1; then
             postgres_ready=true
           fi
-          if curl --fail --silent --output /dev/null +            "http://127.0.0.1:8222/healthz?js-enabled-only=true"; then
+          if curl --fail --silent --output /dev/null "http://127.0.0.1:8222/healthz?js-enabled-only=true"; then
             nats_ready=true
           fi
           if [[ "${postgres_ready}" == true && "${nats_ready}" == true ]]; then
@@ -39,4 +39,4 @@ runs:
           exit 1
         fi
 
-        docker exec crono-postgres psql +          --username postgres +          --dbname postgres +          --set ON_ERROR_STOP=1 +          --file /db/sql/00_init.sql >/dev/null
+        docker exec crono-postgres psql --username postgres --dbname postgres --set ON_ERROR_STOP=1 --file /db/sql/00_init.sql >/dev/null
