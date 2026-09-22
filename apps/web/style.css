@@ -1,41 +1,65 @@
-:root {
-  color-scheme: dark;
-  font-family: system-ui, sans-serif;
-  background: #101820;
-  color: #edf2f4;
+@import "tailwindcss" source("./src");
+
+@theme {
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+
+  --color-crono-bg: #fafafa;
+  --color-crono-surface: #ffffff;
+  --color-crono-sidebar: #09090b;
+  --color-crono-sidebar-surface: #18181b;
+  --color-crono-text: #18181b;
+  --color-crono-muted: #71717a;
+  --color-crono-border: #e4e4e7;
+  --color-crono-primary: #4f46e5;
+  --color-crono-primary-hover: #4338ca;
+  --color-crono-primary-soft: #eef2ff;
+  --color-crono-success: #059669;
+  --color-crono-running: #2563eb;
+  --color-crono-warning: #f59e0b;
+  --color-crono-failed: #dc2626;
+  --color-crono-cancelled: #71717a;
 }
 
-body {
-  margin: 0;
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
+@layer base {
+  html {
+    background: var(--color-crono-bg);
+    color: var(--color-crono-text);
+    font-family: var(--font-sans);
+  }
+
+  body {
+    min-width: 20rem;
+    min-height: 100vh;
+    margin: 0;
+  }
+
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
 }
 
-main {
-  width: min(42rem, calc(100% - 3rem));
-  padding-block: 3rem;
-}
-
-.eyebrow {
-  color: #7dd3c0;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-size: 0.8rem;
-}
-
-h1 {
-  font-size: clamp(3rem, 10vw, 5rem);
+.material-symbols-outlined {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  overflow: hidden;
+  font-family: "Material Symbols Outlined";
+  font-style: normal;
+  font-weight: normal;
+  font-variation-settings:
+    "FILL" 0,
+    "wght" 400,
+    "GRAD" 0,
+    "opsz" 20;
+  letter-spacing: normal;
   line-height: 1;
-  margin-block: 1.5rem;
-}
-
-p {
-  line-height: 1.6;
-}
-
-footer {
-  margin-top: 3rem;
-  color: #b4c0ca;
-  font-size: 0.875rem;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: "liga";
+  -webkit-font-smoothing: antialiased;
 }

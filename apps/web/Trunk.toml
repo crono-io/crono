@@ -3,3 +3,6 @@ target = "index.html"
 dist = "dist"
 public_url = "/"
 locked = true
+
+[tools]
+tailwindcss = "4.3.0"

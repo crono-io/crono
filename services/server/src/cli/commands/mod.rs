@@ -29,8 +29,6 @@ pub fn new() -> Command {
         .color(ColorChoice::Auto)
         .styles(styles)
         .about(env!("CARGO_PKG_DESCRIPTION"))
-        .arg_required_else_help(true)
-        .subcommand_required(true)
         .arg(
             Arg::new("verbose")
                 .short('v')
@@ -39,5 +37,13 @@ pub fn new() -> Command {
                 .action(ArgAction::Count)
                 .help("Increase logging verbosity: -v info, -vv debug, -vvv trace"),
         )
-        .subcommand(Command::new("run").about("Start the server (not implemented yet)"))
+        .arg(
+            Arg::new("port")
+                .short('p')
+                .long("port")
+                .env("CRONO_SERVER_PORT")
+                .value_parser(clap::value_parser!(u16))
+                .default_value("8080")
+                .help("Internal HTTP port to listen on using wildcard interfaces"),
+        )
 }

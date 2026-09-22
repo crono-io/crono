@@ -1,7 +1,10 @@
 //! Exercise CLI behavior through the actual process boundary.
 
 use anyhow::Result;
-use crono_server::cli::{actions::Action, commands, dispatch};
+use crono_server::cli::{
+    actions::{Action, server},
+    commands, dispatch,
+};
 use std::process::{Command, Output};
 
 fn invoke(args: &[&str]) -> Result<Output> {
@@ -52,8 +55,8 @@ fn short_and_long_versions_report_build_identity() -> Result<()> {
 }
 
 #[test]
-fn missing_or_unknown_commands_are_rejected() -> Result<()> {
-    for args in [&[][..], &["unknown"][..], &["run", "--unknown"][..]] {
+fn obsolete_commands_and_unknown_arguments_are_rejected() -> Result<()> {
+    for args in [&["run"][..], &["unknown"][..], &["--unknown"][..]] {
         let output = invoke(args)?;
         assert_eq!(output.status.code(), Some(2));
         assert!(!output.stderr.is_empty());
@@ -62,24 +65,33 @@ fn missing_or_unknown_commands_are_rejected() -> Result<()> {
 }
 
 #[test]
-fn run_reports_unimplemented_runtime() -> Result<()> {
-    let output = invoke(&["run"])?;
-    assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    assert!(String::from_utf8(output.stderr)?.contains("crono-server runtime not implemented"));
+fn port_and_verbosity_dispatch_to_server_action() -> Result<()> {
+    commands::new().debug_assert();
+    let matches =
+        commands::new().try_get_matches_from(["crono-server", "-vv", "--port", "9000"])?;
+    assert_eq!(matches.get_count("verbose"), 2);
+    assert_eq!(
+        dispatch::handler(&matches)?,
+        Action::Server(server::Args { port: 9000 })
+    );
     Ok(())
 }
 
 #[test]
-fn verbosity_and_run_dispatch_are_consistent() -> Result<()> {
-    commands::new().debug_assert();
-    for args in [
-        ["crono-server", "-vv", "run"],
-        ["crono-server", "run", "-vv"],
-    ] {
-        let matches = commands::new().try_get_matches_from(args)?;
-        assert_eq!(matches.get_count("verbose"), 2);
-        assert_eq!(dispatch::handler(&matches)?, Action::Run);
-    }
+fn port_uses_default_and_environment_values() -> Result<()> {
+    let matches = commands::new().try_get_matches_from(["crono-server"])?;
+    assert_eq!(
+        dispatch::handler(&matches)?,
+        Action::Server(server::Args { port: 8080 })
+    );
+
+    temp_env::with_var("CRONO_SERVER_PORT", Some("9001"), || -> Result<()> {
+        let matches = commands::new().try_get_matches_from(["crono-server"])?;
+        assert_eq!(
+            dispatch::handler(&matches)?,
+            Action::Server(server::Args { port: 9001 })
+        );
+        Ok(())
+    })?;
     Ok(())
 }

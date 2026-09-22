@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" role="img" aria-label="Crono logo">
+  <g fill="#FFFFFF">
+    <path fill-rule="evenodd" d="
+      M 350 217
+      A 150 150 0 1 1 50 217
+      A 150 150 0 1 1 350 217
+      Z
+      M 325 217
+      A 125 125 0 1 0 75 217
+      A 125 125 0 1 0 325 217
+      Z
+    "/>
+    <path d="M318 81 L333 98 L313 119 L295 101 Z"/>
+    <rect x="150" y="17" width="100" height="25"/>
+    <rect x="188" y="132" width="24" height="96"/>
+  </g>
+</svg>

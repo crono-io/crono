@@ -1,16 +1,22 @@
-//! Minimal GUI shell; application screens and API calls follow later.
+//! Root composition for the independently deployed browser client.
+//!
+//! The Router owns URL state, the `AppShell` owns persistent navigation and
+//! responsive layout, and each route supplies only page content. Future API
+//! clients will sit below pages and communicate with `crono-server` exclusively
+//! over its public HTTPS boundary.
 
+use crate::{components::layout::AppShell, routing::RouterContent};
 use leptos::prelude::*;
+use leptos_router::components::Router;
 
-/// Display the product identity and the inherited workspace release version.
+/// Mount the client router inside the shared application shell.
 #[component]
 pub fn App() -> impl IntoView {
     view! {
-        <main>
-            <p class="eyebrow">"Distributed workload automation"</p>
-            <h1>"Crono"</h1>
-            <p>"Define the job centrally. Execute it where the capability exists."</p>
-            <footer>"Version " <span id="version">{env!("CARGO_PKG_VERSION")}</span></footer>
-        </main>
+        <Router>
+            <AppShell>
+                <RouterContent />
+            </AppShell>
+        </Router>
     }
 }

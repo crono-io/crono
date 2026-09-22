@@ -8,7 +8,10 @@ Crono is an open-source, API-first and messaging-first control plane for registe
 
 > Define the job centrally. Execute it where the capability exists.
 
-Crono currently provides a compiling workspace scaffold: server and worker CLI shells, optional trace export, and a browser GUI placeholder. The workload runtime is still in the design phase; the protocols and examples below are conceptual, not implemented interfaces.
+Crono currently provides an API-driven server with process health probes, a first-class human CLI
+client shell, a worker CLI scaffold, optional trace export, and a routed browser UI foundation. The
+workload runtime is still in the design phase; except for the documented health API, the protocols
+and examples below are conceptual rather than implemented interfaces.
 
 ## Workspace and development
 
@@ -16,49 +19,97 @@ The repository follows one release version while keeping its artifacts independe
 
 | Package | Location | Responsibility |
 | --- | --- | --- |
-| `crono-server` | `services/server` | Native control-plane application |
-| `crono-worker` | `services/worker` | Native execution-worker application |
-| `crono-web` | `apps/web` | Leptos CSR browser application, built with Trunk |
+| `crono-server` | `services/server` | Authoritative API and control-plane daemon |
+| `crono-worker` | `services/worker` | Execution-worker daemon |
+| `crono-cli` (`crono`) | `apps/cli` | Human CLI client for `crono-server` |
+| `crono-web` | `apps/web` | Independently deployed Leptos browser client |
 | `crono-telemetry` | `crates/telemetry` | Shared native logging and optional OTLP trace export |
 
 The root `Cargo.toml` owns the version, Rust edition, license, dependency declarations, and lint policy. Every package inherits the release version; `Cargo.lock` is shared and committed. Releases will use one `vX.Y.Z` tag for all artifacts. Bump the version in the root manifest and regenerate the lockfile together. Release versions do not define HTTP or messaging protocol compatibility. Packages are not published to crates.io initially.
 
-Use a current stable Rust toolchain with rustfmt and Clippy. The default workspace members are the server and worker; neither requires browser tooling or external infrastructure to build:
+Use a current stable Rust toolchain with rustfmt and Clippy. The default workspace members are the
+server, worker, and human CLI client; none requires browser tooling or external infrastructure to
+build:
 
 ```sh
 cargo build --locked -p crono-server
 cargo build --locked -p crono-worker
+cargo build --locked -p crono-cli
 cargo run --locked -p crono-server -- --help
+cargo run --locked -p crono-server -- --port 8080
+cargo run --locked -p crono-server --bin crono-server-openapi
 cargo run --locked -p crono-worker -- -V
 cargo run --locked -p crono-worker -- --version
+target/debug/crono --help
+target/debug/crono -V
+target/debug/crono --version
 ```
 
-Both binaries support `run` and repeatable `-v`. The `run` action intentionally reports that its runtime is not implemented and exits with status 1. It does not open an application listener, connect to PostgreSQL/NATS, or execute jobs. Help and version output work without telemetry initialization.
+`crono-server` starts directly, supports repeatable `-v`, and listens on port `8080` by default.
+Select another internal HTTP port with `--port` or `CRONO_SERVER_PORT`. The listener prefers a
+dual-stack wildcard socket and falls back to IPv4. It must remain behind a TLS-terminating reverse
+proxy or equivalent trusted ingress; public clients continue to use HTTPS. Graceful SIGINT/SIGTERM
+shutdown drains the HTTP server and flushes telemetry.
 
-Use `-V` for the short version (`crono-server 0.1.0`) and `--version` for the long version (`crono-server 0.1.0 - <commit>`); the worker follows the same format. The shared native build script uses `built` with `git2` to embed the full Git commit hash, falling back to `unknown` when Git metadata is unavailable. Help uses yellow headings, green usage/placeholders, and blue command names, with automatic terminal detection; piped output stays plain and `NO_COLOR` disables colors.
+The initial API exposes `GET /live`, `GET /ready`, and `GET /health`. Liveness and readiness return
+empty successful responses; readiness is process-only until PostgreSQL and NATS clients are wired.
+The detailed health response contains the package name, version, and source commit and includes an
+`X-App` build-identity header. `crono-server-openapi` prints the OpenAPI document generated from the
+same route registration used by the server. It does not expose runtime documentation or Swagger UI.
 
-The GUI displays the product name and inherited version. Install the WASM target and Trunk (validated with Trunk 0.21.14), then build or serve it independently:
+`crono-worker` retains its `run` subcommand and intentionally reports that its runtime is not
+implemented. Neither service connects to PostgreSQL/NATS or executes jobs yet. Help and version
+output work without telemetry initialization.
+
+The `crono-cli` package produces the `crono` executable. It resolves its future API base address in
+this order: `--address`, `CRONO_ADDR`, then the local-development default
+`http://127.0.0.1:8080`. Addresses are parsed as URLs, limited to HTTP or HTTPS, and rejected when
+they contain user-info, query strings, or fragments. Plain HTTP is accepted only for loopback
+development addresses; deployed servers use HTTPS. There is no HTTP transport, authentication,
+token storage, or operational command yet because the server has no stable job/run API contract.
+Valid configuration therefore ends with an explicit unfinished-command error and never opens a
+connection.
+
+Use `-V` for short versions such as `crono 0.1.0` and `--version` for long versions such as
+`crono 0.1.0 - <commit>`; both daemons follow the same convention. The shared native build script
+uses `built` with `git2` to embed the full Git commit hash, falling back to `unknown` when Git
+metadata is unavailable. Help uses yellow headings, green usage/placeholders, and blue command
+names, with automatic terminal detection; piped output stays plain and `NO_COLOR` disables colors.
+
+The GUI provides a routed control-plane shell with Overview, Namespaces, Jobs, Targets, Target Sets,
+Runs, Workers, and Settings pages. Its visual baseline combines a dark infrastructure navigation
+rail, a compact toolbar, a light workspace, and restrained cards with honest zero/empty states. It
+uses Tailwind CSS v4 through Trunk's standalone Tailwind pipeline and Material Symbols Outlined for
+its icon vocabulary. Install the WASM target and Trunk (validated with Trunk 0.21.14), then build or
+serve it independently:
 
 ```sh
 rustup target add wasm32-unknown-unknown
 cargo install --locked trunk --version 0.21.14
-cd apps/web
-trunk serve
-# Or: trunk build --release
+just web
+# Or: cd apps/web && trunk build --release
 ```
 
-Trunk produces static assets under `apps/web/dist`; these are hosted separately from the server. The GUI currently makes no API requests. See [the GUI README](apps/web/README.md) and [CLI architecture](CLI_ARCHITECTURE.md).
+`just web` listens on `0.0.0.0:8080` for remote browser testing. Pass an
+address and optional port to override it, such as `just web 127.0.0.1 3000`.
+
+Trunk produces static assets under `apps/web/dist`; these are hosted separately from the server.
+The GUI currently makes no API requests, and authentication is intentionally not implemented. See
+[the GUI README](apps/web/README.md), [CLI architecture](CLI_ARCHITECTURE.md), and [workload domain
+model](DOMAIN_MODEL.md).
 
 Local structured JSON logging is always available on stderr. Logging defaults to errors; `-v`, `-vv`, and `-vvv` select info, debug, and trace. `RUST_LOG` overrides that default. Trace export requires both an optional build feature and startup configuration:
 
 ```sh
 cargo build --locked -p crono-server -p crono-worker --features telemetry
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 target/debug/crono-server -v run
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 target/debug/crono-server -v --port 8080
 ```
 
-This example exports the scaffold's action span and still exits with the expected unfinished-runtime error. The exporter supports gRPC, gzip, verified HTTPS using WebPKI roots, and standard OTLP header environment variables. `OTEL_EXPORTER_OTLP_ENDPOINT` explicitly enables export and selects its destination; without it, even a telemetry-enabled binary only logs locally. Default builds ignore exporter configuration. Trace export and shutdown are bounded; shutdown failure can lose pending traces and is reported without replacing the action's exit status. More detail is in [CLI architecture](CLI_ARCHITECTURE.md#telemetry).
+This example exports server and HTTP request spans until the process receives a shutdown signal. The exporter supports gRPC, gzip, verified HTTPS using WebPKI roots, and standard OTLP header environment variables. `OTEL_EXPORTER_OTLP_ENDPOINT` explicitly enables export and selects its destination; without it, even a telemetry-enabled binary only logs locally. Default builds ignore exporter configuration. Trace export and shutdown are bounded; shutdown failure can lose pending traces and is reported without replacing the action's exit status. More detail is in [CLI architecture](CLI_ARCHITECTURE.md#telemetry).
 
-The `.justfile` provides two recipes: `clippy` and `test`. Both check native code with default and all features; `clippy` also checks the browser WASM target.
+The `.justfile` provides `clippy` and `test` recipes for code validation, plus database bootstrap and
+verification helpers. The code checks cover native code with default and all features; `clippy` also
+checks the browser WASM target.
 
 ```sh
 cargo fmt --all -- --check
@@ -76,17 +127,24 @@ Crono coordinates Ansible, Terraform/OpenTofu, PostgreSQL utilities, Kubernetes 
 
 ## Architecture
 
-The planned execution topology has four components: `crono-server`, `crono-worker`, PostgreSQL, and NATS with JetStream enabled. `crono-web` is an independently built and hosted browser client; the server does not embed or serve its assets.
+The planned execution topology has four runtime components: `crono-server`, `crono-worker`,
+PostgreSQL, and NATS with JetStream enabled. `crono` and `crono-web` are independent peer clients of
+the public server API. The server does not embed or serve either client.
+
+> All external control-plane clients interact with Crono through the public `crono-server` API. The CLI and browser are clients, not alternate execution paths.
 
 ```mermaid
 flowchart TB
-    subgraph Public["Human / public plane"]
-        Web["crono-web<br/>Browser GUI · separately hosted static assets"]
-        Client["CLI / public API client"]
-        Server["crono-server<br/>REST API · Job Registry<br/>Scheduler · Dispatcher · Run Controller"]
-        Web <-->|"HTTPS<br/>Public API only"| Server
-        Client <-->|"HTTPS<br/>Public API only"| Server
+    subgraph Clients["Independent public API clients"]
+        CLI["crono<br/>Human CLI client"]
+        Web["crono-web<br/>Separately deployed browser client"]
+        Other["curl / SDK / automation"]
     end
+
+    Server["crono-server<br/>Authoritative REST API · Control plane"]
+    CLI <-->|"HTTPS<br/>Public API only"| Server
+    Web <-->|"HTTPS<br/>Public API only"| Server
+    Other <-->|"HTTPS<br/>Public API only"| Server
 
     PG[("PostgreSQL<br/>authoritative state")]
     Server <--> PG
@@ -95,18 +153,16 @@ flowchart TB
         NATS["NATS / JetStream"]
         W1["crono-worker<br/>Ansible control host"]
         W2["crono-worker<br/>Database administration host"]
-        Trusted["Trusted internal service<br/>(future client)"]
         NATS <-->|"Native NATS / TLS<br/>JetStream task pull · control · events"| W1
         NATS <-->|"Native NATS / TLS<br/>JetStream task pull · control · events"| W2
-        NATS <-->|"NATS request/reply"| Trusted
     end
 
     Server <-->|"Native NATS / TLS"| NATS
 ```
 
-`crono-server` remains a modular monolith. Its planned HTTP API, scheduler, dispatcher, run controller, NATS consumers/request handlers, event processor, and persistence layer are logical Rust modules in one deployable process. `crono-web` uses its public API and has no Rust dependency on the server. `crono-worker` is the separate execution process. Server and worker share a telemetry library, not a runtime process. Shared domain and protocol libraries can follow once their contracts are defined.
+`crono-server` remains a modular monolith. Its planned HTTP API, scheduler, dispatcher, run controller, NATS consumers/request handlers, event processor, and persistence layer are logical Rust modules in one deployable process. `crono` and `crono-web` use its public API and have no Rust dependency on the server. `crono-worker` is the separate execution process. Server and worker share a telemetry library, not a runtime process. Shared wire contracts can be evaluated only after the public API stabilizes.
 
-Workers receive tasks directly from NATS JetStream using durable pull consumers over persistent native NATS/TLS connections. These are NATS pull requests, not HTTPS polling. Claims, lease renewals, and execution events also travel directly over NATS. Workers have no PostgreSQL connection, normal-operation HTTP server, or inbound worker ports. The browser connects only to `crono-server` over HTTPS.
+Workers receive tasks directly from NATS JetStream using durable pull consumers over persistent native NATS/TLS connections. These are NATS pull requests, not HTTPS polling. Claims, lease renewals, and execution events also travel directly over NATS. Workers have no PostgreSQL connection, normal-operation HTTP server, or inbound worker ports. The CLI and browser connect only to `crono-server` over HTTPS in deployed environments.
 
 Keep one server deployment initially. Add worker capacity through queues; split control-plane services only when measured scaling or failure-isolation needs justify the operational cost.
 
@@ -114,38 +170,67 @@ Keep one server deployment initially. Add worker capacity through queues; split 
 
 | Client or responsibility | Transport | Boundary |
 | --- | --- | --- |
-| Browser, human CLI, public/external API | HTTPS to `crono-server` | Public authentication and authorization |
-| Trusted automation clients, eventually | NATS request/reply to server handlers | Authorized Run requests, never dispatch publication |
+| Browser, human CLI, SDK, and automation | HTTPS to `crono-server` | Public authentication and authorization |
 | Worker dispatch and important execution events | Native NATS with JetStream | Durable delivery and redelivery |
 | Worker claims, lease renewal, control, presence | Core NATS | Low-latency request/reply or transient messages |
 | Authoritative persistence | Server to PostgreSQL | Workers and clients never access the database |
 
 Native NATS is a distinct protocol, not HTTPS. A conceptual endpoint is `nats://nats.example.internal:4222`; production connections must require TLS, certificate verification, and authentication. TLS-secured native connectivity can use `tls://nats.example.internal:4222`, depending on client configuration. See [NATS TLS documentation](https://docs.nats.io/learn/security/encryption). WebSocket/WSS transport is outside v0.1.
 
-The browser must not receive NATS credentials or connect directly to NATS. Keeping HTTPS as its boundary centralizes authorization, simplifies browser security, and preserves a stable public API independent of messaging internals.
-
-A trusted service may eventually request `crono.request.run` with `job`, `inputs`, `request_id`, and `metadata`. The server authenticates and authorizes the caller, validates the job and inputs, creates the Run in PostgreSQL, and returns its ID after commit. Only the control plane creates executable Runs and publishes dispatch messages.
+Public clients must not receive NATS credentials or connect directly to NATS. Keeping HTTPS as the
+only external control-plane boundary centralizes authorization, simplifies client security, and
+preserves a stable public API independent of messaging internals. Automation may eventually use
+scoped service credentials, but it still creates Runs through `crono-server`; only the control
+plane publishes dispatch messages.
 
 Normal worker traffic flows directly between workers and NATS. The server consumes events and handles authoritative decisions; it does not proxy each message into the bus. This avoids HTTP request overhead, duplicated serialization, connection churn, and extra network hops.
 
 ## Core domain model
 
 ```text
-Job -> JobVersion -> Run -> RunAttempt -> Worker -> Executor
+Namespace
+   |
+   +-- Job -> JobVersion
+   +-- Target
+   +-- TargetSet
+
+JobVersion + Target/TargetSet + Inputs
+                    |
+                    v
+                   Run -> RunAttempt -> Worker -> Executor
 ```
 
 | Concept | Meaning |
 | --- | --- |
-| Job | Logical identity, such as `postgres-backup` |
+| Namespace | Organizational boundary, such as `mariadb` or `postgres` |
+| Job | What to execute, independent of a destination, such as `mariadb/backup` |
 | JobVersion | Immutable execution definition; modifying a Job creates a new version |
-| Run | One requested execution, with validated inputs and exactly one pinned JobVersion |
+| Target | Where or against what a Job executes, such as `mariadb/host-123` |
+| TargetSet | Named explicit selection of unique Targets in one Namespace |
+| Run | One requested execution, with validated inputs and pinned definitions |
 | RunAttempt | One attempt to perform that Run, with its own identity, worker assignment, lease, and outcome |
 | Worker | An identified execution process serving authorized queues |
 | Executor | A generic execution primitive; initially `process` |
 
+> Crono models WHAT to execute separately from WHERE to execute it. Jobs describe behavior; Targets describe execution destinations/resources. Executor-specific concepts such as Ansible inventory remain outside the core domain.
+
+For example, `inventories/mariadb/host-123.yml` maps conceptually to Target
+`mariadb/host-123`, while `playbooks/mariadb/backup.yml` maps to Job
+`mariadb/backup`. The inventory is executor-specific target data, not a Job and
+not a core Ansible abstraction. The same model supports clusters, workspaces,
+database instances, and API endpoints.
+
 For example, Run 42 may have Attempt 1 with a lost worker and Attempt 2 that succeeds, if retry is permitted. Retrying creates a new RunAttempt; it does not overwrite the old attempt or change the pinned JobVersion. Message redelivery alone does not create an attempt.
 
 Immutable versions make definitions auditable and support reproducibility and debugging. They do not freeze installed tools, external infrastructure, or mutable artifacts; those dependencies must also be pinned when reproducibility requires it.
+
+Target configuration will require the same reproducibility guarantee. A
+`TargetVersion` is intentionally deferred until target configuration and Run
+contracts exist; before execution is implemented, a Run must pin the exact
+Target definition as well as its JobVersion and inputs. TargetSet fan-out and
+membership snapshot semantics are also deferred. The complete invariants,
+Ansible mapping, and intended GUI/API/CLI organization are documented in the
+[workload domain model](DOMAIN_MODEL.md).
 
 Queues route work. Labels and capabilities are future placement inputs, not a sophisticated scheduler in v0.1.
 
@@ -153,9 +238,14 @@ Queues route work. Labels and capabilities are future placement inputs, not a so
 
 ### 1. Create and persist a Run
 
-`POST /api/v1/jobs/:id/runs`, future `crono.request.run` requests, and scheduling all enter the same Run creation logic and authorization rules.
+Public HTTP Run requests and scheduling enter the same server-side Run creation logic and authorization rules.
 
-The server validates the request, resolves and pins the JobVersion, and commits the Run, its initial pending RunAttempt, and a dispatch/outbox record in one PostgreSQL transaction. Work becomes visible to workers only after commit. Caller-scoped request IDs must make retries return the same Run and reject conflicting payloads.
+The future server validates the request, resolves and pins the JobVersion and
+exact Target definition, and commits the Run, its initial pending RunAttempt,
+and a dispatch/outbox record in one PostgreSQL transaction. Work becomes
+visible to workers only after commit. Caller-scoped request IDs must make
+retries return the same Run and reject conflicting payloads. The required
+TargetVersion contract is not implemented yet.
 
 ### 2. Publish through the transactional outbox
 
@@ -244,7 +334,6 @@ A deliberately small, provisional semantic subject hierarchy:
 | Subject | Purpose |
 | --- | --- |
 | `crono.dispatch.<queue>` | Durable execution envelopes |
-| `crono.request.run` | Future trusted-client Run creation |
 | `crono.control.claim` | Worker claim and execution-specification reply |
 | `crono.control.<operation>` | Registration, renewal, completion inspection, and optional cancellation control |
 | `crono.worker.heartbeat` | Worker presence |
@@ -394,9 +483,9 @@ Large logs may eventually move to object storage, with references and metadata i
 
 The first milestone is one vertical slice:
 
-1. Register a Job.
-2. Create an immutable JobVersion.
-3. Trigger a Run through the HTTP API.
+1. Register a Namespace, Job, and Target.
+2. Create an immutable JobVersion and exact versioned Target definition.
+3. Trigger a Run through the HTTP API with a JobVersion, Target, and inputs.
 4. Persist the Run, pending attempt, and outbox.
 5. Dispatch through JetStream.
 6. Let a worker pull the dispatch.
@@ -408,7 +497,7 @@ The first milestone is one vertical slice:
 
 This includes `crono-server`, `crono-worker`, HTTP API, PostgreSQL, NATS/JetStream, a process executor, basic worker registration/identity, and basic run events. Include cancellation only if its request, process-stop, and terminal-state semantics remain simple; it must not imply rollback of external effects.
 
-A full Web UI, trusted-client Run creation, scheduling, and automatic retry policies are not prerequisites for this first slice. Worker NATS control operations are required from the start.
+A full Web UI, additional API clients, scheduling, and automatic retry policies are not prerequisites for this first slice. Worker NATS control operations are required from the start.
 
 Excluded from v0.1: workflow DAGs, graphical workflow builders, Kubernetes executors, Terraform-specific or Ansible-specific integrations, complicated RBAC, multi-tenancy, approvals, calendars, plugin frameworks, distributed scheduler services, separate microservices, large-scale log storage, and WebSocket NATS transport.
 
@@ -416,18 +505,23 @@ Excluded from v0.1: workflow DAGs, graphical workflow builders, Kubernetes execu
 
 Workflows are not part of the first implementation milestone. Later composition should reuse ordinary Runs and attempts; no DAG engine is designed here.
 
-Possible later work includes trusted NATS clients, basic scheduling, a minimal Web UI, container/HTTP executors, explicit retry policies, placement using labels/capabilities, secrets providers, and object-backed logs. Advanced authorization, tenancy, calendars, approvals, and high availability require demonstrated needs and separate designs.
+Possible later work includes scoped API automation clients, basic scheduling, a minimal Web UI, container/HTTP executors, explicit retry policies, placement using labels/capabilities, secrets providers, and object-backed logs. Advanced authorization, tenancy, calendars, approvals, and high availability require demonstrated needs and separate designs.
 
 ## Status
 
-Workspace scaffold implemented: independently buildable CLI shells, shared optional telemetry, and a Leptos GUI placeholder. PostgreSQL, NATS, job execution, and public application APIs are not implemented. The next step is to freeze the smallest coherent execution protocol and its failure behavior before implementing the runtime.
+Workspace scaffold implemented: independently buildable daemons, a server-independent `crono` API
+client shell, shared optional telemetry, a routed Leptos GUI foundation, and pure server-side domain
+identities for Namespaces, Jobs, Targets, and TargetSets. PostgreSQL, NATS, target configuration and
+versioning, job execution, authentication, and public workload application APIs are not
+implemented. The next step is to freeze the smallest coherent execution protocol and its failure
+behavior before implementing the runtime.
 
 ## First implementation steps
 
 These are the remaining ordered design and runtime milestones; the workspace scaffold does not implement them.
 
 1. **Phase 0 — architecture freeze:** settle domain terminology, Run/attempt state machines, subject conventions, identity binding, claim/lease semantics, completion and ACK rules, bounded output/loss policies, and failure scenarios.
-2. **Phase 1 — control plane skeleton:** establish the server, PostgreSQL and NATS boundaries, job/version/Run model, and transactional outbox.
+2. **Phase 1 — control plane skeleton:** establish the server, PostgreSQL and NATS boundaries, Namespace/Job/Target/version/Run model, and transactional outbox.
 3. **Phase 2 — worker protocol:** define registration, queue-scoped JetStream pull, claim/specification response, heartbeat, lease renewal, and recovery.
 4. **Phase 3 — process executor:** start and stop processes, capture bounded stdout/stderr, enforce timeout, and commit results through the completion protocol.
 5. **Phase 4 — observability:** expose event history, Run/attempt inspection, and a minimal API; add a minimal UI when useful.

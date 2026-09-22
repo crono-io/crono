@@ -3,12 +3,20 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#101820">
+    <meta name="theme-color" content="#fafafa">
     <title>Crono</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&display=block"
+      rel="stylesheet">
     <!-- Match wasm-opt's enabled instructions to current Rust WASM output. -->
     <link data-trunk rel="rust" data-bin="crono-web" data-wasm-opt="z"
       data-wasm-opt-params="--enable-bulk-memory-opt --enable-nontrapping-float-to-int">
-    <link data-trunk rel="css" href="style.css">
+    <link data-trunk rel="tailwind-css" href="style.css">
+    <link data-trunk rel="copy-file" href="../../logo/crono-logo-white.svg">
   </head>
-  <body></body>
+  <body>
+    <noscript>Crono requires JavaScript to run the browser client.</noscript>
+  </body>
 </html>

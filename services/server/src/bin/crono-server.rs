@@ -6,9 +6,10 @@ use crono_server::cli;
 /// Preserve the action result while reporting any telemetry shutdown failure.
 #[tokio::main]
 async fn main() -> Result<()> {
-    let result = cli::start().and_then(|action| match action {
-        cli::actions::Action::Run => cli::actions::run::execute(),
-    });
+    let result = match cli::start() {
+        Ok(cli::actions::Action::Server(args)) => cli::actions::server::execute(args).await,
+        Err(error) => Err(error),
+    };
 
     // The blocking SDK shutdown must run while Tokio can still drive gRPC I/O.
     let shutdown = tokio::task::spawn_blocking(cli::telemetry::shutdown)

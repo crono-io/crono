@@ -1,0 +1,27 @@
+[package]
+name = "crono-cli"
+description = "Command-line client for the Crono control-plane API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+build = "../../build.rs"
+
+[[bin]]
+name = "crono"
+path = "src/bin/crono.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+temp-env.workspace = true
+
+[build-dependencies]
+built.workspace = true
