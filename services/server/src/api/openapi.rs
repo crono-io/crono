@@ -43,13 +43,14 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         ))
         .routes(routes!(control_plane::create_run, control_plane::list_runs))
         .routes(routes!(control_plane::get_run))
+        .routes(routes!(control_plane::list_workers))
         .routes(routes!(control_plane::overview));
 
     let mut health_tag = Tag::new("health");
     health_tag.description = Some("Process liveness, readiness, and health".to_string());
     let mut control_plane_tag = Tag::new("control-plane");
     control_plane_tag.description =
-        Some("Authorization-checked Namespace, Job, Target, and Run operations".to_string());
+        Some("Authorization-checked resources, Runs, and worker presence".to_string());
     router.get_openapi_mut().tags = Some(vec![health_tag, control_plane_tag]);
 
     router

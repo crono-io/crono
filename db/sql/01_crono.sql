@@ -179,6 +179,25 @@ CREATE TABLE IF NOT EXISTS crono.run_attempts (
     )
 );
 
+CREATE TABLE IF NOT EXISTS crono.worker_presence (
+    worker_id text PRIMARY KEY,
+    session_id uuid NOT NULL,
+    queue text NOT NULL,
+    concurrency integer NOT NULL,
+    version text NOT NULL,
+    started_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+    last_seen_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+    CONSTRAINT worker_presence_id_canonical CHECK (
+        worker_id ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+    ),
+    CONSTRAINT worker_presence_queue_canonical CHECK (
+        queue ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+    ),
+    CONSTRAINT worker_presence_concurrency_bounded CHECK (concurrency BETWEEN 1 AND 256),
+    CONSTRAINT worker_presence_version_bounded CHECK (char_length(version) BETWEEN 1 AND 128),
+    CONSTRAINT worker_presence_timestamps_ordered CHECK (last_seen_at >= started_at)
+);
+
 CREATE TABLE IF NOT EXISTS crono.outbox (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     run_id uuid NOT NULL REFERENCES crono.runs(id) ON DELETE RESTRICT,
@@ -236,6 +255,8 @@ CREATE INDEX IF NOT EXISTS runs_retry_due_idx
     ON crono.runs (next_retry_at, id) WHERE status = 'retry_wait';
 CREATE INDEX IF NOT EXISTS run_attempts_expired_lease_idx
     ON crono.run_attempts (lease_expires_at, id) WHERE status = 'running';
+CREATE INDEX IF NOT EXISTS worker_presence_last_seen_idx
+    ON crono.worker_presence (last_seen_at);
 CREATE INDEX IF NOT EXISTS outbox_pending_idx
     ON crono.outbox (next_attempt_at, id)
     WHERE published_at IS NULL AND cancelled_at IS NULL;

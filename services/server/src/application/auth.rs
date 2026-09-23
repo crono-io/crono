@@ -97,6 +97,7 @@ pub enum Capability {
     ScheduleUpdate,
     RunCreate,
     RunRead,
+    WorkerRead,
 }
 
 /// Resource named by one authorization decision.
@@ -217,6 +218,7 @@ mod tests {
             Capability::ScheduleUpdate,
             Capability::RunCreate,
             Capability::RunRead,
+            Capability::WorkerRead,
         ];
 
         for capability in capabilities {

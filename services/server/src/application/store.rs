@@ -4,13 +4,18 @@
 //! carry database leases so multiple server instances can share work without
 //! process-local coordination.
 
-use super::{JobRecord, Overview, Page, RunRecord, ScheduleRecord, TargetRecord, VisibilityScope};
+use super::{
+    JobRecord, Overview, Page, RunRecord, ScheduleRecord, TargetRecord, VisibilityScope,
+    WorkerRecord,
+};
 use crate::domain::{
     AttemptId, CatchupPolicy, DispatchId, ExecutorKind, MisfirePolicy, Namespace, NamespaceName,
     QueueName, ResourceName, RunId, Schedule, ScheduleId,
 };
 use async_trait::async_trait;
-use crono_api::{ClaimRequest, ClaimResponse, CompletionRequest, LeaseRequest};
+use crono_api::{
+    ClaimRequest, ClaimResponse, CompletionRequest, LeaseRequest, WorkerHeartbeatRequest,
+};
 use std::{error::Error, fmt, time::Duration};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -193,6 +198,15 @@ pub trait ControlPlaneStore: Send + Sync {
         id: RunId,
         visibility: &VisibilityScope,
     ) -> Result<RunRecord, StoreError>;
+    async fn record_worker_heartbeat(
+        &self,
+        request: &WorkerHeartbeatRequest,
+    ) -> Result<(), StoreError>;
+    async fn list_workers(
+        &self,
+        limit: u16,
+        after: Option<&str>,
+    ) -> Result<Page<WorkerRecord>, StoreError>;
     async fn overview(&self, visibility: &VisibilityScope) -> Result<Overview, StoreError>;
 
     async fn claim_due_schedules(

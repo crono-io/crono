@@ -9,7 +9,7 @@ use crate::{
     api::{error::ApiError, state::AppState},
     application::{
         CreateJobInput, CreateScheduleInput, JobRecord, Page as ApplicationPage, RequestContext,
-        RunRecord, ScheduleRecord, TargetRecord,
+        RunRecord, ScheduleRecord, TargetRecord, WorkerRecord,
     },
     domain::{
         CatchupPolicy as DomainCatchup, ExecutorKind as DomainExecutor,
@@ -25,7 +25,7 @@ use crono_api::{
     CatchupPolicy, CreateJobRequest, CreateNamespaceRequest, CreateRunRequest,
     CreateScheduleRequest, CreateTargetRequest, ExecutorKind, JobResource, MisfirePolicy,
     NamespaceResource, OverviewResource, Page, RunResource, RunStatus, ScheduleResource,
-    TargetResource, UpdateScheduleRequest,
+    TargetResource, UpdateScheduleRequest, WorkerResource, WorkerStatus,
 };
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
@@ -426,6 +426,28 @@ pub async fn get_run(
 
 #[utoipa::path(
     get,
+    path = "/api/workers",
+    params(PageQuery),
+    responses((status = 200, body = Page<WorkerResource>)),
+    tag = "control-plane"
+)]
+pub async fn list_workers(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Query(query): Query<PageQuery>,
+) -> Result<Json<Page<WorkerResource>>, ApiError> {
+    let page = state
+        .application()
+        .list_workers(&context, query.limit, query.after.as_deref())
+        .await?;
+    let now = time::OffsetDateTime::now_utc();
+    Ok(Json(map_page(page, |worker| {
+        worker_resource(&worker, now)
+    })?))
+}
+
+#[utoipa::path(
+    get,
     path = "/api/overview",
     responses((status = 200, body = OverviewResource)),
     tag = "control-plane"
@@ -586,6 +608,34 @@ fn run_resource(record: &RunRecord) -> Result<RunResource, ApiError> {
     })
 }
 
+fn worker_resource(
+    record: &WorkerRecord,
+    now: time::OffsetDateTime,
+) -> Result<WorkerResource, ApiError> {
+    Ok(WorkerResource {
+        worker_id: record.worker_id.clone(),
+        queue: record.queue.clone(),
+        concurrency: record.concurrency,
+        version: record.version.clone(),
+        status: worker_status(record.last_seen_at, now),
+        started_at: timestamp(record.started_at)?,
+        last_seen_at: timestamp(record.last_seen_at)?,
+        active_executions: record.active_executions,
+    })
+}
+
+/// Classify presence using server time so clients cannot claim liveness.
+fn worker_status(last_seen: time::OffsetDateTime, now: time::OffsetDateTime) -> WorkerStatus {
+    let age_seconds = (now - last_seen).whole_seconds().max(0);
+    if age_seconds <= 30 {
+        WorkerStatus::Online
+    } else if age_seconds <= 120 {
+        WorkerStatus::Stale
+    } else {
+        WorkerStatus::Offline
+    }
+}
+
 fn timestamp(value: time::OffsetDateTime) -> Result<String, ApiError> {
     value.format(&Rfc3339).map_err(|error| {
         tracing::error!(%error, "failed to encode a persisted timestamp");
@@ -605,4 +655,34 @@ where
             .collect::<Result<Vec<_>, _>>()?,
         next_cursor: page.next_cursor,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::worker_status;
+    use crono_api::WorkerStatus;
+    use time::{Duration, OffsetDateTime};
+
+    #[test]
+    fn worker_status_uses_server_owned_heartbeat_windows() {
+        let now = OffsetDateTime::UNIX_EPOCH + Duration::minutes(5);
+
+        assert_eq!(worker_status(now, now), WorkerStatus::Online);
+        assert_eq!(
+            worker_status(now - Duration::seconds(30), now),
+            WorkerStatus::Online
+        );
+        assert_eq!(
+            worker_status(now - Duration::seconds(31), now),
+            WorkerStatus::Stale
+        );
+        assert_eq!(
+            worker_status(now - Duration::minutes(2), now),
+            WorkerStatus::Stale
+        );
+        assert_eq!(
+            worker_status(now - Duration::seconds(121), now),
+            WorkerStatus::Offline
+        );
+    }
 }

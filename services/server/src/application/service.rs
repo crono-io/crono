@@ -3,7 +3,7 @@
 use super::{
     ApplicationError, Authorizer, Capability, ControlPlaneStore, CreateJobInput,
     CreateScheduleInput, JobDefinition, JobRecord, NewSchedule, Overview, Page, RequestContext,
-    ResourceScope, RunRecord, ScheduleRecord, TargetRecord,
+    ResourceScope, RunRecord, ScheduleRecord, TargetRecord, WorkerRecord,
 };
 use crate::{
     domain::{
@@ -545,6 +545,30 @@ impl Application {
             .visibility(context, Capability::RunRead)
             .await?;
         Ok(self.store.get_run(RunId::new(id), &visibility).await?)
+    }
+
+    /// List recently observed workers after a control-plane authorization decision.
+    ///
+    /// Presence is operational metadata rather than Namespace-owned data, so
+    /// callers require the global worker-read capability.
+    ///
+    /// # Errors
+    ///
+    /// Returns invalid pagination, authorization, or dependency failures.
+    pub async fn list_workers(
+        &self,
+        context: &RequestContext,
+        limit: Option<u16>,
+        after: Option<&str>,
+    ) -> Result<Page<WorkerRecord>, ApplicationError> {
+        self.authorizer
+            .authorize(
+                context,
+                Capability::WorkerRead,
+                &ResourceScope::ControlPlane,
+            )
+            .await?;
+        Ok(self.store.list_workers(page_limit(limit)?, after).await?)
     }
 
     /// Count only resources visible to the established principal.

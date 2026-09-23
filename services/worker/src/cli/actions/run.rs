@@ -1,9 +1,10 @@
 //! Bounded `JetStream` pull-consumer and process executor.
 //!
-//! Every delivery is claimed through the server before execution. Long-running
-//! work refreshes both the PostgreSQL lease and `JetStream` acknowledgement
-//! deadline. Completion is persisted before the message is acknowledged, so a
-//! crash may redeliver but cannot create another logical Attempt.
+//! Every worker session reports bounded presence metadata to the server, and
+//! every delivery is claimed before execution. Long-running work refreshes both
+//! the PostgreSQL lease and `JetStream` acknowledgement deadline. Completion is
+//! persisted before the message is acknowledged, so a crash may redeliver but
+//! cannot create another logical Attempt.
 
 use anyhow::{Context, Result, bail};
 use async_nats::jetstream::{
@@ -13,7 +14,7 @@ use async_nats::jetstream::{
 };
 use crono_api::{
     ClaimRequest, ClaimResponse, CompletionRequest, DispatchEnvelope, ExecutionSnapshot,
-    ExecutorKind, LeaseRequest,
+    ExecutorKind, LeaseRequest, WorkerHeartbeatRequest,
 };
 use futures_util::StreamExt;
 use std::{env, io::Write, process::Stdio, sync::Arc, time::Duration};
@@ -29,6 +30,7 @@ use tracing::{info, warn};
 const STREAM_NAME: &str = "CRONO_DISPATCH";
 const OUTPUT_LIMIT: usize = 65_536;
 const INPUT_LIMIT: usize = 65_536;
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Args {
@@ -90,13 +92,19 @@ pub async fn execute(args: Args) -> Result<()> {
             signal.cancel();
         }
     });
+    let args = Arc::new(args);
+    let heartbeat = tokio::spawn(run_presence_heartbeat(
+        client.clone(),
+        Arc::clone(&args),
+        uuid::Uuid::now_v7(),
+        cancellation.child_token(),
+    ));
     info!(
         worker_id = args.worker_id,
         queue = args.queue,
         concurrency = args.concurrency,
         "Crono worker started"
     );
-    let args = Arc::new(args);
     while !cancellation.is_cancelled() {
         let messages = consumer
             .fetch()
@@ -129,8 +137,64 @@ pub async fn execute(args: Args) -> Result<()> {
             })
             .await;
     }
+    cancellation.cancel();
+    heartbeat.await.context("worker heartbeat task failed")?;
     info!("Crono worker stopped");
     Ok(())
+}
+
+/// Refresh worker presence independently of execution traffic.
+///
+/// A heartbeat failure is recoverable because both NATS and the server control
+/// subscriber may reconnect. Cancellation interrupts an in-flight request so a
+/// missing responder cannot delay graceful shutdown.
+async fn run_presence_heartbeat(
+    client: async_nats::Client,
+    args: Arc<Args>,
+    session_id: uuid::Uuid,
+    cancellation: CancellationToken,
+) {
+    let request = WorkerHeartbeatRequest {
+        worker_id: args.worker_id.clone(),
+        session_id,
+        queue: args.queue.clone(),
+        concurrency: args.concurrency,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+    let mut interval = time::interval(HEARTBEAT_INTERVAL);
+    interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            () = cancellation.cancelled() => return,
+            _ = interval.tick() => {}
+        }
+        let response = tokio::select! {
+            () = cancellation.cancelled() => return,
+            result = presence_request(
+                &client,
+                &args.worker_id,
+                &request,
+            ) => result,
+        };
+        match response {
+            Ok(true) => {}
+            Ok(false) => warn!(worker_id = args.worker_id, "worker heartbeat was rejected"),
+            Err(error) => warn!(%error, worker_id = args.worker_id, "worker heartbeat failed"),
+        }
+    }
+}
+
+async fn presence_request(
+    client: &async_nats::Client,
+    worker_id: &str,
+    request: &WorkerHeartbeatRequest,
+) -> Result<bool> {
+    let subject = format!("crono.worker.presence.{worker_id}");
+    let response = client
+        .request(subject, serde_json::to_vec(request)?.into())
+        .await
+        .context("worker presence request failed")?;
+    serde_json::from_slice(&response.payload).context("worker presence response is invalid")
 }
 
 async fn handle_message(client: async_nats::Client, args: Arc<Args>, message: jetstream::Message) {

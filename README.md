@@ -119,9 +119,11 @@ Workers share durable queue-scoped pull consumers and fetch no more messages tha
 
 While a process runs, the worker refreshes its PostgreSQL lease and sends JetStream in-progress acknowledgements. Completion is committed to PostgreSQL before the dispatch is ACKed. The process executor uses an absolute executable directly without a shell, clears the environment except for a small allowlist, appends Target arguments to Job arguments, supplies inputs through `CRONO_INPUTS_FILE`, and retains bounded stdout/stderr tails.
 
+Every worker session also sends a presence heartbeat through the server-mediated `crono.worker.presence.*` NATS boundary. Keeping presence separate from execution control prevents older control subscribers from consuming new heartbeat operations during rolling deployments. PostgreSQL records the stable worker ID, process session, queue, concurrency, version, start time, and last-seen time. `GET /api/workers` classifies a worker as online for 30 seconds after its last heartbeat, stale through two minutes, and offline afterward. Offline records remain useful for short incident review and are removed after seven days by bounded reconciliation. Presence is operational metadata only: it does not replace Attempt leases or make a NATS connection authoritative execution state.
+
 ## NATS assumptions
 
-The server creates `CRONO_DISPATCH` for `crono.dispatch.*` with file storage, WorkQueue retention, explicit worker acknowledgements, bounded message size, and discard-new behavior. Development defaults to one replica. Set `CRONO_NATS_REPLICAS=3` for a three-node production JetStream cluster; valid values are 1, 3, and 5. Production NATS must use TLS, authenticated identities, and subject permissions that bind a worker to its identity-scoped control subjects and authorized queue.
+The server creates `CRONO_DISPATCH` for `crono.dispatch.*` with file storage, WorkQueue retention, explicit worker acknowledgements, bounded message size, and discard-new behavior. Development defaults to one replica. Set `CRONO_NATS_REPLICAS=3` for a three-node production JetStream cluster; valid values are 1, 3, and 5. Production NATS must use TLS, authenticated identities, and subject permissions that bind a worker to its identity-scoped control and presence subjects and authorized queue.
 
 The server starts and remains ready when NATS is unavailable as long as PostgreSQL is healthy. Its connection manager reconnects and re-establishes the stream. File-backed JetStream storage must be persistent across ordinary NATS restarts. Complete broker-storage loss requires explicit replay/reconciliation from PostgreSQL before affected queued work is considered recovered.
 
@@ -182,7 +184,7 @@ The GUI currently exercises Namespace, Job, Target, and manual Run workflows. Sc
 flowchart TD
     Start["just dev-start"] --> Web["Open http://127.0.0.1:3000"]
     Start --> Infra["PostgreSQL + NATS + crono-server"]
-    WorkerCmd["Start crono-worker separately<br/>queue: default"] --> Ready["Worker ready for dispatch"]
+    WorkerCmd["Start crono-worker separately<br/>queue: default"] --> Ready["Worker heartbeat visible in Workers"]
 
     Web --> Namespace["Create a Namespace"]
     Namespace --> Job["Create a Job"]
@@ -202,7 +204,7 @@ When reviewing failure behavior, stop NATS after creating the definitions but be
 
 ## Health and observability
 
-`GET /live` reports process liveness. `GET /ready` requires PostgreSQL because durable state cannot be accepted without it. `GET /health` reports PostgreSQL and NATS separately; NATS failure is degraded transport health, not failed liveness or readiness. `GET /metrics` exports bounded-cardinality Prometheus metrics for scheduler decisions, execution lateness, outbox depth/age/publication, Run states, retries, active workers, expired leases, and NATS connectivity. Resource IDs appear in structured logs, never metric labels.
+`GET /live` reports process liveness. `GET /ready` requires PostgreSQL because durable state cannot be accepted without it. `GET /health` reports PostgreSQL and NATS separately; NATS failure is degraded transport health, not failed liveness or readiness. `GET /api/workers` reports authorized heartbeat-backed presence for the Workers screen. `GET /metrics` exports bounded-cardinality Prometheus metrics for scheduler decisions, execution lateness, outbox depth/age/publication, Run states, active execution leases, expired leases, and NATS connectivity. Resource IDs appear in structured logs, never metric labels.
 
 ## Workspace
 

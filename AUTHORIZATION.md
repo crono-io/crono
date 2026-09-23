@@ -28,6 +28,9 @@ HTTP request
 The `RequestContext` holds an opaque principal and a per-request correlation
 UUID. `Capability` is the stable permission vocabulary: Namespace create/read,
 Job create/read/execute, Target create/read/use, and Run create/read.
+Schedule create/read/update and global Worker read complete the current
+vocabulary; worker presence is operational control-plane metadata rather than
+Namespace-owned data.
 `ResourceScope` identifies the control plane, Namespace, qualified Job,
 qualified Target, or Run involved in one decision. Run creation checks all
 three relevant permissions: creating the Run, executing the selected Job, and

@@ -7,8 +7,8 @@
 - `00_init.sql` creates the `crono` database, owner/runtime roles, and grants,
   then loads the schema.
 - `01_crono.sql` is the idempotent draft schema baseline for Namespaces, direct
-  Job and Target definitions, Schedules, Runs, Attempts, audit events, leases,
-  and the transactional outbox.
+  Job and Target definitions, Schedules, Runs, Attempts, worker presence,
+  audit events, leases, and the transactional outbox.
 - `container-entrypoint.sql` lets the official PostgreSQL image run the canonical
   bootstrap while keeping relative includes working.
 - `check.sql` verifies database ownership, role safety, schema ownership, and
@@ -65,6 +65,9 @@ manual Run path inserts the Run, first Attempt, and outbox row in one
 transaction. The dispatcher marks the outbox, Attempt, and Run queued only
 after a JetStream persistence acknowledgement; failed sends remain pending
 with bounded operational error text and do not consume execution retries.
+Worker presence is refreshed through the server's NATS control handler rather
+than by granting workers database access. The reconciler bounds retained
+offline presence records to seven days.
 
 This repository is still in its draft schema phase. There is no compatibility
 or numbered schema series: reset older development databases before applying

@@ -11,7 +11,7 @@ use crate::{
     application::{
         ControlPlaneStore, JobDefinition, JobRecord, MetricsSnapshot, NewSchedule, OutboxRecord,
         Overview, Page, RunRecord, SchedulePlan, ScheduleRecord, StoreError, TargetRecord,
-        VisibilityScope,
+        VisibilityScope, WorkerRecord,
     },
     domain::{
         AttemptId, CatchupPolicy, DispatchId, ExecutorKind, Job, JobData, JobId, MisfirePolicy,
@@ -22,7 +22,7 @@ use crate::{
 use async_trait::async_trait;
 use crono_api::{
     ClaimRequest, ClaimResponse, CompletionRequest, DispatchEnvelope, ExecutionSnapshot,
-    ExecutorKind as ApiExecutor, LeaseRequest,
+    ExecutorKind as ApiExecutor, LeaseRequest, WorkerHeartbeatRequest,
 };
 use sqlx::{PgPool, Postgres, Transaction, postgres::PgPoolOptions};
 use std::time::Duration;
@@ -137,6 +137,17 @@ struct RetryRow {
     retry_max_seconds: i32,
     retry_multiplier: f64,
     retry_jitter: f64,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct WorkerRow {
+    worker_id: String,
+    queue: String,
+    concurrency: i32,
+    version: String,
+    started_at: OffsetDateTime,
+    last_seen_at: OffsetDateTime,
+    active_executions: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -692,6 +703,67 @@ impl ControlPlaneStore for PostgresStore {
         run_from_row(row)
     }
 
+    async fn record_worker_heartbeat(
+        &self,
+        request: &WorkerHeartbeatRequest,
+    ) -> Result<(), StoreError> {
+        sqlx::query(
+            "INSERT INTO crono.worker_presence
+                (worker_id, session_id, queue, concurrency, version)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (worker_id) DO UPDATE SET
+                session_id = EXCLUDED.session_id,
+                queue = EXCLUDED.queue,
+                concurrency = EXCLUDED.concurrency,
+                version = EXCLUDED.version,
+                started_at = CASE
+                    WHEN crono.worker_presence.session_id <> EXCLUDED.session_id
+                    THEN statement_timestamp()
+                    ELSE crono.worker_presence.started_at
+                END,
+                last_seen_at = statement_timestamp()",
+        )
+        .bind(&request.worker_id)
+        .bind(request.session_id)
+        .bind(&request.queue)
+        .bind(i32::from(request.concurrency))
+        .bind(&request.version)
+        .execute(&self.pool)
+        .await
+        .map_err(store_error)?;
+        Ok(())
+    }
+
+    async fn list_workers(
+        &self,
+        limit: u16,
+        after: Option<&str>,
+    ) -> Result<Page<WorkerRecord>, StoreError> {
+        let rows = sqlx::query_as::<_, WorkerRow>(
+            "SELECT wp.worker_id, wp.queue, wp.concurrency, wp.version,
+                    wp.started_at, wp.last_seen_at,
+                    count(a.id) FILTER (
+                        WHERE a.status = 'running'
+                          AND a.lease_expires_at > statement_timestamp()
+                    ) AS active_executions
+               FROM crono.worker_presence wp
+               LEFT JOIN crono.run_attempts a ON a.worker_id = wp.worker_id
+              WHERE ($1::text IS NULL OR wp.worker_id > $1)
+              GROUP BY wp.worker_id, wp.queue, wp.concurrency, wp.version,
+                       wp.started_at, wp.last_seen_at
+              ORDER BY wp.worker_id
+              LIMIT $2",
+        )
+        .bind(after)
+        .bind(i64::from(limit) + 1)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+        page(rows, limit, worker_from_row, |worker| {
+            worker.worker_id.clone()
+        })
+    }
+
     async fn overview(&self, visibility: &VisibilityScope) -> Result<Overview, StoreError> {
         if matches!(visibility, VisibilityScope::None) {
             return Ok(Overview {
@@ -1090,6 +1162,7 @@ impl ControlPlaneStore for PostgresStore {
         let expired_dispatches = reconcile_expired_dispatches(&mut transaction, limit).await?;
         let due_retries = reconcile_due_retries(&mut transaction, limit).await?;
         let expired_leases = reconcile_expired_leases(&mut transaction, limit).await?;
+        let expired_workers = remove_expired_worker_presence(&mut transaction, limit).await?;
         sqlx::query(
             "UPDATE crono.outbox SET claimed_by = NULL, claim_expires_at = NULL
               WHERE published_at IS NULL AND cancelled_at IS NULL
@@ -1102,7 +1175,8 @@ impl ControlPlaneStore for PostgresStore {
         u64::try_from(
             expired_leases
                 .saturating_add(due_retries)
-                .saturating_add(expired_dispatches),
+                .saturating_add(expired_dispatches)
+                .saturating_add(expired_workers),
         )
         .map_err(|_| StoreError::Internal)
     }
@@ -1138,6 +1212,31 @@ impl ControlPlaneStore for PostgresStore {
             worker_active: row.4,
         })
     }
+}
+
+async fn remove_expired_worker_presence(
+    transaction: &mut Transaction<'_, Postgres>,
+    limit: u16,
+) -> Result<usize, StoreError> {
+    let rows = sqlx::query_scalar::<_, String>(
+        "WITH expired AS (
+            SELECT worker_id
+              FROM crono.worker_presence
+             WHERE last_seen_at < statement_timestamp() - interval '7 days'
+             ORDER BY last_seen_at
+             LIMIT $1
+             FOR UPDATE SKIP LOCKED
+         )
+         DELETE FROM crono.worker_presence wp
+          USING expired
+          WHERE wp.worker_id = expired.worker_id
+         RETURNING wp.worker_id",
+    )
+    .bind(i64::from(limit))
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(store_error)?;
+    Ok(rows.len())
 }
 
 async fn reconcile_expired_dispatches(
@@ -1720,6 +1819,19 @@ fn run_from_row(row: RunRow) -> Result<RunRecord, StoreError> {
         target_namespace: NamespaceName::parse(&row.target_namespace)
             .map_err(invalid_database_name)?,
         target_name: ResourceName::parse(&row.target_name).map_err(invalid_database_name)?,
+    })
+}
+
+fn worker_from_row(row: WorkerRow) -> Result<WorkerRecord, StoreError> {
+    Ok(WorkerRecord {
+        worker_id: row.worker_id,
+        queue: row.queue,
+        concurrency: u16::try_from(row.concurrency).map_err(|_| StoreError::Internal)?,
+        version: row.version,
+        started_at: row.started_at,
+        last_seen_at: row.last_seen_at,
+        active_executions: u64::try_from(row.active_executions)
+            .map_err(|_| StoreError::Internal)?,
     })
 }
 

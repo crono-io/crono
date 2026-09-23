@@ -9,8 +9,9 @@ the GUI.
 The application uses a dark infrastructure-style sidebar, compact top toolbar,
 and light routed workspace as its baseline visual language. Overview displays
 authorized live counts. Namespaces, Jobs, and Targets provide creation and list
-workflows, while Runs submits qualified resources and displays durable dispatch
-state. Reserved pages continue to use truthful empty states.
+workflows, Runs submits qualified resources and displays durable dispatch state,
+and Workers shows heartbeat-derived presence and capacity. Reserved pages use
+truthful empty states.
 
 ## Development
 

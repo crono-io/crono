@@ -8,7 +8,7 @@
 - `crates/telemetry`: shared native logging and optional OTLP export.
 - `services/*/tests` and `apps/cli/tests`: integration tests; `tests/support/telemetry.rs`: shared collector checks. Unit tests sit beside implementation code.
 
-Follow `CLI_ARCHITECTURE.md`: commands define arguments, dispatch selects typed actions, and binaries execute them. The server starts its API directly; the worker's scaffolded `run` command intentionally reports an unimplemented runtime.
+Follow `CLI_ARCHITECTURE.md`: commands define arguments, dispatch selects typed actions, and binaries execute them. The server starts its API directly; the worker's `run` command starts its presence heartbeat and bounded JetStream execution loop.
 
 ## Documentation Requirements
 
@@ -66,7 +66,7 @@ Fix findings instead of weakening lints or adding production suppressions such a
 
 ## Testing Guidelines
 
-Use Rust/Tokio tests with behavioral names such as `run_reports_unimplemented_runtime`. Cover failure paths and add regression tests for fixes. Telemetry tests require localhost sockets. Verify GUI changes with a Trunk build and browser inspection; native checks only compile its tooling entrypoint.
+Use Rust/Tokio tests with behavioral names such as `run_reports_unavailable_nats`. Cover failure paths and add regression tests for fixes. Telemetry tests require localhost sockets. Verify GUI changes with a Trunk build and browser inspection; native checks only compile its tooling entrypoint.
 
 ## Commit & Pull Request Guidelines
 

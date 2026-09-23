@@ -60,6 +60,18 @@ pub struct RunRecord {
     pub target_name: crate::domain::ResourceName,
 }
 
+/// Authoritative presence and current execution count for one worker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerRecord {
+    pub worker_id: String,
+    pub queue: String,
+    pub concurrency: u16,
+    pub version: String,
+    pub started_at: time::OffsetDateTime,
+    pub last_seen_at: time::OffsetDateTime,
+    pub active_executions: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleRecord {
     pub schedule: Schedule,

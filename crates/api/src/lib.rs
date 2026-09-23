@@ -263,6 +263,30 @@ pub struct RunResource {
     pub terminal_reason: Option<String>,
 }
 
+/// Server-derived liveness of a worker's presence heartbeat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum WorkerStatus {
+    Online,
+    Stale,
+    Offline,
+}
+
+/// Public worker presence without NATS credentials or execution payloads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WorkerResource {
+    pub worker_id: String,
+    pub queue: String,
+    pub concurrency: u16,
+    pub version: String,
+    pub status: WorkerStatus,
+    pub started_at: String,
+    pub last_seen_at: String,
+    pub active_executions: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OverviewResource {
@@ -329,6 +353,21 @@ pub struct ClaimResponse {
 pub struct LeaseRequest {
     pub attempt_id: Uuid,
     pub worker_id: String,
+}
+
+/// Presence metadata refreshed by one worker process session.
+///
+/// The session identifier lets the server distinguish a restarted process that
+/// deliberately reuses a stable worker ID from another heartbeat in the same
+/// process lifetime.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerHeartbeatRequest {
+    pub worker_id: String,
+    pub session_id: Uuid,
+    pub queue: String,
+    pub concurrency: u16,
+    pub version: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

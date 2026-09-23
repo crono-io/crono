@@ -8,7 +8,7 @@
 use crono_api::{
     CreateJobRequest, CreateNamespaceRequest, CreateRunRequest, CreateTargetRequest, ErrorEnvelope,
     ExecutorKind, JobResource, NamespaceResource, OverviewResource, Page, RunResource,
-    TargetResource,
+    TargetResource, WorkerResource,
 };
 use gloo_net::http::{Request, Response};
 use serde::{Serialize, de::DeserializeOwned};
@@ -91,6 +91,10 @@ pub async fn create_run(job: String, target: String) -> ApiResult<RunResource> {
         },
     )
     .await
+}
+
+pub async fn list_workers() -> ApiResult<Page<WorkerResource>> {
+    get(&format!("{API_ROOT}/workers?limit=100")).await
 }
 
 async fn get<T: DeserializeOwned>(url: &str) -> ApiResult<T> {

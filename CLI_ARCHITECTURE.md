@@ -32,8 +32,8 @@ services/server/src/
     └── telemetry.rs
 ```
 
-The worker retains the same CLI directories with `actions/run.rs` and its intentionally unfinished
-`run` command.
+The worker retains the same CLI directories with `actions/run.rs`; its `run` command maintains
+presence heartbeats while consuming bounded JetStream batches and executing claimed work.
 
 `commands::new()` contains clap definitions only. For the server it defines `--port` (also read from
 `CRONO_SERVER_PORT`, default `8080`) and repeatable `-v`; invoking `crono-server` directly starts the
@@ -47,9 +47,9 @@ routing and any validation that spans multiple arguments. The server produces
 `Action::Server(server::Args)`; the worker produces `Action::Run`.
 
 `actions::server::execute()` starts the HTTP application and reports listener failures through
-structured logging. `actions::run::execute()` in the worker continues to return the documented
-unfinished-runtime error. Command definitions and startup orchestration stay free of application
-logic.
+structured logging. `actions::run::execute()` connects to NATS, reports worker presence, and runs
+the durable pull consumer until shutdown. Command definitions and startup orchestration stay free
+of application logic.
 
 `cli::start() -> Result<Action>` performs setup in order:
 

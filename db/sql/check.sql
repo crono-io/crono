@@ -92,6 +92,7 @@ BEGIN
         'crono.schedules',
         'crono.runs',
         'crono.run_attempts',
+        'crono.worker_presence',
         'crono.outbox',
         'crono.run_events',
         'crono.schedule_events'

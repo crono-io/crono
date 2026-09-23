@@ -1,14 +1,16 @@
 //! Server-mediated worker claims over NATS request/reply.
 //!
 //! Workers never receive PostgreSQL credentials. A queue subscription lets any
-//! server instance conditionally claim, renew, or complete an Attempt against
-//! authoritative state. The worker identity is repeated in the subject and
-//! payload to prevent accidental cross-worker lease operations; production
-//! deployments must additionally enforce these subjects with NATS credentials.
+//! server instance conditionally changes an Attempt against authoritative state.
+//! Presence uses a separate subject so an older control subscriber cannot steal
+//! and reject new heartbeat operations during a rolling deployment. The worker
+//! identity is repeated in each subject and payload to prevent accidental
+//! cross-worker operations; production deployments must additionally enforce
+//! these subjects with NATS credentials.
 
 use super::NatsPublisher;
 use crate::application::ControlPlaneStore;
-use crono_api::{ClaimRequest, CompletionRequest, LeaseRequest};
+use crono_api::{ClaimRequest, CompletionRequest, LeaseRequest, WorkerHeartbeatRequest};
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::{sync::Arc, time::Duration};
@@ -18,6 +20,8 @@ use tracing::{info, warn};
 
 const CONTROL_SUBJECT: &str = "crono.worker.control.*.*";
 const CONTROL_QUEUE: &str = "crono-server-control";
+const PRESENCE_SUBJECT: &str = "crono.worker.presence.*";
+const PRESENCE_QUEUE: &str = "crono-server-presence";
 
 /// Serve worker state transitions whenever NATS is connected.
 pub async fn run_worker_control(
@@ -47,6 +51,17 @@ pub async fn run_worker_control(
                 continue;
             }
         };
+        let mut presence = match client
+            .queue_subscribe(PRESENCE_SUBJECT, PRESENCE_QUEUE.to_string())
+            .await
+        {
+            Ok(messages) => messages,
+            Err(error) => {
+                warn!(%error, "failed to subscribe to worker presence subjects");
+                time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
         loop {
             tokio::select! {
                 () = cancellation.cancelled() => break,
@@ -54,8 +69,16 @@ pub async fn run_worker_control(
                     let Some(message) = message else {
                         break;
                     };
-                    if let Err(error) = handle(&store, &client, message).await {
+                    if let Err(error) = handle_control(&store, &client, message).await {
                         warn!(%error, "worker control request failed");
+                    }
+                }
+                message = presence.next() => {
+                    let Some(message) = message else {
+                        break;
+                    };
+                    if let Err(error) = handle_presence(&store, &client, message).await {
+                        warn!(%error, "worker presence request failed");
                     }
                 }
             }
@@ -63,7 +86,7 @@ pub async fn run_worker_control(
     }
 }
 
-async fn handle(
+async fn handle_control(
     store: &Arc<dyn ControlPlaneStore>,
     client: &async_nats::Client,
     message: async_nats::Message,
@@ -101,6 +124,56 @@ async fn handle(
     Ok(())
 }
 
+async fn handle_presence(
+    store: &Arc<dyn ControlPlaneStore>,
+    client: &async_nats::Client,
+    message: async_nats::Message,
+) -> anyhow::Result<()> {
+    let Some(reply) = message.reply.clone() else {
+        return Ok(());
+    };
+    let subject_worker = message
+        .subject
+        .as_str()
+        .split('.')
+        .nth(3)
+        .unwrap_or_default();
+    let request: WorkerHeartbeatRequest = serde_json::from_slice(&message.payload)?;
+    validate_heartbeat(&request, subject_worker)?;
+    store.record_worker_heartbeat(&request).await?;
+    respond(client, reply, &true).await
+}
+
+/// Validate presence metadata at the server trust boundary.
+///
+/// The subject identity must agree with the payload, while worker IDs and queues
+/// remain restricted to the same single-token grammar used by dispatch subjects.
+fn validate_heartbeat(
+    request: &WorkerHeartbeatRequest,
+    subject_worker: &str,
+) -> anyhow::Result<()> {
+    if request.worker_id != subject_worker {
+        anyhow::bail!("worker identity does not match control subject");
+    }
+    for (value, label) in [(&request.worker_id, "worker ID"), (&request.queue, "queue")] {
+        let valid = !value.is_empty()
+            && value.len() <= 63
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+        if !valid {
+            anyhow::bail!("{label} must be a lowercase NATS-safe token");
+        }
+    }
+    if !(1..=256).contains(&request.concurrency) {
+        anyhow::bail!("worker concurrency must be between 1 and 256");
+    }
+    if request.version.is_empty() || request.version.len() > 128 || request.version.contains('\0') {
+        anyhow::bail!("worker version must be a bounded, NUL-free value");
+    }
+    Ok(())
+}
+
 async fn respond<T: Serialize>(
     client: &async_nats::Client,
     reply: async_nats::Subject,
@@ -110,4 +183,39 @@ async fn respond<T: Serialize>(
         .publish(reply, serde_json::to_vec(response)?.into())
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_heartbeat;
+    use crono_api::WorkerHeartbeatRequest;
+    use uuid::Uuid;
+
+    fn request() -> WorkerHeartbeatRequest {
+        WorkerHeartbeatRequest {
+            worker_id: "worker-01".to_string(),
+            session_id: Uuid::now_v7(),
+            queue: "default".to_string(),
+            concurrency: 8,
+            version: "0.1.0".to_string(),
+        }
+    }
+
+    #[test]
+    fn heartbeat_requires_matching_bounded_identity_and_metadata() {
+        let valid = request();
+        assert!(validate_heartbeat(&valid, "worker-01").is_ok());
+
+        let mut mismatched = request();
+        mismatched.worker_id = "worker-02".to_string();
+        assert!(validate_heartbeat(&mismatched, "worker-01").is_err());
+
+        let mut invalid_queue = request();
+        invalid_queue.queue = "other.queue".to_string();
+        assert!(validate_heartbeat(&invalid_queue, "worker-01").is_err());
+
+        let mut invalid_concurrency = request();
+        invalid_concurrency.concurrency = 0;
+        assert!(validate_heartbeat(&invalid_concurrency, "worker-01").is_err());
+    }
 }
