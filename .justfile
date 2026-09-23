@@ -7,6 +7,18 @@ test:
   cargo test --locked --workspace
   cargo test --locked --workspace --all-features
 
+# Run real failure-mode checks. This intentionally stops and restarts crono-nats.
+integration-test: dev-infra
+  CRONO_TEST_DATABASE_URL=postgres://crono_runtime:change-me@127.0.0.1:5432/crono \
+    CRONO_TEST_NATS_URL=nats://127.0.0.1:4222 \
+    cargo test --locked -p crono-server --test nats_outage_recovery -- --ignored --nocapture
+
+# Measure bounded PostgreSQL scheduler/intent throughput (default: 100,000).
+load-test jobs="100000": postgres
+  CRONO_TEST_DATABASE_URL=postgres://crono_runtime:change-me@127.0.0.1:5432/crono \
+    CRONO_LOAD_RUNS="{{ jobs }}" \
+    cargo test --release --locked -p crono-server --test scheduler_load -- --ignored --nocapture
+
 # Ensure the local PostgreSQL 18 container is running and apply the canonical schema.
 postgres:
   #!/usr/bin/env bash

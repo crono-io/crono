@@ -1,64 +1,133 @@
-//! Run identity and the initial durable dispatch state machine.
+//! Durable logical execution state.
 //!
-//! A Run pins immutable execution inputs before an outbox message is visible.
-//! This slice stops after `JetStream` confirms dispatch; claims, leases, worker
-//! execution, and terminal outcomes remain separate future transitions.
+//! Run state is authoritative in PostgreSQL. `JetStream` may redeliver any
+//! attempt, so transitions are conditional and terminal Runs are immutable.
 
-use super::{JobVersionId, RunId, TargetId};
+use super::{JobId, RunId, ScheduleId, TargetId};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-/// Durable state implemented by the initial dispatcher.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunStatus {
     PendingDispatch,
-    Dispatched,
+    Queued,
+    Running,
+    RetryWait,
+    Succeeded,
+    Failed,
+    Dead,
+    Skipped,
+    Cancelled,
+    Unknown,
 }
 
-/// One idempotently requested execution awaiting or completing dispatch.
+impl RunStatus {
+    #[must_use]
+    pub const fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Succeeded
+                | Self::Failed
+                | Self::Dead
+                | Self::Skipped
+                | Self::Cancelled
+                | Self::Unknown
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Run {
     id: RunId,
-    request_id: Uuid,
-    job_version_id: JobVersionId,
+    request_id: Option<Uuid>,
+    schedule_id: Option<ScheduleId>,
+    job_id: JobId,
     target_id: TargetId,
     status: RunStatus,
+    scheduled_at: OffsetDateTime,
     created_at: OffsetDateTime,
-    dispatched_at: Option<OffsetDateTime>,
+    queued_at: Option<OffsetDateTime>,
+    started_at: Option<OffsetDateTime>,
+    completed_at: Option<OffsetDateTime>,
+    attempt_count: u16,
+    max_attempts: u16,
+    lateness_seconds: u64,
+    terminal_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunData {
+    pub id: RunId,
+    pub request_id: Option<Uuid>,
+    pub schedule_id: Option<ScheduleId>,
+    pub job_id: JobId,
+    pub target_id: TargetId,
+    pub status: RunStatus,
+    pub scheduled_at: OffsetDateTime,
+    pub created_at: OffsetDateTime,
+    pub queued_at: Option<OffsetDateTime>,
+    pub started_at: Option<OffsetDateTime>,
+    pub completed_at: Option<OffsetDateTime>,
+    pub attempt_count: u16,
+    pub max_attempts: u16,
+    pub lateness_seconds: u64,
+    pub terminal_reason: Option<String>,
 }
 
 impl Run {
     #[must_use]
-    pub const fn new(
-        id: RunId,
-        request_id: Uuid,
-        job_version_id: JobVersionId,
-        target_id: TargetId,
-        status: RunStatus,
-        created_at: OffsetDateTime,
-        dispatched_at: Option<OffsetDateTime>,
-    ) -> Self {
+    pub fn new(data: RunData) -> Self {
+        let RunData {
+            id,
+            request_id,
+            schedule_id,
+            job_id,
+            target_id,
+            status,
+            scheduled_at,
+            created_at,
+            queued_at,
+            started_at,
+            completed_at,
+            attempt_count,
+            max_attempts,
+            lateness_seconds,
+            terminal_reason,
+        } = data;
         Self {
             id,
             request_id,
-            job_version_id,
+            schedule_id,
+            job_id,
             target_id,
             status,
+            scheduled_at,
             created_at,
-            dispatched_at,
+            queued_at,
+            started_at,
+            completed_at,
+            attempt_count,
+            max_attempts,
+            lateness_seconds,
+            terminal_reason,
         }
     }
+
     #[must_use]
     pub const fn id(&self) -> RunId {
         self.id
     }
     #[must_use]
-    pub const fn request_id(&self) -> Uuid {
+    pub const fn request_id(&self) -> Option<Uuid> {
         self.request_id
     }
     #[must_use]
-    pub const fn job_version_id(&self) -> JobVersionId {
-        self.job_version_id
+    pub const fn schedule_id(&self) -> Option<ScheduleId> {
+        self.schedule_id
+    }
+    #[must_use]
+    pub const fn job_id(&self) -> JobId {
+        self.job_id
     }
     #[must_use]
     pub const fn target_id(&self) -> TargetId {
@@ -69,11 +138,39 @@ impl Run {
         self.status
     }
     #[must_use]
+    pub const fn scheduled_at(&self) -> OffsetDateTime {
+        self.scheduled_at
+    }
+    #[must_use]
     pub const fn created_at(&self) -> OffsetDateTime {
         self.created_at
     }
     #[must_use]
-    pub const fn dispatched_at(&self) -> Option<OffsetDateTime> {
-        self.dispatched_at
+    pub const fn queued_at(&self) -> Option<OffsetDateTime> {
+        self.queued_at
+    }
+    #[must_use]
+    pub const fn started_at(&self) -> Option<OffsetDateTime> {
+        self.started_at
+    }
+    #[must_use]
+    pub const fn completed_at(&self) -> Option<OffsetDateTime> {
+        self.completed_at
+    }
+    #[must_use]
+    pub const fn attempt_count(&self) -> u16 {
+        self.attempt_count
+    }
+    #[must_use]
+    pub const fn max_attempts(&self) -> u16 {
+        self.max_attempts
+    }
+    #[must_use]
+    pub const fn lateness_seconds(&self) -> u64 {
+        self.lateness_seconds
+    }
+    #[must_use]
+    pub fn terminal_reason(&self) -> Option<&str> {
+        self.terminal_reason.as_deref()
     }
 }

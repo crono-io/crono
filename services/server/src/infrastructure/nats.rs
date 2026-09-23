@@ -1,90 +1,170 @@
-//! `JetStream` publisher for durable Run dispatch messages.
+//! Reconnecting `JetStream` execution transport.
 //!
-//! Startup verifies or creates one bounded work-queue stream. Each outbox row
-//! supplies the message ID, allowing `JetStream`'s duplicate window to collapse
-//! retries after an acknowledgement is lost. Message subjects contain only a
-//! validated queue token created by the application layer.
+//! NATS is deliberately optional at server startup. A background manager
+//! connects, verifies the `WorkQueue` stream, and exposes a reusable context to
+//! bounded publishers and worker protocol responders. Losing NATS only delays
+//! dispatch because PostgreSQL retains every execution intent.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use async_nats::jetstream::{
     self,
+    context::traits::Publisher,
     message::PublishMessage,
-    stream::{Config, RetentionPolicy, StorageType},
+    stream::{Config, DiscardPolicy, RetentionPolicy, StorageType},
 };
-use std::time::Duration;
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
+use tokio::time;
+use tokio_util::sync::CancellationToken;
+use tracing::{info, warn};
 use uuid::Uuid;
 
-const STREAM_NAME: &str = "CRONO_DISPATCH";
+pub const STREAM_NAME: &str = "CRONO_DISPATCH";
+pub const DISPATCH_SUBJECTS: &str = "crono.dispatch.*";
 
-/// Connected `JetStream` publisher with a preconfigured dispatch stream.
 #[derive(Debug, Clone)]
 pub struct NatsPublisher {
-    context: jetstream::Context,
+    server_url: Arc<str>,
+    context: Arc<RwLock<Option<jetstream::Context>>>,
 }
 
 impl NatsPublisher {
-    /// Connect to NATS and ensure the durable dispatch stream exists.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when NATS or `JetStream` is unavailable or rejects the
-    /// bounded stream configuration.
-    pub async fn connect(server_url: &str) -> Result<Self> {
-        let client = async_nats::connect(server_url)
+    #[must_use]
+    pub fn new(server_url: &str) -> Self {
+        Self {
+            server_url: Arc::from(server_url),
+            context: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Maintain a reusable NATS connection and stream until shutdown.
+    pub async fn run_connection_manager(&self, cancellation: CancellationToken) {
+        loop {
+            tokio::select! {
+                () = cancellation.cancelled() => {
+                    self.clear();
+                    info!("NATS connection manager stopped");
+                    return;
+                }
+                () = time::sleep(Duration::from_secs(2)) => {
+                    if self.ready().await {
+                        continue;
+                    }
+                    self.clear();
+                    match self.connect_once().await {
+                        Ok(context) => {
+                            self.replace(context);
+                            info!("NATS JetStream execution transport is available");
+                        }
+                        Err(error) => warn!(%error, "NATS unavailable; durable dispatch remains in PostgreSQL"),
+                    }
+                }
+            }
+        }
+    }
+
+    async fn connect_once(&self) -> Result<jetstream::Context> {
+        let client = async_nats::ConnectOptions::new()
+            .max_reconnects(None)
+            .connect(self.server_url.as_ref())
             .await
             .context("failed to connect to NATS")?;
         let context = jetstream::new(client);
         context
-            .get_or_create_stream(Config {
+            .create_or_update_stream(Config {
                 name: STREAM_NAME.to_string(),
-                description: Some("Crono durable Run dispatches".to_string()),
-                subjects: vec!["crono.dispatch.*".to_string()],
+                description: Some("Crono durable execution dispatches".to_string()),
+                subjects: vec![DISPATCH_SUBJECTS.to_string()],
                 retention: RetentionPolicy::WorkQueue,
                 storage: StorageType::File,
-                max_messages: 10_000,
-                max_bytes: 64 * 1024 * 1024,
-                max_age: Duration::from_hours(24),
+                discard: DiscardPolicy::New,
+                max_bytes: 8 * 1024 * 1024 * 1024,
                 max_message_size: 64 * 1024,
-                duplicate_window: Duration::from_mins(2),
+                duplicate_window: Duration::from_secs(120),
+                num_replicas: nats_replicas(),
                 ..Config::default()
             })
             .await
-            .context("failed to ensure the Crono JetStream dispatch stream")?;
-        Ok(Self { context })
+            .context("failed to ensure the Crono execution stream")?;
+        Ok(context)
     }
 
-    /// Publish one outbox payload and wait for a durable stream acknowledgement.
-    ///
-    /// The dispatch UUID is sent as `Nats-Msg-Id`; retrying the same row during
-    /// the stream duplicate window therefore returns an acknowledgement without
-    /// storing a second message.
+    /// Publish one execution event and wait for its persistence acknowledgement.
     ///
     /// # Errors
     ///
-    /// Returns an error unless both publication and acknowledgement succeed.
+    /// Returns when there is no active connection or `JetStream` does not confirm
+    /// durable persistence.
     pub async fn publish(
         &self,
         subject: String,
         payload: Vec<u8>,
-        dispatch_id: Uuid,
+        attempt_id: Uuid,
     ) -> Result<u64> {
-        let acknowledgement = self
-            .context
-            .send_publish(
-                subject,
-                PublishMessage::build()
-                    .message_id(dispatch_id.to_string())
-                    .payload(payload.into()),
-            )
+        let context = self.current()?;
+        let message = PublishMessage::build()
+            .message_id(attempt_id.to_string())
+            .payload(payload.into())
+            .outbound_message(subject);
+        let acknowledgement = context
+            .publish_message(message)
             .await
-            .context("failed to publish a Run dispatch")?
+            .context("failed to publish an execution dispatch")?
             .await
-            .context("JetStream did not acknowledge a Run dispatch")?;
+            .context("JetStream did not acknowledge an execution dispatch")?;
         Ok(acknowledgement.sequence)
     }
 
-    /// Probe the `JetStream` account with a bounded client request timeout.
+    /// Probe transport health without changing server readiness.
     pub async fn ready(&self) -> bool {
-        self.context.query_account().await.is_ok()
+        let Ok(context) = self.current() else {
+            return false;
+        };
+        context.get_stream(STREAM_NAME).await.is_ok()
     }
+
+    /// Return the connected Core NATS client used by worker control handlers.
+    ///
+    /// # Errors
+    ///
+    /// Returns when NATS is currently disconnected.
+    pub fn client(&self) -> Result<async_nats::Client> {
+        Ok(self.current()?.client())
+    }
+
+    fn current(&self) -> Result<jetstream::Context> {
+        self.context
+            .read()
+            .map_err(|_| anyhow!("NATS connection state lock is poisoned"))?
+            .clone()
+            .ok_or_else(|| anyhow!("NATS is not connected"))
+    }
+
+    fn replace(&self, context: jetstream::Context) {
+        match self.context.write() {
+            Ok(mut slot) => {
+                *slot = Some(context);
+                crate::metrics::global().nats_connected.set(1);
+            }
+            Err(error) => warn!(%error, "failed to store NATS connection state"),
+        }
+    }
+
+    fn clear(&self) {
+        crate::metrics::global().nats_connected.set(0);
+        match self.context.write() {
+            Ok(mut slot) => *slot = None,
+            Err(error) => warn!(%error, "failed to clear NATS connection state"),
+        }
+    }
+}
+
+fn nats_replicas() -> usize {
+    std::env::var("CRONO_NATS_REPLICAS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|value| matches!(value, 1 | 3 | 5))
+        .unwrap_or(1)
 }

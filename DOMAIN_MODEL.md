@@ -1,195 +1,51 @@
 # Workload domain model
 
-Crono organizes executor-agnostic workloads around a strict separation between
-what should happen and where it should happen:
-
-> Crono models WHAT to execute separately from WHERE to execute it. Jobs describe behavior;
-> Targets describe execution destinations/resources. Executor-specific concepts such as Ansible
-> inventory remain outside the core domain.
+Crono's draft model separates what runs from where it runs, then snapshots both when durable execution intent is created.
 
 ```text
 Namespace
-   |
-   +-- Job -> JobVersion
-   |
+   +-- Job
    +-- Target
-   |
-   +-- TargetSet
+   +-- Schedule -> occurrence
 
-JobVersion + Target/TargetSet + Inputs
-                    |
-                    v
-                   Run
-                    |
-               RunAttempt
-                    |
-                  Worker
-                    |
-                 Executor
+Job + Target + inputs
+         |
+         v
+        Run -> RunAttempt -> Worker
 ```
 
-`Job = what to do`, `Target = where or against what to do it`, and `Run = one
-requested execution`. A Namespace organizes these resources but does not take
-part in execution. A TargetSet is only a named, explicit set of Targets in the
-same Namespace; it is not a placement rule, label selector, or worker group.
-Whether a TargetSet request creates one Run or fans out to several Runs remains
-undefined until Run semantics are designed.
+A Namespace is the ownership and authorization boundary for names. A Job is a directly editable execution definition containing an executor, queue, executable and arguments, idempotency declaration, and retry policy. A Target contains destination-specific arguments. A Schedule refers to one Job and Target in the same Namespace. Database triggers reject cross-Namespace references even if an adapter is faulty.
 
-## Identities and names
+This draft deliberately has no JobVersion, TargetVersion, ScheduleVersion, `/api/v1`, or schema-version field in dispatch messages. Editing a catalog object affects only future Runs. Every Run stores an immutable execution snapshot, so already committed work and history do not change when the Job or Target is edited.
 
-Namespace and resource names are lowercase path-safe segments. They begin and
-end with an ASCII letter or digit and may contain lowercase ASCII letters,
-digits, and hyphens. Examples include `mariadb`, `database-prod`, `backup`, and
-`host-123`; empty names, path traversal, slashes, spaces, uppercase letters,
-underscores, and leading or trailing hyphens are rejected by one domain
-validator.
+## Identities and occurrence uniqueness
 
-The domain uses separate `NamespaceId`, `JobId`, `TargetId`, and `TargetSetId`
-types as stable internal identities. External interfaces may derive canonical
-qualified names such as `mariadb/backup` and `mariadb/host-123` from the owning
-Namespace and resource name. The qualified string is not stored as another
-identity and cannot be derived across mismatched Namespace relationships.
+Names are lowercase canonical resource names and are unique inside their Namespace. Internal identities are UUIDv7 values. A manual Run uses the request UUID as an idempotency key: replaying the same request and definition returns the existing Run, while reusing the key for different work is a conflict.
 
-## Concepts
+A scheduled occurrence is identified by `(schedule_id, scheduled_at)`. PostgreSQL enforces that pair as unique. Scheduler claims improve concurrency, but this constraint is the final correctness boundary during failover or competing scheduler instances.
 
-| Concept | Meaning |
-| --- | --- |
-| Namespace | Logical organizational boundary containing Jobs, Targets, and Target Sets |
-| Job | Stable identity for what Crono should execute, independent of any destination |
-| JobVersion | Immutable execution definition belonging to a Job |
-| Target | Stable identity for where or against what a Job executes |
-| TargetSet | Named explicit selection of unique Targets from one Namespace |
-| Run | One requested execution with inputs and pinned definitions |
-| RunAttempt | One attempt to perform a Run, with its own worker assignment and outcome |
-| Worker | Identified execution process serving authorized queues |
-| Executor | Runtime adapter that interprets a pinned execution specification |
+Each logical Run can have multiple Attempts. Message redelivery for an existing Attempt never allocates another Attempt. Execution retry does: the old Attempt remains immutable audit history and a transaction creates the next Attempt plus its outbox event.
 
-The first vertical slice persists organizational identities and relationships,
-immutable no-op Job versions, and Runs through acknowledged dispatch. `Target`
-deliberately has no generic JSON configuration field. When an executor
-configuration contract exists, the appropriate execution layer will interpret
-it; core types will not gain Ansible-, SSH-, database-, Kubernetes-, or
-Terraform-specific fields.
+## Schedule state
 
-## Mapping the initial Ansible use case
+A Schedule stores either a five-field cron expression with an IANA timezone or a one-shot UTC timestamp. It also persists `enabled`, `next_run_at`, `last_run_at`, misfire policy, catch-up policy and limits, revision, and short scheduler claim data. `next_run_at` is authoritative and indexed; it is not recomputed by scanning every Schedule.
 
-Given these files:
+The scheduler transaction validates claim ownership, evaluates one bounded plan, inserts executable or skipped Runs, inserts outbox rows for executable occurrences, advances the cursor, writes audit events, and commits. A rollback leaves none of those changes visible.
 
-```text
-inventories/mariadb/host-123.yml
-inventories/mariadb/host-124.yml
+## Run and Attempt state
 
-playbooks/mariadb/backup.yml
-playbooks/mariadb/restart.yml
-```
+A Run begins at `pending_dispatch`, becomes `queued` only after JetStream acknowledges persistence, and becomes `running` only after a PostgreSQL-backed worker claim. Success and non-retryable failure are terminal. Retryable execution failure uses `retry_wait`; the reconciler later creates another Attempt and returns the Run to `pending_dispatch`. `skipped`, `cancelled`, `dead`, and `unknown` preserve other terminal dispositions explicitly.
 
-the conceptual Crono model is:
+An Attempt separately records `pending_dispatch`, `queued`, `running`, and its terminal result, along with the worker, start/heartbeat/lease timestamps, bounded output, exit status, and error. The outbox links one-to-one to an Attempt and records publication attempts independently from execution attempts.
 
-```text
-Namespace: mariadb
+## Leases and idempotency
 
-Targets:
-    host-123
-    host-124
+The worker has no PostgreSQL credentials. It claims, renews, and completes through identity-scoped NATS request/reply subjects handled by the server. Every operation uses conditional state transitions in PostgreSQL. A healthy worker renews the database lease and JetStream ACK deadline independently.
 
-Jobs:
-    mariadb/backup
-    mariadb/restart
-```
+Lease expiry proves only that ownership was lost. It does not prove that a local process stopped or that a remote effect did not happen. Crono automatically creates another Attempt only for a Job declared idempotent and with attempts remaining. Otherwise the Run becomes `unknown`. Resource-specific idempotency keys or fencing must protect external systems when automatic retries are enabled.
 
-An execution request can select `mariadb/backup`, target
-`mariadb/host-123`, and inputs such as `full: true`. The inventory path is
-executor-specific target data interpreted later by the execution layer. The
-inventory file is not a Job, and Crono does not parse it in the core domain.
+## Trust boundary
 
-The same model supports Jobs and Targets such as
-`kubernetes/restart-deployment` with `kubernetes/prod-cluster`,
-`terraform/plan` with `terraform/network-prod`, and `postgres/backup` with
-`postgres/pg-cluster-01` without changing core types.
+Only the server accepts public control-plane requests and writes PostgreSQL. Only the server publishes execution dispatch. Workers consume authorized queues and use scoped control subjects; a payload's claimed `worker_id` is not sufficient authentication. Production broker credentials must restrict those subjects so the authenticated identity and subject identity agree.
 
-## Target reproducibility
-
-Mutable target configuration cannot safely be attached directly to Runs. For
-example, a target might refer to DB-A when a Run is created and later be edited
-to refer to DB-B before a retry. The retry must still be able to recover the
-exact definition selected by the original Run.
-
-`TargetVersion` is therefore a required future invariant, but is intentionally
-not implemented in the current identity-only model. There is no target
-configuration to version yet, and a shell version type would misleadingly
-suggest reproducibility is enforced. The current no-op Run pins the Target
-identity only. Before execution and retry semantics are finalized, a Run must
-instead pin the equivalent of:
-
-```text
-Run
-├── job_version_id
-├── target_version_id
-└── inputs
-```
-
-TargetSet versioning or membership snapshot semantics must be resolved as part
-of the same design. No current persistence fields or fan-out behavior are
-implied by this document.
-
-## Public client shape
-
-The browser information architecture follows the domain rather than an
-executor:
-
-```text
-Namespaces
-├── MariaDB
-│   ├── Jobs
-│   │   ├── Backup
-│   │   ├── Restart
-│   │   └── Upgrade
-│   ├── Targets
-│   │   ├── host-123
-│   │   ├── host-124
-│   │   └── host-125
-│   └── Target Sets
-│       ├── mariadb-prod
-│       └── mariadb-stage
-├── PostgreSQL
-└── Patroni
-```
-
-The eventual workflow is `Namespace -> Job -> Target or TargetSet -> Inputs ->
-Run`. Both the browser and CLI must express that workflow through the same
-public `crono-server` API and server-side application logic.
-
-Implemented public resource collections are:
-
-```text
-/api/v1/namespaces
-/api/v1/namespaces/:namespace/jobs
-/api/v1/namespaces/:namespace/targets
-/api/v1/runs
-```
-
-Target Set routes remain deferred with their snapshot and fan-out semantics.
-
-Potential CLI commands are:
-
-```sh
-crono namespace list
-crono namespace show mariadb
-
-crono job list --namespace mariadb
-crono job show mariadb/backup
-
-crono target list --namespace mariadb
-crono target show mariadb/host-123
-
-crono target-set list --namespace mariadb
-crono target-set show mariadb/mariadb-prod
-
-crono run mariadb/backup --target mariadb/host-123
-crono run mariadb/backup --target-set mariadb/mariadb-prod
-```
-
-The CLI commands still document intended organization rather than an
-implemented CLI transport. The browser uses the implemented HTTP resources via
-the transport-only `crono-api` crate. Neither public client may depend on server
-domain modules or bypass the HTTPS API.
+The process executor does not invoke a shell. Executables must be absolute, arguments remain structured, inputs are passed through a bounded temporary JSON file, and inherited environment is cleared except for an explicit locale/timezone allowlist. This reduces accidental injection but is not a sandbox: a worker process has the privileges and network access of its operating-system identity.

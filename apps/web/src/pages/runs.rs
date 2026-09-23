@@ -50,7 +50,18 @@ pub fn RunsPage() -> impl IntoView {
                 {move || runs.map(|result| match result {
                     Ok(page) if page.items.is_empty() => view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"No Runs yet."</p> }.into_any(),
                     Ok(page) => view! { <ul class="divide-y divide-crono-border">{page.items.iter().map(|run| {
-                        let status = match run.status { crono_api::RunStatus::PendingDispatch => "pending dispatch", crono_api::RunStatus::Dispatched => "dispatched" };
+                        let status = match run.status {
+                            crono_api::RunStatus::PendingDispatch => "pending dispatch",
+                            crono_api::RunStatus::Queued => "queued",
+                            crono_api::RunStatus::Running => "running",
+                            crono_api::RunStatus::RetryWait => "retry wait",
+                            crono_api::RunStatus::Succeeded => "succeeded",
+                            crono_api::RunStatus::Failed => "failed",
+                            crono_api::RunStatus::Dead => "dead",
+                            crono_api::RunStatus::Skipped => "skipped",
+                            crono_api::RunStatus::Cancelled => "cancelled",
+                            crono_api::RunStatus::Unknown => "unknown",
+                        };
                         view! {
                             <li class="grid gap-2 px-5 py-4 sm:grid-cols-[1fr_auto] sm:px-6">
                                 <div><p class="font-medium text-crono-text">{format!("{} → {}", run.job, run.target)}</p><code class="text-xs text-crono-muted">{run.id.to_string()}</code></div>

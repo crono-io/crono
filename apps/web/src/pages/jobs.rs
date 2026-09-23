@@ -3,7 +3,7 @@
 use crate::{api, components::PageHeader};
 use leptos::{prelude::*, task::spawn_local};
 
-/// Exercise immutable no-op Job version creation in one Namespace.
+/// Exercise direct no-op Job creation in one Namespace.
 #[component]
 pub fn JobsPage() -> impl IntoView {
     let namespace = RwSignal::new(String::new());
@@ -33,7 +33,7 @@ pub fn JobsPage() -> impl IntoView {
             feedback.set(Some("Enter a Namespace and Job name.".to_string()));
             return;
         }
-        feedback.set(Some("Creating Job version 1…".to_string()));
+        feedback.set(Some("Creating Job…".to_string()));
         spawn_local(async move {
             match api::create_job(&selected, job_name, queue_name).await {
                 Ok(job) => {
@@ -48,7 +48,7 @@ pub fn JobsPage() -> impl IntoView {
 
     view! {
         <div class="space-y-8">
-            <PageHeader title="Jobs" description="Jobs define what Crono dispatches. Version 1 is an immutable no-op definition for validating the control-plane flow." />
+            <PageHeader title="Jobs" description="Jobs define what Crono snapshots into each durable Run." />
             <section class="rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
                 <h2 class="text-base font-semibold text-crono-text">"Create no-op Job"</h2>
                 <form class="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_1fr_auto]" on:submit=submit>
@@ -67,7 +67,7 @@ pub fn JobsPage() -> impl IntoView {
                     Ok(page) => view! { <ul class="divide-y divide-crono-border">{page.items.iter().map(|job| view! {
                         <li class="grid gap-1 px-5 py-4 sm:grid-cols-[1fr_auto] sm:px-6">
                             <span class="font-medium text-crono-text">{job.qualified_name.clone()}</span>
-                            <span class="text-sm text-crono-muted">{format!("v{} · noop · {}", job.version.number, job.version.queue)}</span>
+                            <span class="text-sm text-crono-muted">{format!("{:?} · {}", job.executor, job.queue)}</span>
                         </li>
                     }).collect_view()}</ul> }.into_any(),
                     Err(error) => view! { <p class="px-6 py-10 text-center text-sm text-crono-failed">{error.clone()}</p> }.into_any(),

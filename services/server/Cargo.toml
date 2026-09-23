@@ -24,9 +24,14 @@ anyhow.workspace = true
 async-nats.workspace = true
 async-trait.workspace = true
 axum.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
 clap.workspace = true
+cron.workspace = true
 crono-api = { workspace = true, features = ["openapi"] }
 crono-telemetry.workspace = true
+futures-util.workspace = true
+prometheus-client.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 socket2.workspace = true

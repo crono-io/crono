@@ -39,7 +39,7 @@ host firewall rules appropriate for the environment. `just dev-start` runs the
 frontend and `crono-server` together, using ports `3000` and `8080`
 respectively. The server recipe also ensures the local PostgreSQL 18 and NATS
 JetStream containers are initialized and running. `Trunk.toml` proxies
-same-origin `/api/v1` requests to `http://127.0.0.1:8080`, avoiding development
+same-origin `/api` requests to `http://127.0.0.1:8080`, avoiding development
 CORS configuration while preserving the independently deployed client boundary.
 
 `trunk serve`, used by both `just web` and `just dev-start`, already watches the

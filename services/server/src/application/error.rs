@@ -42,7 +42,7 @@ impl From<StoreError> for ApplicationError {
     fn from(value: StoreError) -> Self {
         match value {
             StoreError::NotFound => Self::NotFound,
-            StoreError::Conflict => Self::Conflict,
+            StoreError::Conflict | StoreError::StaleRevision => Self::Conflict,
             StoreError::IdempotencyConflict => Self::IdempotencyConflict,
             StoreError::Unavailable => Self::Unavailable,
             StoreError::Internal => Self::Internal,

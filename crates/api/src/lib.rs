@@ -1,9 +1,8 @@
-//! Public transport contracts shared by Crono API clients and the server.
+//! Transport contracts shared by Crono clients, the server, and workers.
 //!
-//! These types describe JSON payloads only. They intentionally contain no
-//! domain behavior, persistence details, authentication claims, or server
-//! dependencies, allowing independently deployed clients to share the wire
-//! contract without crossing the control-plane boundary.
+//! HTTP resources are intentionally unversioned while Crono remains a draft.
+//! `JetStream` messages contain stable identifiers and immutable execution data
+//! remains in PostgreSQL, allowing the transport to be rebuilt safely.
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -12,84 +11,115 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct Page<T> {
-    /// Resources in stable server-defined order.
     pub items: Vec<T>,
-    /// Opaque cursor for the next page, or `None` at the end.
     pub next_cursor: Option<String>,
 }
 
-/// Request to create a Namespace.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateNamespaceRequest {
-    /// Canonical Namespace name.
     pub name: String,
 }
 
-/// Public Namespace representation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct NamespaceResource {
     pub id: Uuid,
     pub name: String,
-    /// RFC 3339 creation timestamp.
     pub created_at: String,
 }
 
-/// Request to create a Job and its immutable first version.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Executor selected by a Job and copied into every Run snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum ExecutorKind {
+    #[default]
+    Noop,
+    Process,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateJobRequest {
     pub name: String,
-    /// Dispatch queue; omitted values use `default`.
-    pub queue: Option<String>,
-}
-
-/// Supported immutable executor definitions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub enum ExecutorKind {
-    /// Development definition that is dispatchable but performs no work.
-    Noop,
-}
-
-/// Immutable Job definition selected by a Run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct JobVersionResource {
-    pub id: Uuid,
-    pub number: u32,
-    pub executor: ExecutorKind,
+    #[serde(default = "default_queue")]
     pub queue: String,
-    /// RFC 3339 creation timestamp.
-    pub created_at: String,
+    #[serde(default)]
+    pub executor: ExecutorKind,
+    pub executable: Option<String>,
+    #[serde(default)]
+    pub arguments: Vec<String>,
+    #[serde(default)]
+    pub idempotent: bool,
+    #[serde(default = "default_max_attempts")]
+    pub max_attempts: u16,
+    #[serde(default = "default_retry_initial_seconds")]
+    pub retry_initial_seconds: u32,
+    #[serde(default = "default_retry_max_seconds")]
+    pub retry_max_seconds: u32,
+    #[serde(default = "default_retry_multiplier")]
+    pub retry_multiplier: f64,
+    #[serde(default = "default_retry_jitter")]
+    pub retry_jitter: f64,
 }
 
-/// Public Job identity and current immutable version.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+fn default_queue() -> String {
+    "default".to_string()
+}
+
+const fn default_max_attempts() -> u16 {
+    1
+}
+
+const fn default_retry_initial_seconds() -> u32 {
+    1
+}
+
+const fn default_retry_max_seconds() -> u32 {
+    60
+}
+
+const fn default_retry_multiplier() -> f64 {
+    2.0
+}
+
+const fn default_retry_jitter() -> f64 {
+    0.2
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct JobResource {
     pub id: Uuid,
     pub namespace: String,
     pub name: String,
     pub qualified_name: String,
-    pub version: JobVersionResource,
-    /// RFC 3339 creation timestamp.
+    pub executor: ExecutorKind,
+    pub queue: String,
+    pub executable: Option<String>,
+    pub arguments: Vec<String>,
+    pub idempotent: bool,
+    pub max_attempts: u16,
+    pub retry_initial_seconds: u32,
+    pub retry_max_seconds: u32,
+    pub retry_multiplier: f64,
+    pub retry_jitter: f64,
     pub created_at: String,
+    pub updated_at: String,
 }
 
-/// Request to create an immutable identity-only Target.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateTargetRequest {
     pub name: String,
+    #[serde(default)]
+    pub arguments: Vec<String>,
 }
 
-/// Public Target representation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TargetResource {
@@ -97,11 +127,96 @@ pub struct TargetResource {
     pub namespace: String,
     pub name: String,
     pub qualified_name: String,
-    /// RFC 3339 creation timestamp.
+    pub arguments: Vec<String>,
     pub created_at: String,
+    pub updated_at: String,
 }
 
-/// Request to create an idempotent Run from canonical qualified names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum MisfirePolicy {
+    RunLate,
+    Skip,
+    GracePeriod,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum CatchupPolicy {
+    Skip,
+    #[default]
+    RunOnce,
+    CatchUp,
+}
+
+/// Request for either a cron schedule or a one-shot UTC execution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateScheduleRequest {
+    pub name: String,
+    pub job: String,
+    pub target: String,
+    pub cron_expression: Option<String>,
+    pub execute_at: Option<String>,
+    #[serde(default = "default_timezone")]
+    pub timezone: String,
+    pub misfire_policy: MisfirePolicy,
+    pub misfire_grace_seconds: Option<u32>,
+    #[serde(default)]
+    pub catchup_policy: CatchupPolicy,
+    #[serde(default = "default_catchup_runs")]
+    pub max_catchup_runs: u16,
+    #[serde(default = "default_catchup_age")]
+    pub max_catchup_age_seconds: u32,
+}
+
+fn default_timezone() -> String {
+    "UTC".to_string()
+}
+
+const fn default_catchup_runs() -> u16 {
+    100
+}
+
+const fn default_catchup_age() -> u32 {
+    86_400
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct ScheduleResource {
+    pub id: Uuid,
+    pub namespace: String,
+    pub name: String,
+    pub job: String,
+    pub target: String,
+    pub cron_expression: Option<String>,
+    pub execute_at: Option<String>,
+    pub timezone: String,
+    pub enabled: bool,
+    pub next_run_at: Option<String>,
+    pub last_run_at: Option<String>,
+    pub misfire_policy: MisfirePolicy,
+    pub misfire_grace_seconds: Option<u32>,
+    pub catchup_policy: CatchupPolicy,
+    pub max_catchup_runs: u16,
+    pub max_catchup_age_seconds: u32,
+    pub revision: u64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateScheduleRequest {
+    pub revision: u64,
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -111,49 +226,59 @@ pub struct CreateRunRequest {
     pub target: String,
 }
 
-/// Persisted Run dispatch state.
+/// Durable logical execution state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub enum RunStatus {
     PendingDispatch,
-    Dispatched,
+    Queued,
+    Running,
+    RetryWait,
+    Succeeded,
+    Failed,
+    Dead,
+    Skipped,
+    Cancelled,
+    Unknown,
 }
 
-/// Public Run representation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RunResource {
     pub id: Uuid,
-    pub request_id: Uuid,
+    pub request_id: Option<Uuid>,
+    pub schedule_id: Option<Uuid>,
     pub job: String,
     pub target: String,
-    pub job_version_id: Uuid,
     pub status: RunStatus,
-    /// RFC 3339 creation timestamp.
+    pub scheduled_at: String,
     pub created_at: String,
-    /// RFC 3339 dispatch timestamp.
-    pub dispatched_at: Option<String>,
+    pub queued_at: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub attempt_count: u16,
+    pub max_attempts: u16,
+    pub lateness_seconds: u64,
+    pub terminal_reason: Option<String>,
 }
 
-/// Exact counts visible to the current request principal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct OverviewResource {
     pub namespaces: u64,
     pub jobs: u64,
     pub targets: u64,
+    pub schedules: u64,
     pub runs: u64,
 }
 
-/// Stable JSON error envelope returned by every application endpoint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ErrorEnvelope {
     pub error: ErrorBody,
 }
 
-/// Machine-readable code and safe human-facing error detail.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ErrorBody {
@@ -161,14 +286,58 @@ pub struct ErrorBody {
     pub message: String,
 }
 
-/// Versioned durable message published for one committed Run.
+/// Minimal durable dispatch message; PostgreSQL owns all execution details.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct DispatchEnvelope {
-    pub schema_version: u16,
     pub dispatch_id: Uuid,
     pub run_id: Uuid,
-    pub job_version_id: Uuid,
-    pub target_id: Uuid,
+    pub attempt_id: Uuid,
     pub queue: String,
+}
+
+/// Immutable executable configuration returned only after a successful claim.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionSnapshot {
+    pub executor: ExecutorKind,
+    pub executable: Option<String>,
+    pub arguments: Vec<String>,
+    pub inputs: serde_json::Value,
+    pub idempotency_key: Uuid,
+    pub queue: String,
+    pub idempotent: bool,
+    pub retry_initial_seconds: u32,
+    pub retry_max_seconds: u32,
+    pub retry_multiplier: f64,
+    pub retry_jitter: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimRequest {
+    pub run_id: Uuid,
+    pub attempt_id: Uuid,
+    pub worker_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClaimResponse {
+    pub claimed: bool,
+    pub lease_seconds: u32,
+    pub execution: Option<ExecutionSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeaseRequest {
+    pub attempt_id: Uuid,
+    pub worker_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompletionRequest {
+    pub attempt_id: Uuid,
+    pub worker_id: String,
+    pub succeeded: bool,
+    pub exit_code: Option<i32>,
+    pub stdout_tail: String,
+    pub stderr_tail: String,
+    pub error: Option<String>,
 }

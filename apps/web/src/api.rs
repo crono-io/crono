@@ -1,19 +1,20 @@
 //! Browser-only client for the public Crono HTTP contract.
 //!
 //! All pages use this module instead of embedding transport details. Requests
-//! are same-origin under `/api/v1`; Trunk proxies that prefix during local
+//! are same-origin under `/api`; Trunk proxies that prefix during local
 //! development, while production can route it to the independently deployed
 //! server. Error envelopes are reduced to safe user-facing messages.
 
 use crono_api::{
     CreateJobRequest, CreateNamespaceRequest, CreateRunRequest, CreateTargetRequest, ErrorEnvelope,
-    JobResource, NamespaceResource, OverviewResource, Page, RunResource, TargetResource,
+    ExecutorKind, JobResource, NamespaceResource, OverviewResource, Page, RunResource,
+    TargetResource,
 };
 use gloo_net::http::{Request, Response};
 use serde::{Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
-const API_ROOT: &str = "/api/v1";
+const API_ROOT: &str = "/api";
 
 /// Browser-safe API failure message.
 pub type ApiResult<T> = Result<T, String>;
@@ -43,7 +44,16 @@ pub async fn create_job(namespace: &str, name: String, queue: String) -> ApiResu
         &format!("{API_ROOT}/namespaces/{namespace}/jobs"),
         &CreateJobRequest {
             name,
-            queue: (!queue.is_empty()).then_some(queue),
+            queue,
+            executor: ExecutorKind::Noop,
+            executable: None,
+            arguments: Vec::new(),
+            idempotent: false,
+            max_attempts: 1,
+            retry_initial_seconds: 1,
+            retry_max_seconds: 60,
+            retry_multiplier: 2.0,
+            retry_jitter: 0.2,
         },
     )
     .await
@@ -59,7 +69,10 @@ pub async fn list_targets(namespace: &str) -> ApiResult<Page<TargetResource>> {
 pub async fn create_target(namespace: &str, name: String) -> ApiResult<TargetResource> {
     post(
         &format!("{API_ROOT}/namespaces/{namespace}/targets"),
-        &CreateTargetRequest { name },
+        &CreateTargetRequest {
+            name,
+            arguments: Vec::new(),
+        },
     )
     .await
 }

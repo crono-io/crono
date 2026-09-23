@@ -16,6 +16,12 @@ pub use auth::{
     Principal, PrincipalKind, RequestContext, ResourceScope, VisibilityScope,
 };
 pub use error::ApplicationError;
-pub use model::{JobRecord, Overview, Page, RunRecord, TargetRecord};
+pub use model::{
+    CreateJobInput, CreateScheduleInput, JobRecord, Overview, Page, RunRecord, ScheduleRecord,
+    TargetRecord,
+};
 pub use service::{Application, CreateRunOutcome};
-pub use store::{ControlPlaneStore, OutboxRecord, StoreError};
+pub use store::{
+    ControlPlaneStore, JobDefinition, MetricsSnapshot, NewSchedule, OutboxRecord,
+    PlannedOccurrence, SchedulePlan, StoreError,
+};

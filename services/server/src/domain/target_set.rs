@@ -101,6 +101,8 @@ mod tests {
             TargetId::new(Uuid::from_u128(id)),
             namespace_id,
             ResourceName::parse(name)?,
+            Vec::new(),
+            OffsetDateTime::UNIX_EPOCH,
             OffsetDateTime::UNIX_EPOCH,
         ))
     }

@@ -1,84 +1,153 @@
-//! Job identity within a Namespace.
+//! Directly editable Job execution definitions.
 //!
-//! A Job describes what Crono should execute and never identifies a host,
-//! inventory, cluster, or other destination. Immutable `JobVersion` definitions
-//! will carry executable behavior once that contract is implemented.
+//! Crono's draft model does not expose Job versions. A scheduler or manual Run
+//! copies these fields into the Run's immutable execution snapshot, so editing
+//! a Job can affect future Runs without changing committed work.
 
-use super::{JobId, NamespaceId, ResourceName};
+use super::{JobId, NamespaceId, QueueName, ResourceName};
 use time::OffsetDateTime;
 
-/// Stable identity and Namespace relationship for executable behavior.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutorKind {
+    Noop,
+    Process,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Job {
     id: JobId,
     namespace_id: NamespaceId,
     name: ResourceName,
+    executor: ExecutorKind,
+    queue: QueueName,
+    executable: Option<String>,
+    arguments: Vec<String>,
+    idempotent: bool,
+    max_attempts: u16,
+    retry_initial_seconds: u32,
+    retry_max_seconds: u32,
+    retry_multiplier: f64,
+    retry_jitter: f64,
     created_at: OffsetDateTime,
+    updated_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct JobData {
+    pub id: JobId,
+    pub namespace_id: NamespaceId,
+    pub name: ResourceName,
+    pub executor: ExecutorKind,
+    pub queue: QueueName,
+    pub executable: Option<String>,
+    pub arguments: Vec<String>,
+    pub idempotent: bool,
+    pub max_attempts: u16,
+    pub retry_initial_seconds: u32,
+    pub retry_max_seconds: u32,
+    pub retry_multiplier: f64,
+    pub retry_jitter: f64,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
 }
 
 impl Job {
-    /// Construct a Job independently from any Target or execution request.
     #[must_use]
-    pub const fn new(
-        id: JobId,
-        namespace_id: NamespaceId,
-        name: ResourceName,
-        created_at: OffsetDateTime,
-    ) -> Self {
+    pub fn new(data: JobData) -> Self {
+        let JobData {
+            id,
+            namespace_id,
+            name,
+            executor,
+            queue,
+            executable,
+            arguments,
+            idempotent,
+            max_attempts,
+            retry_initial_seconds,
+            retry_max_seconds,
+            retry_multiplier,
+            retry_jitter,
+            created_at,
+            updated_at,
+        } = data;
         Self {
             id,
             namespace_id,
             name,
+            executor,
+            queue,
+            executable,
+            arguments,
+            idempotent,
+            max_attempts,
+            retry_initial_seconds,
+            retry_max_seconds,
+            retry_multiplier,
+            retry_jitter,
             created_at,
+            updated_at,
         }
     }
 
-    /// Return the stable internal identity.
     #[must_use]
     pub const fn id(&self) -> JobId {
         self.id
     }
-
-    /// Return the owning Namespace identity.
     #[must_use]
     pub const fn namespace_id(&self) -> NamespaceId {
         self.namespace_id
     }
-
-    /// Return the canonical name within its Namespace.
     #[must_use]
     pub const fn name(&self) -> &ResourceName {
         &self.name
     }
-
-    /// Return when the Job identity was created.
+    #[must_use]
+    pub const fn executor(&self) -> ExecutorKind {
+        self.executor
+    }
+    #[must_use]
+    pub const fn queue(&self) -> &QueueName {
+        &self.queue
+    }
+    #[must_use]
+    pub fn executable(&self) -> Option<&str> {
+        self.executable.as_deref()
+    }
+    #[must_use]
+    pub fn arguments(&self) -> &[String] {
+        &self.arguments
+    }
+    #[must_use]
+    pub const fn idempotent(&self) -> bool {
+        self.idempotent
+    }
+    #[must_use]
+    pub const fn max_attempts(&self) -> u16 {
+        self.max_attempts
+    }
+    #[must_use]
+    pub const fn retry_initial_seconds(&self) -> u32 {
+        self.retry_initial_seconds
+    }
+    #[must_use]
+    pub const fn retry_max_seconds(&self) -> u32 {
+        self.retry_max_seconds
+    }
+    #[must_use]
+    pub const fn retry_multiplier(&self) -> f64 {
+        self.retry_multiplier
+    }
+    #[must_use]
+    pub const fn retry_jitter(&self) -> f64 {
+        self.retry_jitter
+    }
     #[must_use]
     pub const fn created_at(&self) -> OffsetDateTime {
         self.created_at
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Job;
-    use crate::domain::{JobId, NamespaceId, ResourceName};
-    use anyhow::Result;
-    use time::OffsetDateTime;
-    use uuid::Uuid;
-
-    #[test]
-    fn jobs_capture_what_without_a_target_relationship() -> Result<()> {
-        let job = Job::new(
-            JobId::new(Uuid::from_u128(11)),
-            NamespaceId::new(Uuid::from_u128(1)),
-            ResourceName::parse("backup")?,
-            OffsetDateTime::UNIX_EPOCH,
-        );
-
-        assert_eq!(job.id(), JobId::new(Uuid::from_u128(11)));
-        assert_eq!(job.namespace_id(), NamespaceId::new(Uuid::from_u128(1)));
-        assert_eq!(job.name().as_str(), "backup");
-        assert_eq!(job.created_at(), OffsetDateTime::UNIX_EPOCH);
-        Ok(())
+    #[must_use]
+    pub const fn updated_at(&self) -> OffsetDateTime {
+        self.updated_at
     }
 }

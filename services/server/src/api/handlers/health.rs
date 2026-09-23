@@ -30,6 +30,10 @@ pub struct Health {
     pub name: String,
     /// Cargo package version.
     pub version: String,
+    /// PostgreSQL must be available for readiness.
+    pub database: &'static str,
+    /// NATS outages degrade dispatch without losing execution intent.
+    pub nats: &'static str,
 }
 
 #[utoipa::path(
@@ -81,15 +85,51 @@ pub async fn ready(State(state): State<AppState>) -> StatusCode {
 /// The JSON body contains only public package metadata. `X-App` repeats a
 /// compact identity for proxies and operational tooling without exposing
 /// runtime configuration.
-pub async fn health() -> impl IntoResponse {
+pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
+    let (database_ready, nats_ready) = tokio::join!(state.ready(), state.nats_ready());
     let health = Health {
         commit: commit_hash().to_string(),
         name: env!("CARGO_PKG_NAME").to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
+        database: if database_ready {
+            "available"
+        } else {
+            "unavailable"
+        },
+        nats: if nats_ready { "available" } else { "degraded" },
     };
     let headers = x_app_headers(&health);
 
     (StatusCode::OK, headers, Json(health))
+}
+
+#[utoipa::path(
+    get,
+    path = "/metrics",
+    responses((status = 200, description = "Prometheus OpenMetrics exposition")),
+    tag = "health"
+)]
+/// Expose bounded-cardinality operational metrics.
+pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
+    let _ = state.refresh_metrics().await;
+    match crate::metrics::global().encode() {
+        Ok(output) => (
+            StatusCode::OK,
+            [(
+                "content-type",
+                "application/openmetrics-text; version=1.0.0; charset=utf-8",
+            )],
+            output,
+        ),
+        Err(error) => {
+            error!(%error, "failed to encode Prometheus metrics");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [("content-type", "text/plain; charset=utf-8")],
+                "metrics encoding failed".to_string(),
+            )
+        }
+    }
 }
 
 /// Return the embedded source commit, falling back for source-archive builds.

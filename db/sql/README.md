@@ -6,8 +6,9 @@
 
 - `00_init.sql` creates the `crono` database, owner/runtime roles, and grants,
   then loads the schema.
-- `01_crono.sql` is the idempotent normalized schema baseline for Namespaces,
-  Jobs, immutable Job versions, Targets, Runs, and the transactional outbox.
+- `01_crono.sql` is the idempotent draft schema baseline for Namespaces, direct
+  Job and Target definitions, Schedules, Runs, Attempts, audit events, leases,
+  and the transactional outbox.
 - `container-entrypoint.sql` lets the official PostgreSQL image run the canonical
   bootstrap while keeping relative includes working.
 - `check.sql` verifies database ownership, role safety, schema ownership, and
@@ -57,12 +58,19 @@ The application role is `crono_runtime`. It can connect and manipulate objects
 created by `crono_owner`, but it cannot create schema objects. `crono_owner` is a
 non-login role reserved for bootstrap and migrations.
 
-Names are unique inside their owning Namespace. A Run pins one immutable Job
-version and one Target, and a constraint trigger rejects cross-Namespace
-combinations even if an adapter is faulty. The Run and its versioned JSON
-dispatch envelope are inserted in one transaction. The dispatcher marks both
-the outbox row and Run only after a JetStream acknowledgement; failed sends
-remain pending with bounded operational error text.
+Names are unique inside their owning Namespace. Constraint triggers reject
+cross-Namespace Job, Target, Schedule, and Run combinations even if an adapter
+is faulty. A Run stores an immutable execution snapshot. The scheduler or
+manual Run path inserts the Run, first Attempt, and outbox row in one
+transaction. The dispatcher marks the outbox, Attempt, and Run queued only
+after a JetStream persistence acknowledgement; failed sends remain pending
+with bounded operational error text and do not consume execution retries.
+
+This repository is still in its draft schema phase. There is no compatibility
+or numbered schema series: reset older development databases before applying
+the current baseline. `reset_all.sql` is the reversible local-development path.
+Production migration sequencing will be introduced before the schema is
+declared stable; the runtime role intentionally has no DDL privileges.
 
 The local PostgreSQL configuration lives in `db/config/postgres/postgresql.conf`.
 When using the official image, mount `db/` at `/db` and mount

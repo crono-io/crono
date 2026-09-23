@@ -1,7 +1,8 @@
 //! Crono execution-worker application boundary.
 //!
-//! The CLI translates startup arguments into typed actions. Runtime behavior is
-//! deliberately unfinished until the execution protocol is defined.
+//! The CLI translates startup arguments into a bounded `JetStream` pull worker.
+//! PostgreSQL remains behind the server-mediated claim protocol, so workers
+//! hold no database credentials.
 
 pub mod cli;
 

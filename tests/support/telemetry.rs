@@ -9,7 +9,7 @@ fn command() -> Command {
     command
         .env_clear()
         .env("RUST_LOG", "info")
-        .arg("run")
+        .args(["run", "--nats-url", "nats://127.0.0.1:1"])
         .kill_on_drop(true);
     command
 }
@@ -20,7 +20,7 @@ async fn no_endpoint_keeps_local_logging_available() -> Result<()> {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8(output.stderr)?;
     assert!(stderr.contains("\"level\":\"ERROR\""));
-    assert!(stderr.contains("runtime not implemented"));
+    assert!(stderr.contains("failed to connect worker to NATS"));
     assert!(!stderr.contains("Telemetry shutdown failed"));
     Ok(())
 }
@@ -36,7 +36,7 @@ async fn default_build_ignores_exporter_configuration() -> Result<()> {
     )
     .await??;
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8(output.stderr)?.contains("runtime not implemented"));
+    assert!(String::from_utf8(output.stderr)?.contains("failed to connect worker to NATS"));
     Ok(())
 }
 
@@ -109,7 +109,7 @@ mod otlp {
         .await??;
         assert_eq!(output.status.code(), Some(1));
         let stderr = String::from_utf8(output.stderr)?;
-        assert!(stderr.contains("runtime not implemented"));
+        assert!(stderr.contains("failed to connect worker to NATS"));
         assert!(!stderr.contains("Telemetry shutdown failed"), "{stderr}");
 
         let request = timeout(Duration::from_secs(2), receiver.recv())
@@ -157,7 +157,7 @@ mod otlp {
         assert_eq!(output.status.code(), Some(1));
         let stderr = String::from_utf8(output.stderr)?;
         assert!(stderr.contains("invalid OTEL_EXPORTER_OTLP_ENDPOINT"));
-        assert!(!stderr.contains("runtime not implemented"));
+        assert!(!stderr.contains("failed to connect worker to NATS"));
         Ok(())
     }
 
@@ -174,7 +174,7 @@ mod otlp {
         )
         .await??;
         assert_eq!(output.status.code(), Some(1));
-        assert!(String::from_utf8(output.stderr)?.contains("runtime not implemented"));
+        assert!(String::from_utf8(output.stderr)?.contains("failed to connect worker to NATS"));
         Ok(())
     }
 }

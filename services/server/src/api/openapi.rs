@@ -20,6 +20,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(health::live))
         .routes(routes!(health::ready))
         .routes(routes!(health::health))
+        .routes(routes!(health::metrics))
         .routes(routes!(
             control_plane::create_namespace,
             control_plane::list_namespaces
@@ -32,6 +33,14 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
             control_plane::list_targets
         ))
         .routes(routes!(control_plane::get_target))
+        .routes(routes!(
+            control_plane::create_schedule,
+            control_plane::list_schedules
+        ))
+        .routes(routes!(
+            control_plane::get_schedule,
+            control_plane::update_schedule
+        ))
         .routes(routes!(control_plane::create_run, control_plane::list_runs))
         .routes(routes!(control_plane::get_run))
         .routes(routes!(control_plane::overview));

@@ -5,7 +5,7 @@ public_url = "/"
 locked = true
 
 [[proxy]]
-backend = "http://127.0.0.1:8080/api/v1/"
+backend = "http://127.0.0.1:8080/api/"
 
 [tools]
 tailwindcss = "4.3.0"

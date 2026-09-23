@@ -3,7 +3,7 @@
 use crate::{
     api,
     application::{Application, ControlPlaneStore, PermitAllAuthorizer},
-    infrastructure::{NatsPublisher, PostgresStore},
+    infrastructure::{DispatcherConfig, NatsPublisher, PostgresStore},
 };
 use anyhow::{Context, Result};
 use std::{env, sync::Arc};
@@ -31,15 +31,15 @@ pub async fn execute(args: Args) -> Result<()> {
         .context("failed to initialize PostgreSQL control-plane storage")?;
     let store: Arc<dyn ControlPlaneStore> = Arc::new(postgres);
     let application = Application::new(Arc::clone(&store), Arc::new(PermitAllAuthorizer));
-    let publisher = NatsPublisher::connect(&nats_url)
-        .await
-        .context("failed to initialize NATS dispatch")?;
+    let publisher = NatsPublisher::new(&nats_url);
+    let dispatcher_config =
+        DispatcherConfig::from_env().context("failed to load outbox publisher configuration")?;
 
     tracing::warn!(
         principal = "development/local",
         "development authentication policy grants every defined capability"
     );
-    let result = api::serve(args.port, application, store, publisher).await;
+    let result = api::serve(args.port, application, store, publisher, dispatcher_config).await;
     if let Err(error) = &result {
         tracing::error!(%error, "Crono API server stopped with an error");
     }

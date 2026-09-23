@@ -92,6 +92,9 @@ pub enum Capability {
     TargetCreate,
     TargetRead,
     TargetUse,
+    ScheduleCreate,
+    ScheduleRead,
+    ScheduleUpdate,
     RunCreate,
     RunRead,
 }
@@ -103,6 +106,7 @@ pub enum ResourceScope {
     Namespace(String),
     Job { namespace: String, job: String },
     Target { namespace: String, target: String },
+    Schedule { namespace: String, schedule: String },
     Run(Uuid),
 }
 
@@ -208,6 +212,9 @@ mod tests {
             Capability::TargetCreate,
             Capability::TargetRead,
             Capability::TargetUse,
+            Capability::ScheduleCreate,
+            Capability::ScheduleRead,
+            Capability::ScheduleUpdate,
             Capability::RunCreate,
             Capability::RunRead,
         ];

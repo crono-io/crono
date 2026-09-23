@@ -2,7 +2,9 @@
 
 use crate::{
     application::{Application, ControlPlaneStore},
-    infrastructure::{NatsPublisher, run_dispatcher},
+    infrastructure::{DispatcherConfig, NatsPublisher, run_dispatcher, run_worker_control},
+    reconciliation::run_reconciler,
+    scheduler::run_scheduler,
 };
 use anyhow::{Context, Result};
 use axum::{Router, middleware};
@@ -43,6 +45,7 @@ pub async fn serve(
     application: Application,
     store: Arc<dyn ControlPlaneStore>,
     publisher: NatsPublisher,
+    dispatcher_config: DispatcherConfig,
 ) -> Result<()> {
     let (listener, listen_addr) = bind_listener(port)?;
     let listener = tokio::net::TcpListener::from_std(listener)
@@ -52,7 +55,29 @@ pub async fn serve(
     let app: Router = router.layer(TraceLayer::new_for_http());
 
     let cancellation = CancellationToken::new();
-    let dispatcher = tokio::spawn(run_dispatcher(store, publisher, cancellation.child_token()));
+    let connection_publisher = publisher.clone();
+    let connection_cancellation = cancellation.child_token();
+    let nats_manager = tokio::spawn(async move {
+        connection_publisher
+            .run_connection_manager(connection_cancellation)
+            .await;
+    });
+    let worker_control = tokio::spawn(run_worker_control(
+        Arc::clone(&store),
+        publisher.clone(),
+        cancellation.child_token(),
+    ));
+    let dispatcher = tokio::spawn(run_dispatcher(
+        Arc::clone(&store),
+        publisher,
+        dispatcher_config,
+        cancellation.child_token(),
+    ));
+    let scheduler = tokio::spawn(run_scheduler(
+        Arc::clone(&store),
+        cancellation.child_token(),
+    ));
+    let reconciler = tokio::spawn(run_reconciler(store, cancellation.child_token()));
 
     info!(address = %listen_addr, "Crono API listening over internal HTTP");
     let server = axum::serve(listener, app)
@@ -63,6 +88,18 @@ pub async fn serve(
     dispatcher
         .await
         .context("Run dispatch task failed during shutdown")?;
+    worker_control
+        .await
+        .context("worker control task failed during shutdown")?;
+    scheduler
+        .await
+        .context("scheduler task failed during shutdown")?;
+    reconciler
+        .await
+        .context("reconciler task failed during shutdown")?;
+    nats_manager
+        .await
+        .context("NATS connection task failed during shutdown")?;
     server
 }
 

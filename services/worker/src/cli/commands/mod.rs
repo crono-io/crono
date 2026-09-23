@@ -39,5 +39,32 @@ pub fn new() -> Command {
                 .action(ArgAction::Count)
                 .help("Increase logging verbosity: -v info, -vv debug, -vvv trace"),
         )
-        .subcommand(Command::new("run").about("Start the worker (not implemented yet)"))
+        .subcommand(
+            Command::new("run")
+                .about("Start the JetStream execution worker")
+                .arg(
+                    Arg::new("nats-url")
+                        .long("nats-url")
+                        .env("CRONO_NATS_URL")
+                        .default_value("nats://127.0.0.1:4222"),
+                )
+                .arg(
+                    Arg::new("queue")
+                        .long("queue")
+                        .env("CRONO_WORKER_QUEUE")
+                        .default_value("default"),
+                )
+                .arg(
+                    Arg::new("worker-id")
+                        .long("worker-id")
+                        .env("CRONO_WORKER_ID"),
+                )
+                .arg(
+                    Arg::new("concurrency")
+                        .long("concurrency")
+                        .env("CRONO_WORKER_CONCURRENCY")
+                        .value_parser(clap::value_parser!(u16).range(1..=256))
+                        .default_value("8"),
+                ),
+        )
 }

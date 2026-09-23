@@ -10,6 +10,9 @@ pub mod application;
 pub mod cli;
 pub mod domain;
 pub mod infrastructure;
+pub mod metrics;
+pub mod reconciliation;
+pub mod scheduler;
 
 /// Metadata captured at compilation; Git fields may be absent in source archives.
 pub mod built_info {

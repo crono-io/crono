@@ -9,20 +9,23 @@ fn openapi_contains_health_and_control_plane_contracts() -> Result<()> {
     let document = crono_server::api::openapi();
     assert_eq!(document.info.title, "crono-server");
     assert_eq!(document.info.version, env!("CARGO_PKG_VERSION"));
-    assert_eq!(document.paths.paths.len(), 12);
+    assert_eq!(document.paths.paths.len(), 15);
     for path in [
         "/live",
         "/ready",
         "/health",
-        "/api/v1/overview",
-        "/api/v1/namespaces",
-        "/api/v1/namespaces/{namespace}",
-        "/api/v1/namespaces/{namespace}/jobs",
-        "/api/v1/namespaces/{namespace}/jobs/{job}",
-        "/api/v1/namespaces/{namespace}/targets",
-        "/api/v1/namespaces/{namespace}/targets/{target}",
-        "/api/v1/runs",
-        "/api/v1/runs/{run_id}",
+        "/metrics",
+        "/api/overview",
+        "/api/namespaces",
+        "/api/namespaces/{namespace}",
+        "/api/namespaces/{namespace}/jobs",
+        "/api/namespaces/{namespace}/jobs/{job}",
+        "/api/namespaces/{namespace}/targets",
+        "/api/namespaces/{namespace}/targets/{target}",
+        "/api/namespaces/{namespace}/schedules",
+        "/api/namespaces/{namespace}/schedules/{schedule}",
+        "/api/runs",
+        "/api/runs/{run_id}",
     ] {
         assert!(document.paths.paths.contains_key(path));
     }

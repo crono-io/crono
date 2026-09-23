@@ -1,7 +1,10 @@
 //! Exercise CLI behavior through the actual process boundary.
 
 use anyhow::Result;
-use crono_worker::cli::{actions::Action, commands, dispatch};
+use crono_worker::cli::{
+    actions::{Action, run},
+    commands, dispatch,
+};
 use std::process::{Command, Output};
 
 fn invoke(args: &[&str]) -> Result<Output> {
@@ -62,11 +65,11 @@ fn missing_or_unknown_commands_are_rejected() -> Result<()> {
 }
 
 #[test]
-fn run_reports_unimplemented_runtime() -> Result<()> {
-    let output = invoke(&["run"])?;
+fn run_reports_unavailable_nats() -> Result<()> {
+    let output = invoke(&["run", "--nats-url", "nats://127.0.0.1:1"])?;
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
-    assert!(String::from_utf8(output.stderr)?.contains("crono-worker runtime not implemented"));
+    assert!(String::from_utf8(output.stderr)?.contains("failed to connect worker to NATS"));
     Ok(())
 }
 
@@ -74,12 +77,20 @@ fn run_reports_unimplemented_runtime() -> Result<()> {
 fn verbosity_and_run_dispatch_are_consistent() -> Result<()> {
     commands::new().debug_assert();
     for args in [
-        ["crono-worker", "-vv", "run"],
-        ["crono-worker", "run", "-vv"],
+        ["crono-worker", "-vv", "run", "--worker-id", "worker-01"],
+        ["crono-worker", "run", "--worker-id", "worker-01", "-vv"],
     ] {
         let matches = commands::new().try_get_matches_from(args)?;
         assert_eq!(matches.get_count("verbose"), 2);
-        assert_eq!(dispatch::handler(&matches)?, Action::Run);
+        assert_eq!(
+            dispatch::handler(&matches)?,
+            Action::Run(run::Args {
+                nats_url: "nats://127.0.0.1:4222".to_string(),
+                queue: "default".to_string(),
+                worker_id: "worker-01".to_string(),
+                concurrency: 8,
+            })
+        );
     }
     Ok(())
 }

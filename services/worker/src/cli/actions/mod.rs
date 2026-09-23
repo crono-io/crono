@@ -5,6 +5,6 @@ pub mod run;
 /// Operations selected by the command line.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action {
-    /// Start the service once its runtime is implemented.
-    Run,
+    /// Start the bounded `JetStream` execution worker.
+    Run(run::Args),
 }

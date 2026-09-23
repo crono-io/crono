@@ -88,10 +88,13 @@ BEGIN
     FOREACH relation IN ARRAY ARRAY[
         'crono.namespaces',
         'crono.jobs',
-        'crono.job_versions',
         'crono.targets',
+        'crono.schedules',
         'crono.runs',
-        'crono.outbox'
+        'crono.run_attempts',
+        'crono.outbox',
+        'crono.run_events',
+        'crono.schedule_events'
     ] LOOP
         IF to_regclass(relation) IS NULL THEN
             RAISE EXCEPTION 'Missing relation: %', relation;

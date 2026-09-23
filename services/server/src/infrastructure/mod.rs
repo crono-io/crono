@@ -8,7 +8,9 @@
 mod dispatcher;
 mod nats;
 mod postgres;
+mod worker_control;
 
-pub use dispatcher::run_dispatcher;
+pub use dispatcher::{DispatcherConfig, run_dispatcher};
 pub use nats::NatsPublisher;
 pub use postgres::PostgresStore;
+pub use worker_control::run_worker_control;
