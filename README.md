@@ -8,24 +8,28 @@ The project is still a draft. Its HTTP and messaging contracts are intentionally
 
 PostgreSQL is the source of truth for Jobs, Targets, Schedules, calculated `next_run_at` cursors, Runs, Attempts, retry state, leases, misfires, dispatch state, and audit history. JetStream is a durable, high-throughput execution transport; it is not the scheduler database.
 
-```text
-                    PostgreSQL
-                   source of truth
-                         |
-                 scheduler planner
-                         |
-               one short transaction
-                /                 \
-          Run + Attempt          outbox
-                                     |
-                            bounded publisher
-                                     |
-                                     v
-                         NATS JetStream
-                                     |
-                           durable pull consumer
-                                     |
-                              crono-worker
+```mermaid
+flowchart LR
+    Client["Web · CLI · API client"] -->|HTTP /api| API
+
+    subgraph Server["crono-server"]
+        API["HTTP API"] --> App["Application layer"]
+        Scheduler["Scheduler / planner"]
+        Publisher["Bounded outbox publisher"]
+        Control["Worker claim / lease control"]
+        Reconciler["Reconciler"]
+    end
+
+    App -->|"commit catalog or manual Run"| PG[("PostgreSQL<br/>authoritative state")]
+    Scheduler <-->|"claim due Schedules<br/>commit Run + Attempt + outbox"| PG
+    Publisher <-->|"claim / mark published"| PG
+    Reconciler <-->|"repair expired state"| PG
+    Control <-->|"conditional state transitions"| PG
+
+    Publisher -->|"crono.dispatch.&lt;queue&gt;<br/>wait for persistence ACK"| JS[("NATS JetStream<br/>CRONO_DISPATCH")]
+    JS -->|"durable bounded pull"| Worker["crono-worker"]
+    Worker -->|"claim · renew · complete"| Control
+    Worker -->|"ACK · NAK · in-progress"| JS
 ```
 
 Creating a Schedule or Run succeeds after PostgreSQL commits and does not require NATS to be reachable. The scheduler atomically records every selected occurrence and its outbox event. A publisher later claims outbox rows in bounded batches, waits for a JetStream persistence acknowledgement, and only then marks the Attempt and Run queued. A publish that succeeded immediately before a publisher crash can be repeated; the stable Attempt ID is used as `Nats-Msg-Id`, and PostgreSQL claim transitions remain the correctness boundary after JetStream's finite duplicate window.
@@ -39,6 +43,38 @@ durable execution intent
 ```
 
 Crono does not claim exactly-once external side effects. A worker can complete a remote operation and crash before PostgreSQL records success. An expired lease therefore retries automatically only when the Job is marked idempotent and attempts remain. A non-idempotent ambiguous execution becomes `unknown`, leaving operator or resource-specific reconciliation to decide what is safe.
+
+The normal scheduling and execution sequence is:
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Server as crono-server
+    participant PG as PostgreSQL
+    participant Scheduler
+    participant Publisher as Outbox publisher
+    participant JS as NATS JetStream
+    participant Worker
+
+    User->>Server: Create Job, Target, and Schedule over HTTP
+    Server->>PG: Commit durable definitions
+    Server-->>User: Success after PostgreSQL commit
+    Scheduler->>PG: Claim due Schedule (SKIP LOCKED)
+    Scheduler->>PG: Transaction: Run + Attempt + outbox + next_run_at
+    Publisher->>PG: Claim pending outbox batch
+    Publisher->>JS: Publish with Attempt ID as Nats-Msg-Id
+    JS-->>Publisher: Persistence acknowledgement
+    Publisher->>PG: Mark Attempt and Run queued
+    Worker->>JS: Pull within worker concurrency
+    Worker->>Server: Claim Attempt over NATS control subject
+    Server->>PG: Atomically grant execution lease
+    Server-->>Worker: Execution snapshot and lease
+    Worker->>Worker: Execute without a shell
+    Worker->>Server: Commit completion over NATS
+    Server->>PG: Persist terminal state
+    Server-->>Worker: Completion confirmed
+    Worker->>JS: ACK dispatch
+```
 
 ## Scheduling and misfires
 
@@ -60,14 +96,21 @@ Recurring backlog handling is independent of misfire handling:
 
 ## Execution state
 
-```text
-pending_dispatch -> queued -> running -> succeeded
-                                |
-                                +-> failed
-                                +-> retry_wait -> pending_dispatch
-                                +-> unknown
-
-terminal alternatives: skipped, cancelled, dead
+```mermaid
+stateDiagram-v2
+    [*] --> pending_dispatch: durable intent committed
+    pending_dispatch --> queued: JetStream persistence ACK
+    pending_dispatch --> skipped: misfire deadline expires
+    queued --> running: PostgreSQL claim succeeds
+    running --> succeeded: completion commits
+    running --> failed: permanent or exhausted failure
+    running --> retry_wait: retryable idempotent failure
+    running --> unknown: ambiguous non-idempotent lease loss
+    retry_wait --> pending_dispatch: retry time becomes due
+    succeeded --> [*]
+    failed --> [*]
+    skipped --> [*]
+    unknown --> [*]
 ```
 
 Execution retries and dispatch retries are separate. NATS unavailability only increments outbox publication attempts; it never consumes a Job execution attempt. Job retry policy exposes `max_attempts`, initial and maximum backoff, multiplier, and jitter. Each retry creates a new immutable Attempt and outbox event for the same logical Run.
@@ -98,6 +141,64 @@ Outbox drain controls are independent from worker concurrency:
 The reconciler is a bounded safety net. Indexed queries repair expired outbox claims, expire publication deadlines, create due execution retries, and resolve dead worker leases. The scheduler itself naturally revisits a past-due indexed cursor after a server or PostgreSQL interruption.
 
 During a NATS outage, Schedule creation continues and due scheduler transactions continue creating Runs, Attempts, and outbox rows. The outbox accumulates safely in PostgreSQL. On reconnect, independent publisher and worker bounds drain it without spawning one task per Run. `run_late`, `skip`, and `grace_period` decisions remain recorded in Runs and schedule events instead of being inferred from logs.
+
+```mermaid
+sequenceDiagram
+    participant Scheduler
+    participant PG as PostgreSQL
+    participant Publisher
+    participant NATS
+    participant Worker
+    participant Reconciler
+
+    Note over NATS: NATS unavailable
+    Scheduler->>PG: Schedule becomes due
+    Scheduler->>PG: Commit Run + Attempt + outbox
+    Publisher--xNATS: Publish fails
+    Publisher->>PG: Record dispatch failure and next retry
+    Note over PG: Execution intent remains durable
+
+    alt skip policy is already late
+        Scheduler->>PG: Record skipped Run and audit event
+    else grace deadline expires before publication
+        Reconciler->>PG: Mark Run skipped and cancel outbox row
+    else run_late remains eligible
+        Note over PG: Outbox remains pending
+    end
+
+    Note over NATS: NATS recovers
+    Publisher->>PG: Reclaim eligible outbox rows
+    Publisher->>NATS: Publish bounded batch
+    NATS-->>Publisher: Persistence ACK
+    Publisher->>PG: Mark queued
+    Worker->>NATS: Pull according to capacity
+```
+
+## Reviewing locally
+
+The GUI currently exercises Namespace, Job, Target, and manual Run workflows. Schedule APIs are implemented, while dedicated Schedule screens remain a useful next GUI improvement.
+
+```mermaid
+flowchart TD
+    Start["just dev-start"] --> Web["Open http://127.0.0.1:3000"]
+    Start --> Infra["PostgreSQL + NATS + crono-server"]
+    WorkerCmd["Start crono-worker separately<br/>queue: default"] --> Ready["Worker ready for dispatch"]
+
+    Web --> Namespace["Create a Namespace"]
+    Namespace --> Job["Create a Job"]
+    Job --> Target["Create a Target"]
+    Target --> Run["Create a manual Run"]
+    Run --> Outbox["Run becomes pending_dispatch"]
+    Outbox --> JetStream["JetStream persists dispatch"]
+    JetStream --> Consume["Worker pulls dispatch"]
+    Ready --> Consume
+    Consume --> Running["queued → running → succeeded / failed"]
+    Running --> Inspect["Inspect Run state in the GUI"]
+
+    Infra -.-> Health["/live · /ready · /health · /metrics"]
+```
+
+When reviewing failure behavior, stop NATS after creating the definitions but before a Run is dispatched. The GUI/API should remain usable, PostgreSQL should retain `pending_dispatch` work, `/health` should report degraded NATS state, and dispatch should resume after NATS restarts.
 
 ## Health and observability
 
