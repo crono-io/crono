@@ -10,10 +10,10 @@ use anyhow::{Context, Result, anyhow, bail};
 use async_nats::jetstream::{self, consumer::pull};
 use crono_api::{ClaimRequest, ClaimResponse, CompletionRequest, DispatchEnvelope};
 use crono_server::{
-    application::{ControlPlaneStore, JobDefinition, NewSchedule},
+    application::{ControlPlaneStore, JobDefinition, NewSchedule, TargetDefinition},
     domain::{
         CatchupPolicy, ExecutorKind, JobId, MisfirePolicy, NamespaceId, NamespaceName, QueueName,
-        ResourceName, TargetId,
+        ResourceName, TargetId, TargetSelection,
     },
     infrastructure::{
         DispatcherConfig, NatsPublisher, PostgresStore, run_dispatcher, run_worker_control,
@@ -75,6 +75,7 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
                 queue_id,
                 executable: None,
                 arguments: Vec::new(),
+                inputs: serde_json::json!({}),
                 idempotent: true,
                 max_attempts: 2,
                 retry_initial_seconds: 1,
@@ -93,6 +94,7 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
                 queue_id,
                 executable: None,
                 arguments: Vec::new(),
+                inputs: serde_json::json!({}),
                 idempotent: false,
                 max_attempts: 2,
                 retry_initial_seconds: 1,
@@ -102,7 +104,16 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
             },
         )
         .await?;
-    let target_record = store.create_target(namespace_id, &target, &[]).await?;
+    let target_record = store
+        .create_target(
+            namespace_id,
+            &target,
+            &TargetDefinition {
+                arguments: Vec::new(),
+                inputs: serde_json::json!({}),
+            },
+        )
+        .await?;
     let job_id = job_record.job.id();
     let unsafe_job_id = unsafe_job_record.job.id();
     let target_id = target_record.target.id();
@@ -449,7 +460,8 @@ async fn create_once(
             namespace_id,
             name: ResourceName::parse(name)?,
             job_id,
-            target_id,
+            target: TargetSelection::Target(target_id),
+            inputs: serde_json::json!({}),
             cron_expression: None,
             execute_at: Some(execute_at),
             timezone: "UTC".to_string(),

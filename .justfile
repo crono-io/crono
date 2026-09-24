@@ -51,7 +51,7 @@ postgres:
     exit 1
   fi
 
-  podman exec "$container" psql \
+  podman exec --env PGOPTIONS=--client-min-messages=warning "$container" psql \
     --username postgres \
     --dbname postgres \
     --set ON_ERROR_STOP=1 \
@@ -107,6 +107,11 @@ server port="8080" verbosity="-v": dev-infra
 [positional-arguments]
 web address="0.0.0.0" port="3000":
   cd apps/web && NO_COLOR=true trunk serve --address "$1" --port "$2"
+
+[doc("Start a worker for an existing Queue while the development server is running.")]
+[positional-arguments]
+worker queue="default" worker-id="worker-01" concurrency="3" verbosity="-v":
+  cargo run --locked -p crono-worker -- "$4" run --queue "$1" --worker-id "$2" --concurrency "$3"
 
 [doc("Start the complete development stack on non-conflicting ports.")]
 [positional-arguments]

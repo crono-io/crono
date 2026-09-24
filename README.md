@@ -78,9 +78,14 @@ sequenceDiagram
 
 ## Scheduling and misfires
 
-The scheduler queries the indexed `next_run_at` cursor in bounded batches. PostgreSQL claims allow multiple server instances to operate concurrently without process-local locks, while `UNIQUE (schedule_id, scheduled_at)` prevents duplicate logical occurrences. There is no sleeping Tokio task per Schedule and no periodic full-table scan.
+The scheduler queries the indexed `next_run_at` cursor in bounded batches. PostgreSQL claims allow multiple server instances to operate concurrently without process-local locks, while `UNIQUE (schedule_id, scheduled_at, target_id)` prevents duplicate per-Target occurrences. There is no sleeping Tokio task per Schedule and no periodic full-table scan. A Schedule aimed at a Target Set creates one independent Run for every current member in the same planning transaction.
 
 Cron expressions have five fields, use an IANA timezone for wall-clock calculation, and persist UTC instants. Nonexistent spring-forward times are skipped. Repeated fall-back local times produce both distinct UTC occurrences. One-shot timestamps are UTC.
+
+Five-field expressions are parsed with `cron-parser`; supported field syntax
+includes wildcards, lists, ranges, steps, and `Sun` through `Sat` weekday
+names. Crono keeps a bounded UTC overlap check so both fall-back occurrences
+remain distinct even though they share one local wall-clock value.
 
 Misfire policies are explicit and auditable:
 
@@ -128,6 +133,28 @@ delivery for a completed Attempt is acknowledged without execution; a delivery
 for a currently leased Attempt does not create a concurrent execution.
 
 While a process runs, the worker refreshes its PostgreSQL lease and sends JetStream in-progress acknowledgements. Completion is committed to PostgreSQL before the dispatch is ACKed. The process executor uses an absolute executable directly without a shell, clears the environment except for a small allowlist, appends Target arguments to Job arguments, supplies inputs through `CRONO_INPUTS_FILE`, and retains bounded stdout/stderr tails.
+
+## Commands, templates, and inputs
+
+A Job defines what runs: `noop` or `process`, an absolute executable for process Jobs, ordered argument templates, default inputs, and retry behavior. A Target defines where or with what destination-specific argument suffixes and inputs. A Target Set is an explicit collection of Targets plus inputs shared by every member; selecting one fans out to one Run per Target. Schedules and manual Runs can add a final invocation input layer.
+
+Input objects merge from least to most specific:
+
+```text
+Job defaults < Target Set shared inputs < Target inputs < Schedule or manual Run inputs
+```
+
+Objects merge recursively. Arrays, scalar values, and `null` replace the less-specific value. Input keys must be safe template path segments, and the complete encoded object is bounded to 64 KiB. Inputs are ordinary configuration, not a secret store; do not place credentials in them.
+
+Arguments can interpolate scalar input leaves with `{{ path.to.value }}`. A placeholder may occupy all or part of one argument, but it can never create additional argv entries. Missing paths, `null`, objects, and arrays fail rendering before dispatch. Write `\{{` for a literal opening delimiter. The executable itself is never templated, and Crono never invokes a shell.
+
+Before dispatch, the server merges inputs, renders argv, and stores the result in the immutable Run snapshot. The worker writes the final merged JSON to a permission-restricted temporary file and sets `CRONO_INPUTS_FILE` to that file's path only for the child process. The variable does not tell the worker to load a host-provided env file; the worker creates and deletes the file for each execution. `CRONO_RUN_ID` contains the stable Run idempotency key. A program can consume inputs directly, for example:
+
+```sh
+jq -r '.deployment.region' "$CRONO_INPUTS_FILE"
+```
+
+Changing a Job, Target, or Target Set affects only future snapshots. Existing Runs retain the exact executable, rendered arguments, merged inputs, Queue identity, and retry settings they were created with.
 
 Every worker session also sends a presence heartbeat through the server-mediated `crono.worker.presence.*` NATS boundary. Keeping presence separate from execution control prevents older control subscribers from consuming new heartbeat operations during rolling deployments. PostgreSQL records the stable worker ID, process session, Queue UUID, concurrency, version, start time, and last-seen time; API responses join the current Queue name for display. `GET /api/workers` classifies a worker as online for 30 seconds after its last heartbeat, stale through two minutes, and offline afterward. Offline records remain useful for short incident review and are removed after seven days by bounded reconciliation. Presence is operational metadata only: it does not replace Attempt leases or make a NATS connection authoritative execution state.
 
@@ -188,7 +215,7 @@ sequenceDiagram
 
 ## Reviewing locally
 
-The GUI exercises Namespace, Queue, Job, Target, Target Set, and manual Run workflows. Queue administration supports rename, enable/disable, and guarded deletion. Existing relationships are searchable name selectors backed by UUIDs. Schedule APIs are implemented, while dedicated Schedule screens remain a useful next GUI improvement.
+The GUI exercises Namespace, Queue, Job, Target, Target Set, Schedule, and manual Run workflows. Queue administration supports rename, enable/disable, and guarded deletion. Existing relationships are searchable name selectors backed by UUIDs. Job, Target, and Target Set definitions can be edited without replacing their immutable IDs, and the Job editor can preview rendered argv against a selected Target or Target Set.
 
 ```mermaid
 flowchart TD
@@ -227,6 +254,7 @@ When reviewing failure behavior, stop NATS after creating the definitions but be
 | `apps/cli` | Server-independent command-line client boundary |
 | `apps/web` | Independently deployed Leptos CSR client |
 | `crates/api` | Shared transport-only DTOs |
+| `crates/execution` | Deterministic JSON input validation, merging, and argv template rendering |
 | `crates/telemetry` | Structured logging and optional OTLP export |
 
 Public routes use `/api` directly; there is no `/api/v1` or draft compatibility layer. `crono-server-openapi` emits the route-derived OpenAPI document.
@@ -242,13 +270,19 @@ The common development workflow is:
 ```sh
 just dev-infra
 cargo run --locked -p crono-server --bin crono-server -- --port 8080
-cargo run --locked -p crono-worker -- run --queue default
+just worker
 ```
+
+`just worker` starts `worker-01` on the `default` Queue with concurrency `3`
+and verbose logging. Queue, worker ID, concurrency, and verbosity remain
+positional overrides, for example `just worker priority worker-02 6 -vv`.
 
 To discard all local Crono PostgreSQL and JetStream state and recreate both
 services from empty named volumes, run `just dev-reset`. The command requires
 confirmation and only targets the `crono-postgres` and `crono-nats` development
-containers and their named volumes.
+containers and their named volumes. The canonical bootstrap upgrades the
+preceding local draft schema in place, so the reset is optional when a truly
+empty environment is useful rather than a requirement for `just dev-start`.
 
 PostgreSQL uses `CRONO_DATABASE_URL`, NATS uses `CRONO_NATS_URL`, and the worker accepts `--nats-url`, `--queue`, `--worker-id`, and `--concurrency`. Local defaults target loopback development services. Deployed public HTTP must sit behind TLS termination; clients do not receive NATS or PostgreSQL credentials.
 

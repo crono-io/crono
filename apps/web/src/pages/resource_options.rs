@@ -136,3 +136,37 @@ pub(super) fn targets(namespace_id: RwSignal<Option<Uuid>>) -> ResourceOptions {
         }),
     }
 }
+
+/// Load Target Sets whenever the selected Namespace changes.
+pub(super) fn target_sets(namespace_id: RwSignal<Option<Uuid>>) -> ResourceOptions {
+    let resources = LocalResource::new(move || {
+        let selected = namespace_id.get();
+        async move {
+            match selected {
+                Some(id) => api::all_target_sets(id).await,
+                None => Ok(Vec::new()),
+            }
+        }
+    });
+    ResourceOptions {
+        options: Signal::derive(move || {
+            resources
+                .get()
+                .and_then(Result::ok)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|set| ResourceOption {
+                    id: set.id,
+                    label: set.name,
+                })
+                .collect()
+        }),
+        loading: Signal::derive(move || namespace_id.get().is_some() && resources.get().is_none()),
+        load_error: Signal::derive(move || {
+            resources
+                .get()
+                .and_then(Result::err)
+                .map(|error| error.message)
+        }),
+    }
+}

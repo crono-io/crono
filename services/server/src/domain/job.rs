@@ -22,6 +22,7 @@ pub struct Job {
     queue_id: QueueId,
     executable: Option<String>,
     arguments: Vec<String>,
+    inputs: serde_json::Value,
     idempotent: bool,
     max_attempts: u16,
     retry_initial_seconds: u32,
@@ -41,6 +42,7 @@ pub struct JobData {
     pub queue_id: QueueId,
     pub executable: Option<String>,
     pub arguments: Vec<String>,
+    pub inputs: serde_json::Value,
     pub idempotent: bool,
     pub max_attempts: u16,
     pub retry_initial_seconds: u32,
@@ -62,6 +64,7 @@ impl Job {
             queue_id,
             executable,
             arguments,
+            inputs,
             idempotent,
             max_attempts,
             retry_initial_seconds,
@@ -79,6 +82,7 @@ impl Job {
             queue_id,
             executable,
             arguments,
+            inputs,
             idempotent,
             max_attempts,
             retry_initial_seconds,
@@ -117,6 +121,10 @@ impl Job {
     #[must_use]
     pub fn arguments(&self) -> &[String] {
         &self.arguments
+    }
+    #[must_use]
+    pub const fn inputs(&self) -> &serde_json::Value {
+        &self.inputs
     }
     #[must_use]
     pub const fn idempotent(&self) -> bool {

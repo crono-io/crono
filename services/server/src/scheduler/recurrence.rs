@@ -1,13 +1,15 @@
-//! Five-field cron recurrence with IANA timezone evaluation.
+//! Five-field `cron-parser` recurrence with IANA timezone evaluation.
 //!
 //! Expressions are parsed when schedules enter planner batches, not once per
 //! clock tick. UTC is the persisted cursor. Converting each result back to UTC
-//! makes repeated local times distinct across a fall-back transition.
+//! makes repeated local times distinct across a fall-back transition. The
+//! bounded UTC scan compensates for parsers choosing only the earlier instant
+//! when a local wall-clock minute occurs twice.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Datelike, Duration, Timelike, Utc};
 use chrono_tz::Tz;
-use cron::Schedule as CronSchedule;
-use std::{error::Error, fmt, str::FromStr};
+use cron_parser::{parse as parse_cron, parse_field};
+use std::{collections::BTreeSet, error::Error, fmt};
 use time::OffsetDateTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,7 +17,6 @@ pub enum RecurrenceError {
     InvalidExpression,
     InvalidTimezone,
     OutOfRange,
-    Exhausted,
 }
 
 impl fmt::Display for RecurrenceError {
@@ -24,7 +25,6 @@ impl fmt::Display for RecurrenceError {
             Self::InvalidExpression => "cron expression must contain five valid fields",
             Self::InvalidTimezone => "timezone must be a valid IANA identifier",
             Self::OutOfRange => "timestamp is outside the supported range",
-            Self::Exhausted => "cron expression has no later occurrence",
         })
     }
 }
@@ -37,11 +37,13 @@ impl Error for RecurrenceError {}
 ///
 /// Returns a typed validation error for an invalid expression or timezone.
 pub fn validate_cron(expression: &str, timezone: &str) -> Result<(), RecurrenceError> {
-    parsed(expression)?;
-    timezone
+    parsed_fields(expression)?;
+    let zone = timezone
         .parse::<Tz>()
+        .map_err(|_| RecurrenceError::InvalidTimezone)?;
+    parse_cron(expression, &Utc::now().with_timezone(&zone))
         .map(|_| ())
-        .map_err(|_| RecurrenceError::InvalidTimezone)
+        .map_err(|_| RecurrenceError::InvalidExpression)
 }
 
 /// Return the first cron occurrence strictly after the supplied UTC instant.
@@ -54,18 +56,16 @@ pub fn next_cron_occurrence(
     timezone: &str,
     after: OffsetDateTime,
 ) -> Result<OffsetDateTime, RecurrenceError> {
-    let schedule = parsed(expression)?;
+    let fields = parsed_fields(expression)?;
     let zone = timezone
         .parse::<Tz>()
         .map_err(|_| RecurrenceError::InvalidTimezone)?;
     let utc = DateTime::<Utc>::from_timestamp(after.unix_timestamp(), after.nanosecond())
         .ok_or(RecurrenceError::OutOfRange)?;
-    let library_next = schedule
-        .after(&utc.with_timezone(&zone))
-        .next()
-        .ok_or(RecurrenceError::Exhausted)?
+    let library_next = parse_cron(expression, &utc.with_timezone(&zone))
+        .map_err(|_| RecurrenceError::InvalidExpression)?
         .with_timezone(&Utc);
-    let next = first_utc_match(&schedule, zone, utc, library_next)?;
+    let next = first_utc_match(&fields, zone, utc, library_next)?;
     OffsetDateTime::from_unix_timestamp_nanos(i128::from(
         next.timestamp_nanos_opt()
             .ok_or(RecurrenceError::OutOfRange)?,
@@ -78,7 +78,7 @@ pub fn next_cron_occurrence(
 /// longest plausible civil-time overlap; the library result remains the fast
 /// path and the upper bound for ordinary recurrence gaps.
 fn first_utc_match(
-    schedule: &CronSchedule,
+    fields: &CronFields,
     zone: Tz,
     after: DateTime<Utc>,
     library_next: DateTime<Utc>,
@@ -93,7 +93,7 @@ fn first_utc_match(
         .ok_or(RecurrenceError::OutOfRange)?;
 
     while candidate <= search_end {
-        if schedule.includes(candidate.with_timezone(&zone)) {
+        if fields.matches(candidate.with_timezone(&zone)) {
             return Ok(candidate);
         }
         candidate = candidate
@@ -104,12 +104,39 @@ fn first_utc_match(
     Ok(library_next)
 }
 
-fn parsed(expression: &str) -> Result<CronSchedule, RecurrenceError> {
-    if expression.split_whitespace().count() != 5 {
-        return Err(RecurrenceError::InvalidExpression);
+struct CronFields {
+    minutes: BTreeSet<u32>,
+    hours: BTreeSet<u32>,
+    days_of_month: BTreeSet<u32>,
+    months: BTreeSet<u32>,
+    days_of_week: BTreeSet<u32>,
+}
+
+impl CronFields {
+    fn matches(&self, candidate: DateTime<Tz>) -> bool {
+        self.minutes.contains(&candidate.minute())
+            && self.hours.contains(&candidate.hour())
+            && self.days_of_month.contains(&candidate.day())
+            && self.months.contains(&candidate.month())
+            && self
+                .days_of_week
+                .contains(&candidate.weekday().num_days_from_sunday())
     }
-    CronSchedule::from_str(&format!("0 {expression}"))
-        .map_err(|_| RecurrenceError::InvalidExpression)
+}
+
+fn parsed_fields(expression: &str) -> Result<CronFields, RecurrenceError> {
+    let fields = expression.split_whitespace().collect::<Vec<_>>();
+    let [minutes, hours, days_of_month, months, days_of_week] = fields.as_slice() else {
+        return Err(RecurrenceError::InvalidExpression);
+    };
+    let invalid = |_| RecurrenceError::InvalidExpression;
+    Ok(CronFields {
+        minutes: parse_field(minutes, 0, 59).map_err(invalid)?,
+        hours: parse_field(hours, 0, 23).map_err(invalid)?,
+        days_of_month: parse_field(days_of_month, 1, 31).map_err(invalid)?,
+        months: parse_field(months, 1, 12).map_err(invalid)?,
+        days_of_week: parse_field(days_of_week, 0, 6).map_err(invalid)?,
+    })
 }
 
 #[cfg(test)]
@@ -128,6 +155,13 @@ mod tests {
     fn rejects_non_five_field_expressions() {
         assert!(validate_cron("0 0 1 1 * 2027", "UTC").is_err());
         assert!(validate_cron("*/5 * * * *", "UTC").is_ok());
+    }
+
+    #[test]
+    fn accepts_cron_parser_ranges_steps_and_weekday_names() {
+        assert!(validate_cron("0 12-18/3 * * Mon-Fri", "UTC").is_ok());
+        assert!(validate_cron("*/0 * * * *", "UTC").is_err());
+        assert!(validate_cron("0 0 31 2 *", "UTC").is_err());
     }
 
     #[test]

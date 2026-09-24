@@ -8,9 +8,11 @@
 
 use crono_api::{
     CreateJobRequest, CreateNamespaceRequest, CreateQueueRequest, CreateRunRequest,
-    CreateTargetRequest, CreateTargetSetRequest, ErrorEnvelope, ExecutorKind, JobResource,
-    NamespaceResource, OverviewResource, Page, QueueResource, RunResource, TargetResource,
-    TargetSetResource, UpdateQueueRequest, WorkerResource,
+    CreateScheduleRequest, CreateTargetRequest, CreateTargetSetRequest, ErrorEnvelope,
+    ExecutionTarget, JobResource, NamespaceResource, OverviewResource, Page, QueueResource,
+    RunBatchResource, RunResource, ScheduleResource, TargetResource, TargetSetResource,
+    UpdateJobRequest, UpdateQueueRequest, UpdateScheduleRequest, UpdateTargetRequest,
+    UpdateTargetSetRequest, WorkerResource,
 };
 use gloo_net::http::{Request, Response};
 use serde::{Serialize, de::DeserializeOwned};
@@ -94,28 +96,12 @@ pub async fn all_jobs(namespace_id: Uuid) -> ApiResult<Vec<JobResource>> {
     get_all(&jobs_path(namespace_id)).await
 }
 
-pub async fn create_job(
-    namespace_id: Uuid,
-    name: String,
-    queue_id: Uuid,
-) -> ApiResult<JobResource> {
-    post(&jobs_path(namespace_id), &job_request(name, queue_id)).await
+pub async fn create_job(namespace_id: Uuid, request: &CreateJobRequest) -> ApiResult<JobResource> {
+    post(&jobs_path(namespace_id), request).await
 }
 
-fn job_request(name: String, queue_id: Uuid) -> CreateJobRequest {
-    CreateJobRequest {
-        name,
-        queue_id,
-        executor: ExecutorKind::Noop,
-        executable: None,
-        arguments: Vec::new(),
-        idempotent: false,
-        max_attempts: 1,
-        retry_initial_seconds: 1,
-        retry_max_seconds: 60,
-        retry_multiplier: 2.0,
-        retry_jitter: 0.2,
-    }
+pub async fn update_job(id: Uuid, request: &UpdateJobRequest) -> ApiResult<JobResource> {
+    put(&format!("{API_ROOT}/jobs/{id}"), request).await
 }
 
 pub async fn list_targets(namespace_id: Uuid) -> ApiResult<Page<TargetResource>> {
@@ -126,15 +112,15 @@ pub async fn all_targets(namespace_id: Uuid) -> ApiResult<Vec<TargetResource>> {
     get_all(&targets_path(namespace_id)).await
 }
 
-pub async fn create_target(namespace_id: Uuid, name: String) -> ApiResult<TargetResource> {
-    post(
-        &targets_path(namespace_id),
-        &CreateTargetRequest {
-            name,
-            arguments: Vec::new(),
-        },
-    )
-    .await
+pub async fn create_target(
+    namespace_id: Uuid,
+    request: &CreateTargetRequest,
+) -> ApiResult<TargetResource> {
+    post(&targets_path(namespace_id), request).await
+}
+
+pub async fn update_target(id: Uuid, request: &UpdateTargetRequest) -> ApiResult<TargetResource> {
+    put(&format!("{API_ROOT}/targets/{id}"), request).await
 }
 
 pub async fn list_target_sets(namespace_id: Uuid) -> ApiResult<Page<TargetSetResource>> {
@@ -146,22 +132,70 @@ pub async fn list_target_sets(namespace_id: Uuid) -> ApiResult<Page<TargetSetRes
 
 pub async fn create_target_set(
     namespace_id: Uuid,
-    name: String,
-    target_ids: Vec<Uuid>,
+    request: &CreateTargetSetRequest,
 ) -> ApiResult<TargetSetResource> {
     post(
         &format!("{API_ROOT}/namespaces/{namespace_id}/target-sets"),
-        &CreateTargetSetRequest { name, target_ids },
+        request,
     )
     .await
+}
+
+pub async fn update_target_set(
+    id: Uuid,
+    request: &UpdateTargetSetRequest,
+) -> ApiResult<TargetSetResource> {
+    put(&format!("{API_ROOT}/target-sets/{id}"), request).await
+}
+
+pub async fn all_target_sets(namespace_id: Uuid) -> ApiResult<Vec<TargetSetResource>> {
+    get_all(&format!("{API_ROOT}/namespaces/{namespace_id}/target-sets")).await
+}
+
+pub async fn list_schedules(namespace_id: Uuid) -> ApiResult<Page<ScheduleResource>> {
+    get(&format!(
+        "{API_ROOT}/namespaces/{namespace_id}/schedules?limit=100"
+    ))
+    .await
+}
+
+pub async fn create_schedule(
+    namespace_id: Uuid,
+    request: &CreateScheduleRequest,
+) -> ApiResult<ScheduleResource> {
+    post(
+        &format!("{API_ROOT}/namespaces/{namespace_id}/schedules"),
+        request,
+    )
+    .await
+}
+
+pub async fn update_schedule(
+    id: Uuid,
+    request: &UpdateScheduleRequest,
+) -> ApiResult<ScheduleResource> {
+    patch(&format!("{API_ROOT}/schedules/{id}"), request).await
 }
 
 pub async fn list_runs() -> ApiResult<Page<RunResource>> {
     get(&format!("{API_ROOT}/runs?limit=100")).await
 }
 
-pub async fn create_run(job_id: Uuid, target_id: Uuid) -> ApiResult<RunResource> {
-    post(&format!("{API_ROOT}/runs"), &run_request(job_id, target_id)).await
+pub async fn create_run(
+    job_id: Uuid,
+    target: ExecutionTarget,
+    inputs: serde_json::Value,
+) -> ApiResult<RunBatchResource> {
+    post(
+        &format!("{API_ROOT}/runs"),
+        &CreateRunRequest {
+            request_id: Uuid::now_v7(),
+            job_id,
+            target,
+            inputs,
+        },
+    )
+    .await
 }
 
 fn jobs_path(namespace_id: Uuid) -> String {
@@ -170,14 +204,6 @@ fn jobs_path(namespace_id: Uuid) -> String {
 
 fn targets_path(namespace_id: Uuid) -> String {
     format!("{API_ROOT}/namespaces/{namespace_id}/targets")
-}
-
-fn run_request(job_id: Uuid, target_id: Uuid) -> CreateRunRequest {
-    CreateRunRequest {
-        request_id: Uuid::now_v7(),
-        job_id,
-        target_id,
-    }
 }
 
 pub async fn list_workers() -> ApiResult<Page<WorkerResource>> {
@@ -213,6 +239,21 @@ where
     B: Serialize,
 {
     let request = Request::put(url)
+        .json(body)
+        .map_err(|error| client_error(format!("Could not encode the request: {error}")))?;
+    let response = request
+        .send()
+        .await
+        .map_err(|error| client_error(format!("Crono API is unreachable: {error}")))?;
+    decode(response).await
+}
+
+async fn patch<T, B>(url: &str, body: &B) -> ApiResult<T>
+where
+    T: DeserializeOwned,
+    B: Serialize,
+{
+    let request = Request::patch(url)
         .json(body)
         .map_err(|error| client_error(format!("Could not encode the request: {error}")))?;
     let response = request
@@ -286,15 +327,13 @@ fn client_error(message: String) -> ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{job_request, jobs_path, run_request, targets_path};
+    use super::{jobs_path, targets_path};
     use uuid::Uuid;
     use wasm_bindgen_test::wasm_bindgen_test;
 
     #[wasm_bindgen_test]
-    fn relationship_requests_retain_selected_uuids() {
+    fn relationship_paths_retain_selected_namespace_uuid() {
         let namespace_id = Uuid::from_u128(1);
-        let job_id = Uuid::from_u128(2);
-        let target_id = Uuid::from_u128(3);
 
         assert_eq!(
             jobs_path(namespace_id),
@@ -304,10 +343,5 @@ mod tests {
             targets_path(namespace_id),
             format!("/api/namespaces/{namespace_id}/targets")
         );
-        let request = run_request(job_id, target_id);
-        assert_eq!(request.job_id, job_id);
-        assert_eq!(request.target_id, target_id);
-        let job = job_request("nightly".to_string(), job_id);
-        assert_eq!(job.queue_id, job_id);
     }
 }

@@ -26,6 +26,6 @@ pub use name::{NameError, NamespaceName, QueueName, ResourceName};
 pub use namespace::{Namespace, NamespaceMismatch, QualifiedName};
 pub use queue::Queue;
 pub use run::{Run, RunData, RunStatus};
-pub use schedule::{CatchupPolicy, MisfirePolicy, Schedule, ScheduleTiming};
+pub use schedule::{CatchupPolicy, MisfirePolicy, Schedule, ScheduleTiming, TargetSelection};
 pub use target::Target;
 pub use target_set::TargetSet;

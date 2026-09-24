@@ -2,7 +2,7 @@
 
 use crate::domain::{
     CatchupPolicy, ExecutorKind, Job, JobId, MisfirePolicy, NamespaceName, Run, Schedule,
-    ScheduleTiming, Target, TargetId, TargetSet,
+    ScheduleTiming, Target, TargetSet,
 };
 use uuid::Uuid;
 
@@ -26,6 +26,7 @@ pub struct CreateJobInput {
     pub executor: ExecutorKind,
     pub executable: Option<String>,
     pub arguments: Vec<String>,
+    pub inputs: serde_json::Value,
     pub idempotent: bool,
     pub max_attempts: u16,
     pub retry_initial_seconds: u32,
@@ -38,7 +39,8 @@ pub struct CreateJobInput {
 pub struct CreateScheduleInput {
     pub name: String,
     pub job_id: JobId,
-    pub target_id: TargetId,
+    pub target: crate::domain::TargetSelection,
+    pub inputs: serde_json::Value,
     pub timing: ScheduleTiming,
     pub misfire_policy: MisfirePolicy,
     pub misfire_grace_seconds: Option<u32>,

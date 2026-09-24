@@ -3,7 +3,7 @@
 //! Occurrence calculation is pure and lives in the scheduler module. This
 //! entity stores the persisted inputs and cursor used by that calculation.
 
-use super::{JobId, NamespaceId, ResourceName, ScheduleId, TargetId};
+use super::{JobId, NamespaceId, ResourceName, ScheduleId, TargetId, TargetSetId};
 use time::OffsetDateTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,13 +31,21 @@ pub enum ScheduleTiming {
     },
 }
 
+/// Explicit single-Target or Target Set execution selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetSelection {
+    Target(TargetId),
+    TargetSet(TargetSetId),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Schedule {
     pub id: ScheduleId,
     pub namespace_id: NamespaceId,
     pub name: ResourceName,
     pub job_id: JobId,
-    pub target_id: TargetId,
+    pub target: TargetSelection,
+    pub inputs: serde_json::Value,
     pub timing: ScheduleTiming,
     pub enabled: bool,
     pub next_run_at: Option<OffsetDateTime>,

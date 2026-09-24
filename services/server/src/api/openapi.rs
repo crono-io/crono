@@ -36,17 +36,23 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
             control_plane::delete_queue
         ))
         .routes(routes!(control_plane::create_job, control_plane::list_jobs))
-        .routes(routes!(control_plane::get_job))
+        .routes(routes!(control_plane::get_job, control_plane::update_job))
         .routes(routes!(
             control_plane::create_target,
             control_plane::list_targets
         ))
-        .routes(routes!(control_plane::get_target))
+        .routes(routes!(
+            control_plane::get_target,
+            control_plane::update_target
+        ))
         .routes(routes!(
             control_plane::create_target_set,
             control_plane::list_target_sets
         ))
-        .routes(routes!(control_plane::get_target_set))
+        .routes(routes!(
+            control_plane::get_target_set,
+            control_plane::update_target_set
+        ))
         .routes(routes!(
             control_plane::create_schedule,
             control_plane::list_schedules

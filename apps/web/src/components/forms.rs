@@ -39,6 +39,109 @@ pub fn visible_name_validation(value: &str, attempted: bool) -> Option<String> {
     name_validation_message(value, true)
 }
 
+/// Parse and validate the JSON object entered in an input editor.
+///
+/// # Errors
+///
+/// Returns a concise syntax, shape, key, or size error suitable for inline UI.
+pub fn parse_input_object(value: &str) -> Result<serde_json::Value, String> {
+    let parsed = serde_json::from_str(value).map_err(|error| format!("Invalid JSON: {error}"))?;
+    crono_execution::validate_inputs(&parsed).map_err(|error| error.to_string())?;
+    Ok(parsed)
+}
+
+/// Multi-line JSON object editor shared by Job, Target, Target Set, Schedule,
+/// and manual Run input layers.
+#[component]
+pub fn JsonObjectInput(
+    id: &'static str,
+    label: &'static str,
+    value: RwSignal<String>,
+    error: Signal<Option<String>>,
+) -> impl IntoView {
+    let error_id = format!("{id}-error");
+    view! {
+        <div>
+            <label for=id class="block text-sm font-medium text-crono-text">{label}</label>
+            <textarea
+                id=id
+                class=format!("mt-1.5 min-h-32 font-mono {INPUT_CLASS}")
+                spellcheck="false"
+                aria-describedby=error_id.clone()
+                aria-invalid=move || error.get().is_some().then_some("true")
+                prop:value=move || value.get()
+                on:input=move |event| value.set(event_target_value(&event))
+            />
+            <p class="mt-1.5 text-xs text-crono-muted">
+                "JSON object. Values are not treated as secrets."
+            </p>
+            <p id=error_id class="mt-1 text-sm text-crono-failed" role="alert">
+                {move || error.get().unwrap_or_default()}
+            </p>
+        </div>
+    }
+}
+
+/// Ordered argv editor; each row remains exactly one process argument.
+#[component]
+pub fn ArgumentListInput(
+    id: &'static str,
+    label: &'static str,
+    values: RwSignal<Vec<String>>,
+    #[prop(optional, into)] error: Signal<Option<String>>,
+) -> impl IntoView {
+    view! {
+        <fieldset>
+            <legend class="text-sm font-medium text-crono-text">{label}</legend>
+            <div class="mt-1.5 space-y-2">
+                {move || values.get().into_iter().enumerate().map(|(index, value)| {
+                    view! {
+                        <div class="flex gap-2">
+                            <input
+                                id=format!("{id}-{index}")
+                                class=format!("font-mono {INPUT_CLASS}")
+                                type="text"
+                                autocomplete="off"
+                                prop:value=value
+                                on:input=move |event| values.update(|items| {
+                                    if let Some(item) = items.get_mut(index) {
+                                        *item = event_target_value(&event);
+                                    }
+                                })
+                            />
+                            <button
+                                type="button"
+                                class="rounded-md border border-crono-border px-3 text-sm text-crono-muted hover:bg-zinc-50 hover:text-crono-failed"
+                                aria-label=format!("Remove argument {}", index + 1)
+                                on:click=move |_| values.update(|items| {
+                                    if index < items.len() {
+                                        items.remove(index);
+                                    }
+                                })
+                            >
+                                "Remove"
+                            </button>
+                        </div>
+                    }
+                }).collect_view()}
+            </div>
+            <button
+                type="button"
+                class="mt-2 text-sm font-medium text-crono-primary hover:text-crono-primary-hover"
+                on:click=move |_| values.update(|items| items.push(String::new()))
+            >
+                "+ Add argument"
+            </button>
+            <p class="mt-1.5 text-xs text-crono-muted">
+                "Use {{ path.to.value }} for scalar inputs. Each row is one argv item; no shell is used."
+            </p>
+            <p class="mt-1 text-sm text-crono-failed" role="alert">
+                {move || error.get().unwrap_or_default()}
+            </p>
+        </fieldset>
+    }
+}
+
 /// Canonical resource-name field with stable guidance and inline errors.
 #[component]
 pub fn ResourceNameInput(
@@ -87,6 +190,7 @@ pub fn ResourceSelect(
     loading: Signal<bool>,
     load_error: Signal<Option<String>>,
     #[prop(optional, into)] field_error: Signal<Option<String>>,
+    #[prop(optional)] optional: bool,
 ) -> impl IntoView {
     let query = RwSignal::new(String::new());
     let open = RwSignal::new(false);
@@ -129,7 +233,10 @@ pub fn ResourceSelect(
     view! {
         <div>
             <label for=id class="block text-sm font-medium text-crono-text">
-                {label}<span class="ml-1 text-crono-failed" aria-hidden="true">"*"</span>
+                {label}
+                <Show when=move || !optional>
+                    <span class="ml-1 text-crono-failed" aria-hidden="true">"*"</span>
+                </Show>
             </label>
             <div class="relative mt-1.5">
                 <input
@@ -138,6 +245,7 @@ pub fn ResourceSelect(
                     type="text"
                     role="combobox"
                     autocomplete="off"
+                    required=!optional
                     placeholder=move || if loading.get() { "Loading…" } else { placeholder }
                     disabled=disabled
                     aria-expanded=move || open.get().to_string()
@@ -415,8 +523,9 @@ mod browser_tests {
 
     #[wasm_bindgen_test]
     async fn resource_select_filters_and_stores_the_uuid() {
-        let Some(host) = test_host() else {
-            assert!(false, "browser test requires a document body");
+        let host = test_host();
+        assert!(host.is_some(), "browser test requires a document body");
+        let Some(host) = host else {
             return;
         };
         let production_id = Uuid::from_u128(1);
@@ -449,17 +558,20 @@ mod browser_tests {
             }
         });
 
-        let Some(input) = host.query_selector("#namespace").ok().flatten() else {
-            assert!(false, "selector input must render");
+        let input = host.query_selector("#namespace").ok().flatten();
+        assert!(input.is_some(), "selector input must render");
+        let Some(input) = input else {
             return;
         };
-        let Ok(input) = input.dyn_into::<HtmlInputElement>() else {
-            assert!(false, "selector must render an input");
+        let input = input.dyn_into::<HtmlInputElement>();
+        assert!(input.is_ok(), "selector must render an input");
+        let Ok(input) = input else {
             return;
         };
         input.set_value("prod");
-        let Ok(input_event) = Event::new("input") else {
-            assert!(false, "input event must be constructible");
+        let input_event = Event::new("input");
+        assert!(input_event.is_ok(), "input event must be constructible");
+        let Ok(input_event) = input_event else {
             return;
         };
         assert!(input.dispatch_event(&input_event).is_ok());
@@ -467,16 +579,17 @@ mod browser_tests {
         assert!(host.inner_text().contains("production"));
         assert!(!host.inner_text().contains("staging"));
 
-        let Some(option) = host
+        let option = host
             .query_selector("[role=\"option\"] button")
             .ok()
-            .flatten()
-        else {
-            assert!(false, "filtered option must render");
+            .flatten();
+        assert!(option.is_some(), "filtered option must render");
+        let Some(option) = option else {
             return;
         };
-        let Ok(mouse_event) = MouseEvent::new("mousedown") else {
-            assert!(false, "mouse event must be constructible");
+        let mouse_event = MouseEvent::new("mousedown");
+        assert!(mouse_event.is_ok(), "mouse event must be constructible");
+        let Ok(mouse_event) = mouse_event else {
             return;
         };
         assert!(option.dispatch_event(&mouse_event).is_ok());
@@ -488,8 +601,9 @@ mod browser_tests {
 
     #[wasm_bindgen_test]
     async fn resource_select_exposes_loading_empty_and_api_errors() {
-        let Some(host) = test_host() else {
-            assert!(false, "browser test requires a document body");
+        let host = test_host();
+        assert!(host.is_some(), "browser test requires a document body");
+        let Some(host) = host else {
             return;
         };
         let handle = leptos::mount::mount_to(host.clone(), move || {
@@ -510,8 +624,9 @@ mod browser_tests {
                 <button id="error" on:click=move |_| load_error.set(Some("Namespace API failed.".to_string()))>"error"</button>
             }
         });
-        let Some(input) = host.query_selector("#stateful-namespace").ok().flatten() else {
-            assert!(false, "selector input must render");
+        let input = host.query_selector("#stateful-namespace").ok().flatten();
+        assert!(input.is_some(), "selector input must render");
+        let Some(input) = input else {
             return;
         };
         assert_eq!(
@@ -519,20 +634,23 @@ mod browser_tests {
             Some("Loading…")
         );
 
-        let Ok(click) = MouseEvent::new("click") else {
-            assert!(false, "mouse event must be constructible");
+        let click = MouseEvent::new("click");
+        assert!(click.is_ok(), "mouse event must be constructible");
+        let Ok(click) = click else {
             return;
         };
-        let Some(empty) = host.query_selector("#empty").ok().flatten() else {
-            assert!(false, "empty-state trigger must render");
+        let empty = host.query_selector("#empty").ok().flatten();
+        assert!(empty.is_some(), "empty-state trigger must render");
+        let Some(empty) = empty else {
             return;
         };
         assert!(empty.dispatch_event(&click).is_ok());
         leptos::task::tick().await;
         assert!(input.has_attribute("disabled"));
 
-        let Some(error) = host.query_selector("#error").ok().flatten() else {
-            assert!(false, "error-state trigger must render");
+        let error = host.query_selector("#error").ok().flatten();
+        assert!(error.is_some(), "error-state trigger must render");
+        let Some(error) = error else {
             return;
         };
         assert!(error.dispatch_event(&click).is_ok());
@@ -544,8 +662,9 @@ mod browser_tests {
 
     #[wasm_bindgen_test]
     fn resource_name_input_blocks_invalid_names_and_surfaces_server_errors() {
-        let Some(host) = test_host() else {
-            assert!(false, "browser test requires a document body");
+        let host = test_host();
+        assert!(host.is_some(), "browser test requires a document body");
+        let Some(host) = host else {
             return;
         };
         let handle = leptos::mount::mount_to(host.clone(), move || {
@@ -575,18 +694,19 @@ mod browser_tests {
             host.inner_text()
                 .contains("start and end with a lowercase letter or number")
         );
-        let Some(submit) = host
+        let submit = host
             .query_selector("button[type=\"submit\"]")
             .ok()
-            .flatten()
-        else {
-            assert!(false, "submit button must render");
+            .flatten();
+        assert!(submit.is_some(), "submit button must render");
+        let Some(submit) = submit else {
             return;
         };
         assert!(submit.has_attribute("disabled"));
         assert!(host.inner_text().contains("Name already exists."));
-        let Some(server_input) = host.query_selector("#server-name").ok().flatten() else {
-            assert!(false, "server-validated field must render");
+        let server_input = host.query_selector("#server-name").ok().flatten();
+        assert!(server_input.is_some(), "server-validated field must render");
+        let Some(server_input) = server_input else {
             return;
         };
         assert_eq!(

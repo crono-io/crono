@@ -12,6 +12,7 @@ pub struct Target {
     namespace_id: NamespaceId,
     name: ResourceName,
     arguments: Vec<String>,
+    inputs: serde_json::Value,
     created_at: OffsetDateTime,
     updated_at: OffsetDateTime,
 }
@@ -23,6 +24,7 @@ impl Target {
         namespace_id: NamespaceId,
         name: ResourceName,
         arguments: Vec<String>,
+        inputs: serde_json::Value,
         created_at: OffsetDateTime,
         updated_at: OffsetDateTime,
     ) -> Self {
@@ -31,6 +33,7 @@ impl Target {
             namespace_id,
             name,
             arguments,
+            inputs,
             created_at,
             updated_at,
         }
@@ -51,6 +54,10 @@ impl Target {
     #[must_use]
     pub fn arguments(&self) -> &[String] {
         &self.arguments
+    }
+    #[must_use]
+    pub const fn inputs(&self) -> &serde_json::Value {
+        &self.inputs
     }
     #[must_use]
     pub const fn created_at(&self) -> OffsetDateTime {

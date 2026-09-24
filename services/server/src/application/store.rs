@@ -11,7 +11,7 @@ use super::{
 use crate::domain::{
     AttemptId, CatchupPolicy, DispatchId, ExecutorKind, JobId, MisfirePolicy, Namespace,
     NamespaceId, NamespaceName, Queue, QueueId, QueueName, ResourceName, RunId, Schedule,
-    ScheduleId, TargetId, TargetSetId,
+    ScheduleId, TargetId, TargetSelection, TargetSetId,
 };
 use async_trait::async_trait;
 use crono_api::{
@@ -27,6 +27,7 @@ pub struct JobDefinition {
     pub queue_id: QueueId,
     pub executable: Option<String>,
     pub arguments: Vec<String>,
+    pub inputs: serde_json::Value,
     pub idempotent: bool,
     pub max_attempts: u16,
     pub retry_initial_seconds: u32,
@@ -36,11 +37,18 @@ pub struct JobDefinition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetDefinition {
+    pub arguments: Vec<String>,
+    pub inputs: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewSchedule {
     pub namespace_id: NamespaceId,
     pub name: ResourceName,
     pub job_id: JobId,
-    pub target_id: TargetId,
+    pub target: TargetSelection,
+    pub inputs: serde_json::Value,
     pub cron_expression: Option<String>,
     pub execute_at: Option<OffsetDateTime>,
     pub timezone: String,
@@ -157,11 +165,17 @@ pub trait ControlPlaneStore: Send + Sync {
         after: Option<&str>,
     ) -> Result<Page<JobRecord>, StoreError>;
     async fn get_job(&self, id: JobId) -> Result<JobRecord, StoreError>;
+    async fn update_job(
+        &self,
+        id: JobId,
+        name: &ResourceName,
+        definition: &JobDefinition,
+    ) -> Result<JobRecord, StoreError>;
     async fn create_target(
         &self,
         namespace_id: NamespaceId,
         name: &ResourceName,
-        arguments: &[String],
+        definition: &TargetDefinition,
     ) -> Result<TargetRecord, StoreError>;
     async fn list_targets(
         &self,
@@ -171,11 +185,18 @@ pub trait ControlPlaneStore: Send + Sync {
         after: Option<&str>,
     ) -> Result<Page<TargetRecord>, StoreError>;
     async fn get_target(&self, id: TargetId) -> Result<TargetRecord, StoreError>;
+    async fn update_target(
+        &self,
+        id: TargetId,
+        name: &ResourceName,
+        definition: &TargetDefinition,
+    ) -> Result<TargetRecord, StoreError>;
     async fn create_target_set(
         &self,
         namespace_id: NamespaceId,
         name: &ResourceName,
         target_ids: &[TargetId],
+        inputs: &serde_json::Value,
     ) -> Result<TargetSetRecord, StoreError>;
     async fn list_target_sets(
         &self,
@@ -185,6 +206,13 @@ pub trait ControlPlaneStore: Send + Sync {
         after: Option<&str>,
     ) -> Result<Page<TargetSetRecord>, StoreError>;
     async fn get_target_set(&self, id: TargetSetId) -> Result<TargetSetRecord, StoreError>;
+    async fn update_target_set(
+        &self,
+        id: TargetSetId,
+        name: &ResourceName,
+        target_ids: &[TargetId],
+        inputs: &serde_json::Value,
+    ) -> Result<TargetSetRecord, StoreError>;
     async fn create_schedule(&self, schedule: &NewSchedule) -> Result<ScheduleRecord, StoreError>;
     async fn list_schedules(
         &self,
@@ -201,12 +229,34 @@ pub trait ControlPlaneStore: Send + Sync {
         enabled: bool,
         next_run_at: Option<OffsetDateTime>,
     ) -> Result<ScheduleRecord, StoreError>;
+    async fn create_runs(
+        &self,
+        request_id: Uuid,
+        job_id: JobId,
+        target: TargetSelection,
+        inputs: &serde_json::Value,
+    ) -> Result<(Vec<RunRecord>, bool), StoreError>;
+    /// Create one direct-target Run through the batch-aware persistence path.
+    ///
+    /// This compatibility boundary keeps internal callers concise while the
+    /// public API always returns a batch, including single-target requests.
     async fn create_run(
         &self,
         request_id: Uuid,
         job_id: JobId,
         target_id: TargetId,
-    ) -> Result<(RunRecord, bool), StoreError>;
+    ) -> Result<(RunRecord, bool), StoreError> {
+        let (runs, created) = self
+            .create_runs(
+                request_id,
+                job_id,
+                TargetSelection::Target(target_id),
+                &serde_json::json!({}),
+            )
+            .await?;
+        let run = runs.into_iter().next().ok_or(StoreError::Internal)?;
+        Ok((run, created))
+    }
     async fn list_runs(
         &self,
         visibility: &VisibilityScope,

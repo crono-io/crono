@@ -2,7 +2,8 @@
 --
 -- PostgreSQL is the authority for schedules, execution intent, dispatch,
 -- retries, leases, and audit history. JetStream is a rebuildable transport.
--- Reset databases created from the previous draft before applying this schema.
+-- The compatibility block below upgrades the preceding draft in place so the
+-- local development startup remains non-destructive.
 
 CREATE SCHEMA IF NOT EXISTS crono AUTHORIZATION crono_owner;
 
@@ -47,6 +48,7 @@ CREATE TABLE IF NOT EXISTS crono.jobs (
     queue_id uuid NOT NULL REFERENCES crono.queues(id) ON DELETE RESTRICT,
     executable text,
     arguments jsonb NOT NULL DEFAULT '[]'::jsonb,
+    inputs jsonb NOT NULL DEFAULT '{}'::jsonb,
     idempotent boolean NOT NULL DEFAULT false,
     max_attempts integer NOT NULL DEFAULT 1,
     retry_initial_seconds integer NOT NULL DEFAULT 1,
@@ -65,6 +67,7 @@ CREATE TABLE IF NOT EXISTS crono.jobs (
         OR (executor = 'process' AND executable LIKE '/%')
     ),
     CONSTRAINT jobs_arguments_array CHECK (jsonb_typeof(arguments) = 'array'),
+    CONSTRAINT jobs_inputs_object CHECK (jsonb_typeof(inputs) = 'object'),
     CONSTRAINT jobs_retry_valid CHECK (
         max_attempts BETWEEN 1 AND 100
         AND retry_initial_seconds BETWEEN 1 AND 86400
@@ -79,24 +82,29 @@ CREATE TABLE IF NOT EXISTS crono.targets (
     namespace_id uuid NOT NULL REFERENCES crono.namespaces(id) ON DELETE RESTRICT,
     name text NOT NULL,
     arguments jsonb NOT NULL DEFAULT '[]'::jsonb,
+    inputs jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT statement_timestamp(),
     updated_at timestamptz NOT NULL DEFAULT statement_timestamp(),
     CONSTRAINT targets_namespace_name_unique UNIQUE (namespace_id, name),
     CONSTRAINT targets_name_canonical CHECK (
         name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
     ),
-    CONSTRAINT targets_arguments_array CHECK (jsonb_typeof(arguments) = 'array')
+    CONSTRAINT targets_arguments_array CHECK (jsonb_typeof(arguments) = 'array'),
+    CONSTRAINT targets_inputs_object CHECK (jsonb_typeof(inputs) = 'object')
 );
 
 CREATE TABLE IF NOT EXISTS crono.target_sets (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     namespace_id uuid NOT NULL REFERENCES crono.namespaces(id) ON DELETE RESTRICT,
     name text NOT NULL,
+    inputs jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+    updated_at timestamptz NOT NULL DEFAULT statement_timestamp(),
     CONSTRAINT target_sets_namespace_name_unique UNIQUE (namespace_id, name),
     CONSTRAINT target_sets_name_canonical CHECK (
         name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
-    )
+    ),
+    CONSTRAINT target_sets_inputs_object CHECK (jsonb_typeof(inputs) = 'object')
 );
 
 CREATE TABLE IF NOT EXISTS crono.target_set_members (
@@ -110,7 +118,9 @@ CREATE TABLE IF NOT EXISTS crono.schedules (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     namespace_id uuid NOT NULL REFERENCES crono.namespaces(id) ON DELETE RESTRICT,
     job_id uuid NOT NULL REFERENCES crono.jobs(id) ON DELETE RESTRICT,
-    target_id uuid NOT NULL REFERENCES crono.targets(id) ON DELETE RESTRICT,
+    target_id uuid REFERENCES crono.targets(id) ON DELETE RESTRICT,
+    target_set_id uuid REFERENCES crono.target_sets(id) ON DELETE RESTRICT,
+    inputs jsonb NOT NULL DEFAULT '{}'::jsonb,
     name text NOT NULL,
     schedule_type text NOT NULL,
     cron_expression text,
@@ -130,6 +140,10 @@ CREATE TABLE IF NOT EXISTS crono.schedules (
     created_at timestamptz NOT NULL DEFAULT statement_timestamp(),
     updated_at timestamptz NOT NULL DEFAULT statement_timestamp(),
     CONSTRAINT schedules_namespace_name_unique UNIQUE (namespace_id, name),
+    CONSTRAINT schedules_target_selection CHECK (
+        (target_id IS NOT NULL)::integer + (target_set_id IS NOT NULL)::integer = 1
+    ),
+    CONSTRAINT schedules_inputs_object CHECK (jsonb_typeof(inputs) = 'object'),
     CONSTRAINT schedules_name_canonical CHECK (
         name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
     ),
@@ -154,9 +168,23 @@ CREATE TABLE IF NOT EXISTS crono.schedules (
     CONSTRAINT schedules_revision_positive CHECK (revision > 0)
 );
 
+CREATE TABLE IF NOT EXISTS crono.run_requests (
+    request_id uuid PRIMARY KEY,
+    namespace_id uuid NOT NULL REFERENCES crono.namespaces(id) ON DELETE RESTRICT,
+    job_id uuid NOT NULL REFERENCES crono.jobs(id) ON DELETE RESTRICT,
+    target_id uuid REFERENCES crono.targets(id) ON DELETE RESTRICT,
+    target_set_id uuid REFERENCES crono.target_sets(id) ON DELETE RESTRICT,
+    inputs jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+    CONSTRAINT run_requests_target_selection CHECK (
+        (target_id IS NOT NULL)::integer + (target_set_id IS NOT NULL)::integer = 1
+    ),
+    CONSTRAINT run_requests_inputs_object CHECK (jsonb_typeof(inputs) = 'object')
+);
+
 CREATE TABLE IF NOT EXISTS crono.runs (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
-    request_id uuid UNIQUE,
+    request_id uuid REFERENCES crono.run_requests(request_id) ON DELETE RESTRICT,
     schedule_id uuid REFERENCES crono.schedules(id) ON DELETE RESTRICT,
     job_id uuid NOT NULL REFERENCES crono.jobs(id) ON DELETE RESTRICT,
     target_id uuid NOT NULL REFERENCES crono.targets(id) ON DELETE RESTRICT,
@@ -187,8 +215,55 @@ CREATE TABLE IF NOT EXISTS crono.runs (
     CONSTRAINT runs_snapshot_object CHECK (jsonb_typeof(execution_snapshot) = 'object')
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS runs_schedule_occurrence_unique
-    ON crono.runs (schedule_id, scheduled_at) WHERE schedule_id IS NOT NULL;
+-- Upgrade the preceding draft without discarding local development data.
+-- CREATE TABLE IF NOT EXISTS does not add newly declared columns or constraints
+-- to existing tables, so this deliberately narrow bridge remains idempotent.
+BEGIN;
+
+ALTER TABLE crono.jobs
+    ADD COLUMN IF NOT EXISTS inputs jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE crono.jobs DROP CONSTRAINT IF EXISTS jobs_inputs_object;
+ALTER TABLE crono.jobs
+    ADD CONSTRAINT jobs_inputs_object CHECK (jsonb_typeof(inputs) = 'object');
+
+ALTER TABLE crono.targets
+    ADD COLUMN IF NOT EXISTS inputs jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE crono.targets DROP CONSTRAINT IF EXISTS targets_inputs_object;
+ALTER TABLE crono.targets
+    ADD CONSTRAINT targets_inputs_object CHECK (jsonb_typeof(inputs) = 'object');
+
+ALTER TABLE crono.target_sets
+    ADD COLUMN IF NOT EXISTS inputs jsonb NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT statement_timestamp();
+ALTER TABLE crono.target_sets DROP CONSTRAINT IF EXISTS target_sets_inputs_object;
+ALTER TABLE crono.target_sets
+    ADD CONSTRAINT target_sets_inputs_object CHECK (jsonb_typeof(inputs) = 'object');
+
+ALTER TABLE crono.schedules
+    ADD COLUMN IF NOT EXISTS target_set_id uuid,
+    ADD COLUMN IF NOT EXISTS inputs jsonb NOT NULL DEFAULT '{}'::jsonb,
+    ALTER COLUMN target_id DROP NOT NULL;
+ALTER TABLE crono.schedules DROP CONSTRAINT IF EXISTS schedules_target_set_id_fkey;
+ALTER TABLE crono.schedules
+    ADD CONSTRAINT schedules_target_set_id_fkey
+    FOREIGN KEY (target_set_id) REFERENCES crono.target_sets(id) ON DELETE RESTRICT;
+ALTER TABLE crono.schedules DROP CONSTRAINT IF EXISTS schedules_target_selection;
+ALTER TABLE crono.schedules
+    ADD CONSTRAINT schedules_target_selection CHECK (
+        (target_id IS NOT NULL)::integer + (target_set_id IS NOT NULL)::integer = 1
+    );
+ALTER TABLE crono.schedules DROP CONSTRAINT IF EXISTS schedules_inputs_object;
+ALTER TABLE crono.schedules
+    ADD CONSTRAINT schedules_inputs_object CHECK (jsonb_typeof(inputs) = 'object');
+
+-- One idempotency request can now fan out to multiple Target Set members.
+ALTER TABLE crono.runs DROP CONSTRAINT IF EXISTS runs_request_id_key;
+DROP INDEX IF EXISTS crono.runs_schedule_occurrence_unique;
+
+COMMIT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS runs_schedule_occurrence_target_unique
+    ON crono.runs (schedule_id, scheduled_at, target_id) WHERE schedule_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS crono.run_attempts (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
@@ -330,12 +405,18 @@ SET search_path = pg_catalog, crono
 AS $$
 DECLARE
     job_namespace_id uuid;
-    target_namespace_id uuid;
+    selection_namespace_id uuid;
 BEGIN
     SELECT namespace_id INTO STRICT job_namespace_id FROM crono.jobs WHERE id = NEW.job_id;
-    SELECT namespace_id INTO STRICT target_namespace_id FROM crono.targets WHERE id = NEW.target_id;
-    IF NEW.namespace_id <> job_namespace_id OR job_namespace_id <> target_namespace_id THEN
-        RAISE EXCEPTION 'Schedule, Job, and Target must belong to the same Namespace'
+    IF NEW.target_id IS NOT NULL THEN
+        SELECT namespace_id INTO STRICT selection_namespace_id
+          FROM crono.targets WHERE id = NEW.target_id;
+    ELSE
+        SELECT namespace_id INTO STRICT selection_namespace_id
+          FROM crono.target_sets WHERE id = NEW.target_set_id;
+    END IF;
+    IF NEW.namespace_id <> job_namespace_id OR job_namespace_id <> selection_namespace_id THEN
+        RAISE EXCEPTION 'Schedule, Job, and execution target must belong to the same Namespace'
             USING ERRCODE = '23514';
     END IF;
     RETURN NEW;
@@ -365,7 +446,7 @@ $$;
 
 DROP TRIGGER IF EXISTS schedules_namespace_match ON crono.schedules;
 CREATE CONSTRAINT TRIGGER schedules_namespace_match
-AFTER INSERT OR UPDATE OF namespace_id, job_id, target_id ON crono.schedules
+AFTER INSERT OR UPDATE OF namespace_id, job_id, target_id, target_set_id ON crono.schedules
 DEFERRABLE INITIALLY IMMEDIATE
 FOR EACH ROW EXECUTE FUNCTION crono.enforce_schedule_namespace_match();
 

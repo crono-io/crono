@@ -15,7 +15,7 @@ use crate::{
     domain::{
         CatchupPolicy as DomainCatchup, ExecutorKind as DomainExecutor,
         MisfirePolicy as DomainMisfire, Namespace, Queue, RunStatus as DomainRunStatus,
-        ScheduleTiming,
+        ScheduleTiming, TargetSelection,
     },
 };
 use axum::{
@@ -25,10 +25,12 @@ use axum::{
 };
 use crono_api::{
     CatchupPolicy, CreateJobRequest, CreateNamespaceRequest, CreateQueueRequest, CreateRunRequest,
-    CreateScheduleRequest, CreateTargetRequest, CreateTargetSetRequest, ExecutorKind, JobResource,
-    MisfirePolicy, NamespaceResource, OverviewResource, Page, QueueResource, RunResource,
-    RunStatus, ScheduleResource, TargetReference, TargetResource, TargetSetResource,
-    UpdateQueueRequest, UpdateScheduleRequest, WorkerResource, WorkerStatus,
+    CreateScheduleRequest, CreateTargetRequest, CreateTargetSetRequest, ExecutionTarget,
+    ExecutionTargetResource, ExecutorKind, JobResource, MisfirePolicy, NamespaceResource,
+    OverviewResource, Page, QueueResource, RunBatchResource, RunResource, RunStatus,
+    ScheduleResource, TargetReference, TargetResource, TargetSetResource, UpdateJobRequest,
+    UpdateQueueRequest, UpdateScheduleRequest, UpdateTargetRequest, UpdateTargetSetRequest,
+    WorkerResource, WorkerStatus,
 };
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
@@ -241,6 +243,7 @@ pub async fn create_job(
                 },
                 executable: request.executable,
                 arguments: request.arguments,
+                inputs: request.inputs,
                 idempotent: request.idempotent,
                 max_attempts: request.max_attempts,
                 retry_initial_seconds: request.retry_initial_seconds,
@@ -290,6 +293,44 @@ pub async fn get_job(
 }
 
 #[utoipa::path(
+    put,
+    path = "/api/jobs/{job_id}",
+    params(("job_id" = Uuid, Path)),
+    request_body = UpdateJobRequest,
+    responses((status = 200, body = JobResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    tag = "control-plane"
+)]
+pub async fn update_job(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(job_id): Path<Uuid>,
+    Json(request): Json<UpdateJobRequest>,
+) -> Result<Json<JobResource>, ApiError> {
+    let job = state
+        .application()
+        .update_job(
+            &context,
+            job_id,
+            CreateJobInput {
+                name: request.name,
+                queue_id: request.queue_id,
+                executor: domain_executor(request.executor),
+                executable: request.executable,
+                arguments: request.arguments,
+                inputs: request.inputs,
+                idempotent: request.idempotent,
+                max_attempts: request.max_attempts,
+                retry_initial_seconds: request.retry_initial_seconds,
+                retry_max_seconds: request.retry_max_seconds,
+                retry_multiplier: request.retry_multiplier,
+                retry_jitter: request.retry_jitter,
+            },
+        )
+        .await?;
+    Ok(Json(job_resource(&job)?))
+}
+
+#[utoipa::path(
     post,
     path = "/api/namespaces/{namespace_id}/targets",
     params(("namespace_id" = Uuid, Path)),
@@ -305,7 +346,13 @@ pub async fn create_target(
 ) -> Result<(StatusCode, Json<TargetResource>), ApiError> {
     let target = state
         .application()
-        .create_target(&context, namespace_id, &request.name, request.arguments)
+        .create_target(
+            &context,
+            namespace_id,
+            &request.name,
+            request.arguments,
+            request.inputs,
+        )
         .await?;
     Ok((StatusCode::CREATED, Json(target_resource(&target)?)))
 }
@@ -347,6 +394,33 @@ pub async fn get_target(
 }
 
 #[utoipa::path(
+    put,
+    path = "/api/targets/{target_id}",
+    params(("target_id" = Uuid, Path)),
+    request_body = UpdateTargetRequest,
+    responses((status = 200, body = TargetResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    tag = "control-plane"
+)]
+pub async fn update_target(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(target_id): Path<Uuid>,
+    Json(request): Json<UpdateTargetRequest>,
+) -> Result<Json<TargetResource>, ApiError> {
+    let target = state
+        .application()
+        .update_target(
+            &context,
+            target_id,
+            &request.name,
+            request.arguments,
+            request.inputs,
+        )
+        .await?;
+    Ok(Json(target_resource(&target)?))
+}
+
+#[utoipa::path(
     post,
     path = "/api/namespaces/{namespace_id}/target-sets",
     params(("namespace_id" = Uuid, Path)),
@@ -362,7 +436,13 @@ pub async fn create_target_set(
 ) -> Result<(StatusCode, Json<TargetSetResource>), ApiError> {
     let target_set = state
         .application()
-        .create_target_set(&context, namespace_id, &request.name, request.target_ids)
+        .create_target_set(
+            &context,
+            namespace_id,
+            &request.name,
+            request.target_ids,
+            request.inputs,
+        )
         .await?;
     Ok((StatusCode::CREATED, Json(target_set_resource(&target_set)?)))
 }
@@ -402,6 +482,33 @@ pub async fn get_target_set(
     let target_set = state
         .application()
         .get_target_set(&context, target_set_id)
+        .await?;
+    Ok(Json(target_set_resource(&target_set)?))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/target-sets/{target_set_id}",
+    params(("target_set_id" = Uuid, Path)),
+    request_body = UpdateTargetSetRequest,
+    responses((status = 200, body = TargetSetResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    tag = "control-plane"
+)]
+pub async fn update_target_set(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(target_set_id): Path<Uuid>,
+    Json(request): Json<UpdateTargetSetRequest>,
+) -> Result<Json<TargetSetResource>, ApiError> {
+    let target_set = state
+        .application()
+        .update_target_set(
+            &context,
+            target_set_id,
+            &request.name,
+            request.target_ids,
+            request.inputs,
+        )
         .await?;
     Ok(Json(target_set_resource(&target_set)?))
 }
@@ -449,7 +556,8 @@ pub async fn create_schedule(
             CreateScheduleInput {
                 name: request.name,
                 job_id: crate::domain::JobId::new(request.job_id),
-                target_id: crate::domain::TargetId::new(request.target_id),
+                target: domain_target(request.target),
+                inputs: request.inputs,
                 timing,
                 misfire_policy: domain_misfire(request.misfire_policy),
                 misfire_grace_seconds: request.misfire_grace_seconds,
@@ -526,21 +634,22 @@ pub async fn update_schedule(
     post,
     path = "/api/runs",
     request_body = CreateRunRequest,
-    responses((status = 201, body = RunResource), (status = 200, body = RunResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses((status = 201, body = RunBatchResource), (status = 200, body = RunBatchResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
     tag = "control-plane"
 )]
 pub async fn create_run(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
     Json(request): Json<CreateRunRequest>,
-) -> Result<(StatusCode, Json<RunResource>), ApiError> {
+) -> Result<(StatusCode, Json<RunBatchResource>), ApiError> {
     let outcome = state
         .application()
         .create_run(
             &context,
             request.request_id,
             request.job_id,
-            request.target_id,
+            domain_target(request.target),
+            request.inputs,
         )
         .await?;
     let status = if outcome.created {
@@ -548,7 +657,18 @@ pub async fn create_run(
     } else {
         StatusCode::OK
     };
-    Ok((status, Json(run_resource(&outcome.run)?)))
+    let runs = outcome
+        .runs
+        .iter()
+        .map(run_resource)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((
+        status,
+        Json(RunBatchResource {
+            request_id: request.request_id,
+            runs,
+        }),
+    ))
 }
 
 #[utoipa::path(
@@ -665,6 +785,7 @@ fn job_resource(record: &JobRecord) -> Result<JobResource, ApiError> {
         queue: record.queue_name.to_string(),
         executable: record.job.executable().map(str::to_string),
         arguments: record.job.arguments().to_vec(),
+        inputs: record.job.inputs().clone(),
         idempotent: record.job.idempotent(),
         max_attempts: record.job.max_attempts(),
         retry_initial_seconds: record.job.retry_initial_seconds(),
@@ -684,6 +805,7 @@ fn target_resource(record: &TargetRecord) -> Result<TargetResource, ApiError> {
         name: record.target.name().to_string(),
         qualified_name: format!("{}/{}", record.namespace, record.target.name()),
         arguments: record.target.arguments().to_vec(),
+        inputs: record.target.inputs().clone(),
         created_at: timestamp(record.target.created_at())?,
         updated_at: timestamp(record.target.updated_at())?,
     })
@@ -705,7 +827,9 @@ fn target_set_resource(record: &TargetSetRecord) -> Result<TargetSetResource, Ap
         name: record.target_set.name().to_string(),
         qualified_name: format!("{}/{}", record.namespace, record.target_set.name()),
         targets,
+        inputs: record.target_set.inputs().clone(),
         created_at: timestamp(record.target_set.created_at())?,
+        updated_at: timestamp(record.target_set.updated_at())?,
     })
 }
 
@@ -726,8 +850,17 @@ fn schedule_resource(record: &ScheduleRecord) -> Result<ScheduleResource, ApiErr
         name: record.schedule.name.to_string(),
         job_id: record.schedule.job_id.get(),
         job: format!("{}/{}", record.namespace, record.job_name),
-        target_id: record.schedule.target_id.get(),
-        target: format!("{}/{}", record.namespace, record.target_name),
+        target: match record.schedule.target {
+            TargetSelection::Target(id) => ExecutionTargetResource::Target {
+                id: id.get(),
+                name: format!("{}/{}", record.namespace, record.target_name),
+            },
+            TargetSelection::TargetSet(id) => ExecutionTargetResource::TargetSet {
+                id: id.get(),
+                name: format!("{}/{}", record.namespace, record.target_name),
+            },
+        },
+        inputs: record.schedule.inputs.clone(),
         cron_expression,
         execute_at,
         timezone,
@@ -750,6 +883,22 @@ const fn domain_misfire(value: MisfirePolicy) -> DomainMisfire {
         MisfirePolicy::RunLate => DomainMisfire::RunLate,
         MisfirePolicy::Skip => DomainMisfire::Skip,
         MisfirePolicy::GracePeriod => DomainMisfire::GracePeriod,
+    }
+}
+
+const fn domain_executor(value: ExecutorKind) -> DomainExecutor {
+    match value {
+        ExecutorKind::Noop => DomainExecutor::Noop,
+        ExecutorKind::Process => DomainExecutor::Process,
+    }
+}
+
+const fn domain_target(value: ExecutionTarget) -> TargetSelection {
+    match value {
+        ExecutionTarget::Target { id } => TargetSelection::Target(crate::domain::TargetId::new(id)),
+        ExecutionTarget::TargetSet { id } => {
+            TargetSelection::TargetSet(crate::domain::TargetSetId::new(id))
+        }
     }
 }
 

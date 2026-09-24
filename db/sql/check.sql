@@ -93,6 +93,7 @@ BEGIN
         'crono.target_sets',
         'crono.target_set_members',
         'crono.schedules',
+        'crono.run_requests',
         'crono.runs',
         'crono.run_attempts',
         'crono.worker_presence',
@@ -107,6 +108,56 @@ BEGIN
             RAISE EXCEPTION 'Missing runtime grants on relation: %', relation;
         END IF;
     END LOOP;
+END;
+$$;
+
+DO $$
+DECLARE
+    required_column text;
+BEGIN
+    FOREACH required_column IN ARRAY ARRAY[
+        'jobs.inputs',
+        'targets.inputs',
+        'target_sets.inputs',
+        'target_sets.updated_at',
+        'schedules.inputs',
+        'schedules.target_set_id'
+    ] LOOP
+        IF NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'crono'
+              AND table_name = split_part(required_column, '.', 1)
+              AND column_name = split_part(required_column, '.', 2)
+        ) THEN
+            RAISE EXCEPTION 'Missing compatibility column: crono.%', required_column;
+        END IF;
+    END LOOP;
+
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'crono'
+          AND table_name = 'schedules'
+          AND column_name = 'target_id'
+          AND is_nullable = 'NO'
+    ) THEN
+        RAISE EXCEPTION 'schedules.target_id still requires a Target';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'crono.runs'::regclass
+          AND conname = 'runs_request_id_key'
+    ) THEN
+        RAISE EXCEPTION 'runs.request_id still prevents Target Set fan-out';
+    END IF;
+    IF to_regclass('crono.runs_schedule_occurrence_target_unique') IS NULL THEN
+        RAISE EXCEPTION 'Missing per-Target Schedule occurrence index';
+    END IF;
+    IF to_regclass('crono.runs_schedule_occurrence_unique') IS NOT NULL THEN
+        RAISE EXCEPTION 'Legacy Schedule occurrence index still prevents fan-out';
+    END IF;
 END;
 $$;
 

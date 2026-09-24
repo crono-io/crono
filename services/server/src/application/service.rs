@@ -3,15 +3,19 @@
 use super::{
     ApplicationError, Authorizer, Capability, ControlPlaneStore, CreateJobInput, CreateQueueInput,
     CreateScheduleInput, JobDefinition, JobRecord, NewSchedule, Overview, Page, RequestContext,
-    ResourceScope, RunRecord, ScheduleRecord, StoreError, TargetRecord, TargetSetRecord,
-    UpdateQueueInput, WorkerRecord,
+    ResourceScope, RunRecord, ScheduleRecord, StoreError, TargetDefinition, TargetRecord,
+    TargetSetRecord, UpdateQueueInput, WorkerRecord,
 };
 use crate::{
     domain::{
-        ExecutorKind, JobId, MisfirePolicy, Namespace, NamespaceId, NamespaceName, Queue, QueueId,
-        QueueName, ResourceName, RunId, ScheduleId, ScheduleTiming, TargetId, TargetSetId,
+        ExecutorKind, Job, JobId, MisfirePolicy, Namespace, NamespaceId, NamespaceName, Queue,
+        QueueId, QueueName, ResourceName, RunId, ScheduleId, ScheduleTiming, Target, TargetId,
+        TargetSelection, TargetSetId,
     },
     scheduler::next_cron_occurrence,
+};
+use crono_execution::{
+    merge_inputs, render_arguments, validate_argument_templates, validate_inputs,
 };
 use std::{collections::BTreeSet, sync::Arc};
 use time::OffsetDateTime;
@@ -24,7 +28,7 @@ const MAX_QUEUE_DESCRIPTION_CHARACTERS: usize = 500;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateRunOutcome {
-    pub run: RunRecord,
+    pub runs: Vec<RunRecord>,
     pub created: bool,
 }
 
@@ -270,6 +274,7 @@ impl Application {
             queue_id,
             executable: input.executable,
             arguments: input.arguments,
+            inputs: input.inputs,
             idempotent: input.idempotent,
             max_attempts: input.max_attempts,
             retry_initial_seconds: input.retry_initial_seconds,
@@ -281,6 +286,64 @@ impl Application {
             .store
             .create_job(namespace_id, &name, &definition)
             .await?)
+    }
+
+    /// Replace a Job definition while preserving its identity and Namespace.
+    ///
+    /// Existing Runs retain their immutable snapshots; only future Runs observe
+    /// the updated command, inputs, Queue, and retry policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns validation, authorization, not-found, conflict, or storage failures.
+    pub async fn update_job(
+        &self,
+        context: &RequestContext,
+        id: Uuid,
+        input: CreateJobInput,
+    ) -> Result<JobRecord, ApplicationError> {
+        let id = JobId::new(id);
+        let name = ResourceName::parse(&input.name).map_err(invalid_name)?;
+        validate_job(&input)?;
+        self.authorizer
+            .authorize(context, Capability::JobUpdate, &ResourceScope::Job(id))
+            .await?;
+        let existing = self.store.get_job(id).await?;
+        let queue_id = QueueId::new(input.queue_id);
+        self.authorizer
+            .authorize(
+                context,
+                Capability::QueueRead,
+                &ResourceScope::Queue(queue_id),
+            )
+            .await?;
+        let queue = self.store.get_queue(queue_id).await.map_err(|error| {
+            if error == StoreError::NotFound {
+                ApplicationError::invalid("queue_id", "Select an existing Queue.")
+            } else {
+                error.into()
+            }
+        })?;
+        if !queue.enabled() && queue_id != existing.job.queue_id() {
+            return Err(ApplicationError::invalid(
+                "queue_id",
+                "Select an enabled Queue.",
+            ));
+        }
+        let definition = JobDefinition {
+            executor: input.executor,
+            queue_id,
+            executable: input.executable,
+            arguments: input.arguments,
+            inputs: input.inputs,
+            idempotent: input.idempotent,
+            max_attempts: input.max_attempts,
+            retry_initial_seconds: input.retry_initial_seconds,
+            retry_max_seconds: input.retry_max_seconds,
+            retry_multiplier: input.retry_multiplier,
+            retry_jitter: input.retry_jitter,
+        };
+        Ok(self.store.update_job(id, &name, &definition).await?)
     }
 
     /// List visible Jobs from one authorized Namespace.
@@ -341,10 +404,12 @@ impl Application {
         namespace_id: Uuid,
         name: &str,
         arguments: Vec<String>,
+        inputs: serde_json::Value,
     ) -> Result<TargetRecord, ApplicationError> {
         let namespace_id = NamespaceId::new(namespace_id);
         let name = ResourceName::parse(name).map_err(invalid_name)?;
         validate_arguments(&arguments)?;
+        validate_input_object(&inputs)?;
         self.authorizer
             .authorize(
                 context,
@@ -352,9 +417,10 @@ impl Application {
                 &ResourceScope::Namespace(namespace_id),
             )
             .await?;
+        let definition = TargetDefinition { arguments, inputs };
         Ok(self
             .store
-            .create_target(namespace_id, &name, &arguments)
+            .create_target(namespace_id, &name, &definition)
             .await?)
     }
 
@@ -405,6 +471,34 @@ impl Application {
         Ok(self.store.get_target(id).await?)
     }
 
+    /// Replace Target arguments and inputs for future execution snapshots.
+    ///
+    /// # Errors
+    ///
+    /// Returns validation, authorization, not-found, conflict, or storage failures.
+    pub async fn update_target(
+        &self,
+        context: &RequestContext,
+        id: Uuid,
+        name: &str,
+        arguments: Vec<String>,
+        inputs: serde_json::Value,
+    ) -> Result<TargetRecord, ApplicationError> {
+        let id = TargetId::new(id);
+        let name = ResourceName::parse(name).map_err(invalid_name)?;
+        validate_arguments(&arguments)?;
+        validate_input_object(&inputs)?;
+        self.authorizer
+            .authorize(
+                context,
+                Capability::TargetUpdate,
+                &ResourceScope::Target(id),
+            )
+            .await?;
+        let definition = TargetDefinition { arguments, inputs };
+        Ok(self.store.update_target(id, &name, &definition).await?)
+    }
+
     /// Create a non-empty Target Set from explicit same-Namespace Target IDs.
     ///
     /// # Errors
@@ -416,9 +510,11 @@ impl Application {
         namespace_id: Uuid,
         name: &str,
         target_ids: Vec<Uuid>,
+        inputs: serde_json::Value,
     ) -> Result<TargetSetRecord, ApplicationError> {
         let namespace_id = NamespaceId::new(namespace_id);
         let name = ResourceName::parse(name).map_err(invalid_name)?;
+        validate_input_object(&inputs)?;
         if target_ids.is_empty() || target_ids.len() > MAX_TARGET_SET_MEMBERS {
             return Err(ApplicationError::invalid(
                 "target_ids",
@@ -463,7 +559,7 @@ impl Application {
         }
         Ok(self
             .store
-            .create_target_set(namespace_id, &name, &ids)
+            .create_target_set(namespace_id, &name, &ids, &inputs)
             .await?)
     }
 
@@ -518,6 +614,41 @@ impl Application {
         Ok(self.store.get_target_set(id).await?)
     }
 
+    /// Replace Target Set membership and shared inputs atomically.
+    ///
+    /// # Errors
+    ///
+    /// Returns validation, authorization, not-found, conflict, or storage failures.
+    pub async fn update_target_set(
+        &self,
+        context: &RequestContext,
+        id: Uuid,
+        name: &str,
+        target_ids: Vec<Uuid>,
+        inputs: serde_json::Value,
+    ) -> Result<TargetSetRecord, ApplicationError> {
+        let id = TargetSetId::new(id);
+        let existing = self.store.get_target_set(id).await?;
+        let namespace_id = existing.target_set.namespace_id();
+        let name = ResourceName::parse(name).map_err(invalid_name)?;
+        validate_input_object(&inputs)?;
+        validate_target_ids(&target_ids)?;
+        self.authorizer
+            .authorize(
+                context,
+                Capability::TargetSetUpdate,
+                &ResourceScope::TargetSet(id),
+            )
+            .await?;
+        let ids: Vec<TargetId> = target_ids.into_iter().map(TargetId::new).collect();
+        self.validate_target_members(context, namespace_id, &ids)
+            .await?;
+        Ok(self
+            .store
+            .update_target_set(id, &name, &ids, &inputs)
+            .await?)
+    }
+
     /// Create a durable Schedule without consulting NATS.
     ///
     /// # Errors
@@ -531,6 +662,7 @@ impl Application {
     ) -> Result<ScheduleRecord, ApplicationError> {
         let namespace_id = NamespaceId::new(namespace_id);
         let name = ResourceName::parse(&input.name).map_err(invalid_name)?;
+        validate_input_object(&input.inputs)?;
         self.authorizer
             .authorize(
                 context,
@@ -545,19 +677,21 @@ impl Application {
                 &ResourceScope::Job(input.job_id),
             )
             .await?;
-        self.authorizer
-            .authorize(
-                context,
-                Capability::TargetRead,
-                &ResourceScope::Target(input.target_id),
-            )
-            .await?;
         let job = self.store.get_job(input.job_id).await?;
-        let target = self.store.get_target(input.target_id).await?;
-        if job.job.namespace_id() != namespace_id || target.target.namespace_id() != namespace_id {
+        let (selection_namespace, target_set_inputs, targets) =
+            self.execution_targets(context, input.target).await?;
+        if job.job.namespace_id() != namespace_id || selection_namespace != namespace_id {
             return Err(ApplicationError::invalid_request(
-                "Schedule, Job, and Target must belong to the same Namespace",
+                "Schedule, Job, and execution target must belong to the same Namespace",
             ));
+        }
+        for selected_target in &targets {
+            validate_rendered_execution(
+                &job.job,
+                target_set_inputs.as_ref(),
+                selected_target,
+                &input.inputs,
+            )?;
         }
         validate_schedule_policy(
             input.misfire_policy,
@@ -585,7 +719,8 @@ impl Application {
                 namespace_id,
                 name,
                 job_id: input.job_id,
-                target_id: input.target_id,
+                target: input.target,
+                inputs: input.inputs,
                 cron_expression,
                 execute_at,
                 timezone,
@@ -703,26 +838,29 @@ impl Application {
         context: &RequestContext,
         request_id: Uuid,
         job_id: Uuid,
-        target_id: Uuid,
+        target: TargetSelection,
+        inputs: serde_json::Value,
     ) -> Result<CreateRunOutcome, ApplicationError> {
         let job_id = JobId::new(job_id);
-        let target_id = TargetId::new(target_id);
+        validate_input_object(&inputs)?;
         self.authorizer
             .authorize(context, Capability::JobExecute, &ResourceScope::Job(job_id))
             .await?;
-        self.authorizer
-            .authorize(
-                context,
-                Capability::TargetUse,
-                &ResourceScope::Target(target_id),
-            )
-            .await?;
         let job = self.store.get_job(job_id).await?;
-        let target = self.store.get_target(target_id).await?;
-        if job.job.namespace_id() != target.target.namespace_id() {
+        let (selection_namespace, target_set_inputs, targets) =
+            self.execution_targets(context, target).await?;
+        if job.job.namespace_id() != selection_namespace {
             return Err(ApplicationError::invalid_request(
-                "Job and Target must belong to the same Namespace",
+                "Job and execution target must belong to the same Namespace",
             ));
+        }
+        for selected_target in &targets {
+            validate_rendered_execution(
+                &job.job,
+                target_set_inputs.as_ref(),
+                selected_target,
+                &inputs,
+            )?;
         }
         self.authorizer
             .authorize(
@@ -731,8 +869,11 @@ impl Application {
                 &ResourceScope::Namespace(job.job.namespace_id()),
             )
             .await?;
-        let (run, created) = self.store.create_run(request_id, job_id, target_id).await?;
-        Ok(CreateRunOutcome { run, created })
+        let (runs, created) = self
+            .store
+            .create_runs(request_id, job_id, target, &inputs)
+            .await?;
+        Ok(CreateRunOutcome { runs, created })
     }
 
     /// List Runs after applying principal visibility within the SQL query.
@@ -812,6 +953,76 @@ impl Application {
             .await?;
         Ok(self.store.overview(&visibility).await?)
     }
+
+    async fn validate_target_members(
+        &self,
+        context: &RequestContext,
+        namespace_id: NamespaceId,
+        ids: &[TargetId],
+    ) -> Result<(), ApplicationError> {
+        for id in ids {
+            self.authorizer
+                .authorize(context, Capability::TargetRead, &ResourceScope::Target(*id))
+                .await?;
+            let target = self.store.get_target(*id).await.map_err(|error| {
+                if error == StoreError::NotFound {
+                    ApplicationError::invalid(
+                        "target_ids",
+                        "one or more selected Targets no longer exist",
+                    )
+                } else {
+                    error.into()
+                }
+            })?;
+            if target.target.namespace_id() != namespace_id {
+                return Err(ApplicationError::invalid(
+                    "target_ids",
+                    "all selected Targets must belong to the Target Set Namespace",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    async fn execution_targets(
+        &self,
+        context: &RequestContext,
+        selection: TargetSelection,
+    ) -> Result<(NamespaceId, Option<serde_json::Value>, Vec<Target>), ApplicationError> {
+        match selection {
+            TargetSelection::Target(id) => {
+                self.authorizer
+                    .authorize(context, Capability::TargetUse, &ResourceScope::Target(id))
+                    .await?;
+                let record = self.store.get_target(id).await?;
+                Ok((record.target.namespace_id(), None, vec![record.target]))
+            }
+            TargetSelection::TargetSet(id) => {
+                self.authorizer
+                    .authorize(
+                        context,
+                        Capability::TargetSetUse,
+                        &ResourceScope::TargetSet(id),
+                    )
+                    .await?;
+                let record = self.store.get_target_set(id).await?;
+                for target in &record.targets {
+                    self.authorizer
+                        .authorize(
+                            context,
+                            Capability::TargetUse,
+                            &ResourceScope::Target(target.id()),
+                        )
+                        .await?;
+                }
+                Ok((
+                    record.target_set.namespace_id(),
+                    Some(record.target_set.inputs().clone()),
+                    record.targets,
+                ))
+            }
+        }
+    }
 }
 
 fn page_limit(limit: Option<u16>) -> Result<u16, ApplicationError> {
@@ -855,11 +1066,55 @@ fn validate_arguments(arguments: &[String]) -> Result<(), ApplicationError> {
             "arguments must contain at most 128 bounded, NUL-free values",
         ));
     }
+    validate_argument_templates(arguments)
+        .map_err(|error| ApplicationError::invalid("arguments", error.to_string()))
+}
+
+fn validate_input_object(inputs: &serde_json::Value) -> Result<(), ApplicationError> {
+    validate_inputs(inputs).map_err(|error| ApplicationError::invalid("inputs", error.to_string()))
+}
+
+fn validate_target_ids(target_ids: &[Uuid]) -> Result<(), ApplicationError> {
+    if target_ids.is_empty() || target_ids.len() > MAX_TARGET_SET_MEMBERS {
+        return Err(ApplicationError::invalid(
+            "target_ids",
+            format!("target_ids must contain between 1 and {MAX_TARGET_SET_MEMBERS} values"),
+        ));
+    }
+    let unique: BTreeSet<Uuid> = target_ids.iter().copied().collect();
+    if unique.len() != target_ids.len() {
+        return Err(ApplicationError::invalid(
+            "target_ids",
+            "target_ids must not contain duplicates",
+        ));
+    }
     Ok(())
+}
+
+fn validate_rendered_execution(
+    job: &Job,
+    target_set_inputs: Option<&serde_json::Value>,
+    target: &Target,
+    invocation_inputs: &serde_json::Value,
+) -> Result<(), ApplicationError> {
+    let empty = serde_json::json!({});
+    let merged = merge_inputs(&[
+        job.inputs(),
+        target_set_inputs.unwrap_or(&empty),
+        target.inputs(),
+        invocation_inputs,
+    ])
+    .map_err(|error| ApplicationError::invalid("inputs", error.to_string()))?;
+    let mut arguments = job.arguments().to_vec();
+    arguments.extend_from_slice(target.arguments());
+    render_arguments(&arguments, &merged)
+        .map(|_| ())
+        .map_err(|error| ApplicationError::invalid("arguments", error.to_string()))
 }
 
 fn validate_job(input: &CreateJobInput) -> Result<(), ApplicationError> {
     validate_arguments(&input.arguments)?;
+    validate_input_object(&input.inputs)?;
     if !(1..=100).contains(&input.max_attempts) {
         return Err(ApplicationError::invalid(
             "max_attempts",

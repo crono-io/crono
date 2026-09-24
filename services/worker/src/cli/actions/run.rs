@@ -17,6 +17,7 @@ use crono_api::{
     ExecutorKind, LeaseRequest, QueueReference, QueueResolutionRequest, QueueResolutionResponse,
     QueueResolutionStatus, WorkerHeartbeatRequest,
 };
+use crono_execution::MAX_INPUT_BYTES;
 use futures_util::StreamExt;
 use std::{env, io::Write, process::Stdio, sync::Arc, time::Duration};
 use tempfile::NamedTempFile;
@@ -30,7 +31,6 @@ use tracing::{info, warn};
 
 const STREAM_NAME: &str = "CRONO_DISPATCH";
 const OUTPUT_LIMIT: usize = 65_536;
-const INPUT_LIMIT: usize = 65_536;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const QUEUE_RESOLUTION_ATTEMPTS: u8 = 30;
 const QUEUE_RESOLUTION_RETRY: Duration = Duration::from_secs(1);
@@ -401,7 +401,7 @@ async fn execute_process(execution: ExecutionSnapshot) -> Result<ExecutionResult
         bail!("process executable is not absolute");
     }
     let inputs = serde_json::to_vec(&execution.inputs)?;
-    if inputs.len() > INPUT_LIMIT {
+    if inputs.len() > MAX_INPUT_BYTES {
         bail!("execution inputs exceed the worker limit");
     }
     let mut input_file = NamedTempFile::new().context("failed to create execution input file")?;

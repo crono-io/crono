@@ -16,7 +16,9 @@ pub struct TargetSet {
     namespace_id: NamespaceId,
     name: ResourceName,
     members: BTreeSet<TargetId>,
+    inputs: serde_json::Value,
     created_at: OffsetDateTime,
+    updated_at: OffsetDateTime,
 }
 
 impl TargetSet {
@@ -26,14 +28,18 @@ impl TargetSet {
         id: TargetSetId,
         namespace_id: NamespaceId,
         name: ResourceName,
+        inputs: serde_json::Value,
         created_at: OffsetDateTime,
+        updated_at: OffsetDateTime,
     ) -> Self {
         Self {
             id,
             namespace_id,
             name,
             members: BTreeSet::new(),
+            inputs,
             created_at,
+            updated_at,
         }
     }
 
@@ -61,10 +67,22 @@ impl TargetSet {
         &self.members
     }
 
+    /// Return shared inputs applied when this set is explicitly executed.
+    #[must_use]
+    pub const fn inputs(&self) -> &serde_json::Value {
+        &self.inputs
+    }
+
     /// Return when the Target Set was created.
     #[must_use]
     pub const fn created_at(&self) -> OffsetDateTime {
         self.created_at
+    }
+
+    /// Return when editable metadata or membership last changed.
+    #[must_use]
+    pub const fn updated_at(&self) -> OffsetDateTime {
+        self.updated_at
     }
 
     /// Add a Target after enforcing same-Namespace membership.
@@ -102,6 +120,7 @@ mod tests {
             namespace_id,
             ResourceName::parse(name)?,
             Vec::new(),
+            serde_json::json!({}),
             OffsetDateTime::UNIX_EPOCH,
             OffsetDateTime::UNIX_EPOCH,
         ))
@@ -114,6 +133,8 @@ mod tests {
             TargetSetId::new(Uuid::from_u128(31)),
             namespace_id,
             ResourceName::parse("mariadb-prod")?,
+            serde_json::json!({}),
+            OffsetDateTime::UNIX_EPOCH,
             OffsetDateTime::UNIX_EPOCH,
         );
         let host_124 = target(24, namespace_id, "host-124")?;
@@ -139,6 +160,8 @@ mod tests {
             TargetSetId::new(Uuid::from_u128(31)),
             namespace_id,
             ResourceName::parse("mariadb-prod")?,
+            serde_json::json!({}),
+            OffsetDateTime::UNIX_EPOCH,
             OffsetDateTime::UNIX_EPOCH,
         );
         let postgres = target(41, NamespaceId::new(Uuid::from_u128(2)), "pg-cluster-01")?;

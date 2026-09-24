@@ -27,8 +27,9 @@ axum.workspace = true
 chrono.workspace = true
 chrono-tz.workspace = true
 clap.workspace = true
-cron.workspace = true
+cron-parser.workspace = true
 crono-api = { workspace = true, features = ["openapi"] }
+crono-execution.workspace = true
 crono-telemetry.workspace = true
 futures-util.workspace = true
 prometheus-client.workspace = true

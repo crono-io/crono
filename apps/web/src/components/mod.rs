@@ -14,8 +14,9 @@ pub mod page_header;
 pub use card::Card;
 pub use empty_state::EmptyState;
 pub use forms::{
-    FormActions, ResourceMultiSelect, ResourceNameInput, ResourceOption, ResourceSelect,
-    name_validation_message, visible_name_validation,
+    ArgumentListInput, FormActions, JsonObjectInput, ResourceMultiSelect, ResourceNameInput,
+    ResourceOption, ResourceSelect, name_validation_message, parse_input_object,
+    visible_name_validation,
 };
 pub use icon::Icon;
 pub use page_header::PageHeader;

@@ -12,10 +12,12 @@ workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 crono-api.workspace = true
+crono-execution.workspace = true
 gloo-net.workspace = true
 leptos.workspace = true
 leptos_router.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 uuid.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

@@ -13,6 +13,7 @@ pub enum AppRoute {
     Jobs,
     Targets,
     TargetSets,
+    Schedules,
     Runs,
     Workers,
     Settings,
@@ -29,6 +30,7 @@ impl AppRoute {
             Self::Jobs => "/jobs",
             Self::Targets => "/targets",
             Self::TargetSets => "/target-sets",
+            Self::Schedules => "/schedules",
             Self::Runs => "/runs",
             Self::Workers => "/workers",
             Self::Settings => "/settings",
@@ -45,6 +47,7 @@ impl AppRoute {
             Self::Jobs => "Jobs",
             Self::Targets => "Targets",
             Self::TargetSets => "Target Sets",
+            Self::Schedules => "Schedules",
             Self::Runs => "Runs",
             Self::Workers => "Workers",
             Self::Settings => "Settings",
@@ -61,6 +64,7 @@ impl AppRoute {
             Self::Jobs => MaterialSymbol::Work,
             Self::Targets => MaterialSymbol::Dns,
             Self::TargetSets => MaterialSymbol::Lan,
+            Self::Schedules => MaterialSymbol::CalendarMonth,
             Self::Runs => MaterialSymbol::PlayCircle,
             Self::Workers => MaterialSymbol::Memory,
             Self::Settings => MaterialSymbol::Settings,
@@ -81,6 +85,7 @@ impl AppRoute {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaterialSymbol {
     AccountTree,
+    CalendarMonth,
     Check,
     Dashboard,
     Dns,
@@ -101,6 +106,7 @@ impl MaterialSymbol {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::AccountTree => "account_tree",
+            Self::CalendarMonth => "calendar_month",
             Self::Check => "check",
             Self::Dashboard => "dashboard",
             Self::Dns => "dns",
@@ -132,17 +138,18 @@ const RESOURCE_ROUTES: &[AppRoute] = &[
     AppRoute::Targets,
     AppRoute::TargetSets,
 ];
-const EXECUTION_ROUTES: &[AppRoute] = &[AppRoute::Runs, AppRoute::Workers];
+const EXECUTION_ROUTES: &[AppRoute] = &[AppRoute::Schedules, AppRoute::Runs, AppRoute::Workers];
 const SYSTEM_ROUTES: &[AppRoute] = &[AppRoute::Settings];
 
 /// Complete route inventory used for exact matching and verification.
-pub const ALL_ROUTES: [AppRoute; 9] = [
+pub const ALL_ROUTES: [AppRoute; 10] = [
     AppRoute::Overview,
     AppRoute::Namespaces,
     AppRoute::Queues,
     AppRoute::Jobs,
     AppRoute::Targets,
     AppRoute::TargetSets,
+    AppRoute::Schedules,
     AppRoute::Runs,
     AppRoute::Workers,
     AppRoute::Settings,

@@ -162,6 +162,8 @@ pub struct CreateJobRequest {
     pub executable: Option<String>,
     #[serde(default)]
     pub arguments: Vec<String>,
+    #[serde(default = "default_inputs")]
+    pub inputs: serde_json::Value,
     #[serde(default)]
     pub idempotent: bool,
     #[serde(default = "default_max_attempts")]
@@ -174,6 +176,29 @@ pub struct CreateJobRequest {
     pub retry_multiplier: f64,
     #[serde(default = "default_retry_jitter")]
     pub retry_jitter: f64,
+}
+
+/// Replace an existing Job definition while preserving its UUID and Namespace.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateJobRequest {
+    pub name: String,
+    pub queue_id: Uuid,
+    pub executor: ExecutorKind,
+    pub executable: Option<String>,
+    pub arguments: Vec<String>,
+    pub inputs: serde_json::Value,
+    pub idempotent: bool,
+    pub max_attempts: u16,
+    pub retry_initial_seconds: u32,
+    pub retry_max_seconds: u32,
+    pub retry_multiplier: f64,
+    pub retry_jitter: f64,
+}
+
+fn default_inputs() -> serde_json::Value {
+    serde_json::json!({})
 }
 
 const fn default_max_attempts() -> u16 {
@@ -209,6 +234,7 @@ pub struct JobResource {
     pub queue: String,
     pub executable: Option<String>,
     pub arguments: Vec<String>,
+    pub inputs: serde_json::Value,
     pub idempotent: bool,
     pub max_attempts: u16,
     pub retry_initial_seconds: u32,
@@ -226,6 +252,18 @@ pub struct CreateTargetRequest {
     pub name: String,
     #[serde(default)]
     pub arguments: Vec<String>,
+    #[serde(default = "default_inputs")]
+    pub inputs: serde_json::Value,
+}
+
+/// Replace editable Target metadata while preserving identity and Namespace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateTargetRequest {
+    pub name: String,
+    pub arguments: Vec<String>,
+    pub inputs: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -237,6 +275,7 @@ pub struct TargetResource {
     pub name: String,
     pub qualified_name: String,
     pub arguments: Vec<String>,
+    pub inputs: serde_json::Value,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -248,6 +287,18 @@ pub struct TargetResource {
 pub struct CreateTargetSetRequest {
     pub name: String,
     pub target_ids: Vec<Uuid>,
+    #[serde(default = "default_inputs")]
+    pub inputs: serde_json::Value,
+}
+
+/// Replace a Target Set's name, explicit membership, and shared inputs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateTargetSetRequest {
+    pub name: String,
+    pub target_ids: Vec<Uuid>,
+    pub inputs: serde_json::Value,
 }
 
 /// Display metadata for one Target selected by a Target Set.
@@ -267,7 +318,27 @@ pub struct TargetSetResource {
     pub name: String,
     pub qualified_name: String,
     pub targets: Vec<TargetReference>,
+    pub inputs: serde_json::Value,
     pub created_at: String,
+    pub updated_at: String,
+}
+
+/// One explicit execution destination selected by immutable UUID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum ExecutionTarget {
+    Target { id: Uuid },
+    TargetSet { id: Uuid },
+}
+
+/// Display form of an execution destination.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum ExecutionTargetResource {
+    Target { id: Uuid, name: String },
+    TargetSet { id: Uuid, name: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -296,7 +367,9 @@ pub enum CatchupPolicy {
 pub struct CreateScheduleRequest {
     pub name: String,
     pub job_id: Uuid,
-    pub target_id: Uuid,
+    pub target: ExecutionTarget,
+    #[serde(default = "default_inputs")]
+    pub inputs: serde_json::Value,
     pub cron_expression: Option<String>,
     pub execute_at: Option<String>,
     #[serde(default = "default_timezone")]
@@ -332,8 +405,8 @@ pub struct ScheduleResource {
     pub name: String,
     pub job_id: Uuid,
     pub job: String,
-    pub target_id: Uuid,
-    pub target: String,
+    pub target: ExecutionTargetResource,
+    pub inputs: serde_json::Value,
     pub cron_expression: Option<String>,
     pub execute_at: Option<String>,
     pub timezone: String,
@@ -364,7 +437,9 @@ pub struct UpdateScheduleRequest {
 pub struct CreateRunRequest {
     pub request_id: Uuid,
     pub job_id: Uuid,
-    pub target_id: Uuid,
+    pub target: ExecutionTarget,
+    #[serde(default = "default_inputs")]
+    pub inputs: serde_json::Value,
 }
 
 /// Durable logical execution state.
@@ -404,6 +479,14 @@ pub struct RunResource {
     pub max_attempts: u16,
     pub lateness_seconds: u64,
     pub terminal_reason: Option<String>,
+}
+
+/// All per-Target Runs created by one idempotent manual request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RunBatchResource {
+    pub request_id: Uuid,
+    pub runs: Vec<RunResource>,
 }
 
 /// Server-derived liveness of a worker's presence heartbeat.
