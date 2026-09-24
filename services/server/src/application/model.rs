@@ -4,11 +4,25 @@ use crate::domain::{
     CatchupPolicy, ExecutorKind, Job, JobId, MisfirePolicy, NamespaceName, Run, Schedule,
     ScheduleTiming, Target, TargetId, TargetSet,
 };
+use uuid::Uuid;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreateQueueInput {
+    pub name: String,
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UpdateQueueInput {
+    pub name: String,
+    pub description: Option<String>,
+    pub enabled: bool,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateJobInput {
     pub name: String,
-    pub queue: String,
+    pub queue_id: Uuid,
     pub executor: ExecutorKind,
     pub executable: Option<String>,
     pub arguments: Vec<String>,
@@ -42,6 +56,7 @@ pub struct Page<T> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct JobRecord {
     pub namespace: NamespaceName,
+    pub queue_name: crate::domain::QueueName,
     pub job: Job,
 }
 
@@ -71,6 +86,7 @@ pub struct RunRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkerRecord {
     pub worker_id: String,
+    pub queue_id: crate::domain::QueueId,
     pub queue: String,
     pub concurrency: u16,
     pub version: String,

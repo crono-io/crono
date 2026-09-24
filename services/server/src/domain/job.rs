@@ -4,7 +4,7 @@
 //! copies these fields into the Run's immutable execution snapshot, so editing
 //! a Job can affect future Runs without changing committed work.
 
-use super::{JobId, NamespaceId, QueueName, ResourceName};
+use super::{JobId, NamespaceId, QueueId, ResourceName};
 use time::OffsetDateTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,7 +19,7 @@ pub struct Job {
     namespace_id: NamespaceId,
     name: ResourceName,
     executor: ExecutorKind,
-    queue: QueueName,
+    queue_id: QueueId,
     executable: Option<String>,
     arguments: Vec<String>,
     idempotent: bool,
@@ -38,7 +38,7 @@ pub struct JobData {
     pub namespace_id: NamespaceId,
     pub name: ResourceName,
     pub executor: ExecutorKind,
-    pub queue: QueueName,
+    pub queue_id: QueueId,
     pub executable: Option<String>,
     pub arguments: Vec<String>,
     pub idempotent: bool,
@@ -59,7 +59,7 @@ impl Job {
             namespace_id,
             name,
             executor,
-            queue,
+            queue_id,
             executable,
             arguments,
             idempotent,
@@ -76,7 +76,7 @@ impl Job {
             namespace_id,
             name,
             executor,
-            queue,
+            queue_id,
             executable,
             arguments,
             idempotent,
@@ -107,8 +107,8 @@ impl Job {
         self.executor
     }
     #[must_use]
-    pub const fn queue(&self) -> &QueueName {
-        &self.queue
+    pub const fn queue_id(&self) -> QueueId {
+        self.queue_id
     }
     #[must_use]
     pub fn executable(&self) -> Option<&str> {

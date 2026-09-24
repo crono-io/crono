@@ -87,6 +87,7 @@ DECLARE
 BEGIN
     FOREACH relation IN ARRAY ARRAY[
         'crono.namespaces',
+        'crono.queues',
         'crono.jobs',
         'crono.targets',
         'crono.target_sets',

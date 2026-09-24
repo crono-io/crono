@@ -109,6 +109,38 @@ pub struct NamespaceResource {
     pub created_at: String,
 }
 
+/// Create a global worker Queue used by Jobs and worker processes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateQueueRequest {
+    pub name: String,
+    pub description: Option<String>,
+}
+
+/// Replace the editable metadata of an existing Queue.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct UpdateQueueRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub enabled: bool,
+}
+
+/// Public Queue metadata; the UUID remains authoritative across renames.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct QueueResource {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub enabled: bool,
+    pub system: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// Executor selected by a Job and copied into every Run snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -124,8 +156,7 @@ pub enum ExecutorKind {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateJobRequest {
     pub name: String,
-    #[serde(default = "default_queue")]
-    pub queue: String,
+    pub queue_id: Uuid,
     #[serde(default)]
     pub executor: ExecutorKind,
     pub executable: Option<String>,
@@ -143,10 +174,6 @@ pub struct CreateJobRequest {
     pub retry_multiplier: f64,
     #[serde(default = "default_retry_jitter")]
     pub retry_jitter: f64,
-}
-
-fn default_queue() -> String {
-    "default".to_string()
 }
 
 const fn default_max_attempts() -> u16 {
@@ -178,6 +205,7 @@ pub struct JobResource {
     pub name: String,
     pub qualified_name: String,
     pub executor: ExecutorKind,
+    pub queue_id: Uuid,
     pub queue: String,
     pub executable: Option<String>,
     pub arguments: Vec<String>,
@@ -393,6 +421,7 @@ pub enum WorkerStatus {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkerResource {
     pub worker_id: String,
+    pub queue_id: Uuid,
     pub queue: String,
     pub concurrency: u16,
     pub version: String,
@@ -466,7 +495,7 @@ pub struct DispatchEnvelope {
     pub dispatch_id: Uuid,
     pub run_id: Uuid,
     pub attempt_id: Uuid,
-    pub queue: String,
+    pub queue_id: Uuid,
 }
 
 /// Immutable executable configuration returned only after a successful claim.
@@ -477,6 +506,7 @@ pub struct ExecutionSnapshot {
     pub arguments: Vec<String>,
     pub inputs: serde_json::Value,
     pub idempotency_key: Uuid,
+    pub queue_id: Uuid,
     pub queue: String,
     pub idempotent: bool,
     pub retry_initial_seconds: u32,
@@ -489,6 +519,7 @@ pub struct ExecutionSnapshot {
 pub struct ClaimRequest {
     pub run_id: Uuid,
     pub attempt_id: Uuid,
+    pub queue_id: Uuid,
     pub worker_id: String,
 }
 
@@ -515,9 +546,38 @@ pub struct LeaseRequest {
 pub struct WorkerHeartbeatRequest {
     pub worker_id: String,
     pub session_id: Uuid,
-    pub queue: String,
+    pub queue_id: Uuid,
     pub concurrency: u16,
     pub version: String,
+}
+
+/// Worker request for resolving a configured Queue name to stable routing data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QueueResolutionRequest {
+    pub name: String,
+}
+
+/// Minimal Queue identity returned over the server-mediated NATS boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueReference {
+    pub id: Uuid,
+    pub name: String,
+}
+
+/// Result of Queue resolution without exposing persistence failures to workers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueResolutionStatus {
+    Ready,
+    NotFound,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueResolutionResponse {
+    pub status: QueueResolutionStatus,
+    pub queue: Option<QueueReference>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

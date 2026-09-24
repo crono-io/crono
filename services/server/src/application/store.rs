@@ -10,8 +10,8 @@ use super::{
 };
 use crate::domain::{
     AttemptId, CatchupPolicy, DispatchId, ExecutorKind, JobId, MisfirePolicy, Namespace,
-    NamespaceId, NamespaceName, QueueName, ResourceName, RunId, Schedule, ScheduleId, TargetId,
-    TargetSetId,
+    NamespaceId, NamespaceName, Queue, QueueId, QueueName, ResourceName, RunId, Schedule,
+    ScheduleId, TargetId, TargetSetId,
 };
 use async_trait::async_trait;
 use crono_api::{
@@ -24,7 +24,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq)]
 pub struct JobDefinition {
     pub executor: ExecutorKind,
-    pub queue: QueueName,
+    pub queue_id: QueueId,
     pub executable: Option<String>,
     pub arguments: Vec<String>,
     pub idempotent: bool,
@@ -93,6 +93,7 @@ pub struct MetricsSnapshot {
 pub enum StoreError {
     NotFound,
     Conflict,
+    InUse,
     IdempotencyConflict,
     StaleRevision,
     Unavailable,
@@ -104,6 +105,7 @@ impl fmt::Display for StoreError {
         formatter.write_str(match self {
             Self::NotFound => "resource was not found",
             Self::Conflict => "resource already exists",
+            Self::InUse => "resource is still in use",
             Self::IdempotencyConflict => "idempotency key conflicts with an existing request",
             Self::StaleRevision => "resource revision is stale",
             Self::Unavailable => "persistence is unavailable",
@@ -124,6 +126,23 @@ pub trait ControlPlaneStore: Send + Sync {
         after: Option<&str>,
     ) -> Result<Page<Namespace>, StoreError>;
     async fn get_namespace(&self, id: NamespaceId) -> Result<Namespace, StoreError>;
+    async fn create_queue(
+        &self,
+        name: &QueueName,
+        description: Option<&str>,
+    ) -> Result<Queue, StoreError>;
+    async fn list_queues(&self, limit: u16, after: Option<&str>)
+    -> Result<Page<Queue>, StoreError>;
+    async fn get_queue(&self, id: QueueId) -> Result<Queue, StoreError>;
+    async fn get_queue_by_name(&self, name: &QueueName) -> Result<Queue, StoreError>;
+    async fn update_queue(
+        &self,
+        id: QueueId,
+        name: &QueueName,
+        description: Option<&str>,
+        enabled: bool,
+    ) -> Result<Queue, StoreError>;
+    async fn delete_queue(&self, id: QueueId) -> Result<(), StoreError>;
     async fn create_job(
         &self,
         namespace_id: NamespaceId,

@@ -15,8 +15,9 @@ use crate::{
     },
     domain::{
         AttemptId, CatchupPolicy, DispatchId, ExecutorKind, Job, JobData, JobId, MisfirePolicy,
-        Namespace, NamespaceId, NamespaceName, QueueName, ResourceName, Run, RunData, RunId,
-        RunStatus, Schedule, ScheduleId, ScheduleTiming, Target, TargetId, TargetSet, TargetSetId,
+        Namespace, NamespaceId, NamespaceName, Queue, QueueId, QueueName, ResourceName, Run,
+        RunData, RunId, RunStatus, Schedule, ScheduleId, ScheduleTiming, Target, TargetId,
+        TargetSet, TargetSetId,
     },
 };
 use async_trait::async_trait;
@@ -36,7 +37,8 @@ struct JobRow {
     namespace_id: Uuid,
     name: String,
     executor: String,
-    queue: String,
+    queue_id: Uuid,
+    queue_name: String,
     executable: Option<String>,
     arguments: serde_json::Value,
     idempotent: bool,
@@ -48,6 +50,17 @@ struct JobRow {
     created_at: OffsetDateTime,
     updated_at: OffsetDateTime,
     namespace_name: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct QueueRow {
+    id: Uuid,
+    name: String,
+    description: Option<String>,
+    enabled: bool,
+    system: bool,
+    created_at: OffsetDateTime,
+    updated_at: OffsetDateTime,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -125,7 +138,8 @@ struct ExecutionRow {
     job_id: Uuid,
     target_id: Uuid,
     executor: String,
-    queue: String,
+    queue_id: Uuid,
+    queue_name: String,
     executable: Option<String>,
     job_arguments: serde_json::Value,
     target_arguments: serde_json::Value,
@@ -151,6 +165,7 @@ struct RetryRow {
 #[derive(Debug, sqlx::FromRow)]
 struct WorkerRow {
     worker_id: String,
+    queue_id: Uuid,
     queue: String,
     concurrency: i32,
     version: String,
@@ -243,6 +258,107 @@ impl ControlPlaneStore for PostgresStore {
         namespace_from_row(row)
     }
 
+    async fn create_queue(
+        &self,
+        name: &QueueName,
+        description: Option<&str>,
+    ) -> Result<Queue, StoreError> {
+        let row = sqlx::query_as::<_, QueueRow>(
+            "INSERT INTO crono.queues (name, description) VALUES ($1, $2)
+             RETURNING id, name, description, enabled, system, created_at, updated_at",
+        )
+        .bind(name.as_str())
+        .bind(description)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(store_error)?;
+        queue_from_row(row)
+    }
+
+    async fn list_queues(
+        &self,
+        limit: u16,
+        after: Option<&str>,
+    ) -> Result<Page<Queue>, StoreError> {
+        let rows = sqlx::query_as::<_, QueueRow>(
+            "SELECT id, name, description, enabled, system, created_at, updated_at
+               FROM crono.queues
+              WHERE ($1::text IS NULL OR name > $1)
+              ORDER BY name LIMIT $2",
+        )
+        .bind(after)
+        .bind(i64::from(limit) + 1)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+        page(rows, limit, queue_from_row, |queue| {
+            queue.name().to_string()
+        })
+    }
+
+    async fn get_queue(&self, id: QueueId) -> Result<Queue, StoreError> {
+        let row = sqlx::query_as::<_, QueueRow>(
+            "SELECT id, name, description, enabled, system, created_at, updated_at
+               FROM crono.queues WHERE id = $1",
+        )
+        .bind(id.get())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(store_error)?
+        .ok_or(StoreError::NotFound)?;
+        queue_from_row(row)
+    }
+
+    async fn get_queue_by_name(&self, name: &QueueName) -> Result<Queue, StoreError> {
+        let row = sqlx::query_as::<_, QueueRow>(
+            "SELECT id, name, description, enabled, system, created_at, updated_at
+               FROM crono.queues WHERE name = $1",
+        )
+        .bind(name.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(store_error)?
+        .ok_or(StoreError::NotFound)?;
+        queue_from_row(row)
+    }
+
+    async fn update_queue(
+        &self,
+        id: QueueId,
+        name: &QueueName,
+        description: Option<&str>,
+        enabled: bool,
+    ) -> Result<Queue, StoreError> {
+        let row = sqlx::query_as::<_, QueueRow>(
+            "UPDATE crono.queues
+                SET name = $2, description = $3, enabled = $4,
+                    updated_at = statement_timestamp()
+              WHERE id = $1
+          RETURNING id, name, description, enabled, system, created_at, updated_at",
+        )
+        .bind(id.get())
+        .bind(name.as_str())
+        .bind(description)
+        .bind(enabled)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(store_error)?
+        .ok_or(StoreError::NotFound)?;
+        queue_from_row(row)
+    }
+
+    async fn delete_queue(&self, id: QueueId) -> Result<(), StoreError> {
+        let result = sqlx::query("DELETE FROM crono.queues WHERE id = $1")
+            .bind(id.get())
+            .execute(&self.pool)
+            .await
+            .map_err(store_error)?;
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
     async fn create_job(
         &self,
         namespace_id: NamespaceId,
@@ -253,13 +369,15 @@ impl ControlPlaneStore for PostgresStore {
         let arguments = serde_json::to_value(&definition.arguments).map_err(json_error)?;
         let row = sqlx::query_as::<_, JobRow>(
             "INSERT INTO crono.jobs (
-                 namespace_id, name, executor, queue, executable, arguments,
+                 namespace_id, name, executor, queue_id, executable, arguments,
                  idempotent, max_attempts, retry_initial_seconds,
                  retry_max_seconds, retry_multiplier, retry_jitter
              )
-             SELECT id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-               FROM crono.namespaces WHERE id = $1
-             RETURNING id, namespace_id, name, executor, queue, executable,
+             SELECT n.id, $2, $3, q.id, $5, $6, $7, $8, $9, $10, $11, $12
+               FROM crono.namespaces n CROSS JOIN crono.queues q
+              WHERE n.id = $1 AND q.id = $4 AND q.enabled
+             RETURNING id, namespace_id, name, executor, queue_id,
+                       (SELECT name FROM crono.queues WHERE id = $4) AS queue_name, executable,
                        arguments, idempotent, max_attempts, retry_initial_seconds,
                        retry_max_seconds, retry_multiplier, retry_jitter,
                        created_at, updated_at,
@@ -268,7 +386,7 @@ impl ControlPlaneStore for PostgresStore {
         .bind(namespace_id.get())
         .bind(name.as_str())
         .bind(executor)
-        .bind(definition.queue.as_str())
+        .bind(definition.queue_id.get())
         .bind(&definition.executable)
         .bind(arguments)
         .bind(definition.idempotent)
@@ -297,12 +415,15 @@ impl ControlPlaneStore for PostgresStore {
         let ids = Self::namespace_ids(visibility);
         let restrict = matches!(visibility, VisibilityScope::Namespaces(_));
         let rows = sqlx::query_as::<_, JobRow>(
-            "SELECT j.id, j.namespace_id, j.name, j.executor, j.queue, j.executable,
+            "SELECT j.id, j.namespace_id, j.name, j.executor, j.queue_id,
+                    q.name AS queue_name, j.executable,
                     j.arguments, j.idempotent, j.max_attempts, j.retry_initial_seconds,
                     j.retry_max_seconds, j.retry_multiplier, j.retry_jitter,
                     j.created_at, j.updated_at,
                     n.name AS namespace_name
-             FROM crono.jobs j JOIN crono.namespaces n ON n.id = j.namespace_id
+             FROM crono.jobs j
+             JOIN crono.namespaces n ON n.id = j.namespace_id
+             JOIN crono.queues q ON q.id = j.queue_id
              WHERE n.id = $1 AND ($2::text IS NULL OR j.name > $2)
                AND (NOT $3 OR n.id = ANY($4::uuid[]))
              ORDER BY j.name LIMIT $5",
@@ -322,12 +443,15 @@ impl ControlPlaneStore for PostgresStore {
 
     async fn get_job(&self, id: JobId) -> Result<JobRecord, StoreError> {
         let row = sqlx::query_as::<_, JobRow>(
-            "SELECT j.id, j.namespace_id, j.name, j.executor, j.queue, j.executable,
+            "SELECT j.id, j.namespace_id, j.name, j.executor, j.queue_id,
+                    q.name AS queue_name, j.executable,
                     j.arguments, j.idempotent, j.max_attempts, j.retry_initial_seconds,
                     j.retry_max_seconds, j.retry_multiplier, j.retry_jitter,
                     j.created_at, j.updated_at,
                     n.name AS namespace_name
-             FROM crono.jobs j JOIN crono.namespaces n ON n.id = j.namespace_id
+             FROM crono.jobs j
+             JOIN crono.namespaces n ON n.id = j.namespace_id
+             JOIN crono.queues q ON q.id = j.queue_id
              WHERE j.id = $1",
         )
         .bind(id.get())
@@ -683,14 +807,15 @@ impl ControlPlaneStore for PostgresStore {
         let snapshot = execution_snapshot(run_id, &execution)?;
         let inserted = sqlx::query(
             "INSERT INTO crono.runs (
-                 id, request_id, job_id, target_id, scheduled_at, execution_snapshot,
-                 attempt_count, max_attempts
-             ) VALUES ($1, $2, $3, $4, $5, $6, 1, $7)",
+                 id, request_id, job_id, target_id, queue_id, scheduled_at,
+                 execution_snapshot, attempt_count, max_attempts
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8)",
         )
         .bind(run_id)
         .bind(request_id)
         .bind(execution.job_id)
         .bind(execution.target_id)
+        .bind(execution.queue_id)
         .bind(now)
         .bind(&snapshot)
         .bind(execution.max_attempts)
@@ -706,7 +831,7 @@ impl ControlPlaneStore for PostgresStore {
             }
             return Err(store_error(error));
         }
-        create_attempt_and_outbox(&mut transaction, run_id, 1, &execution.queue, None).await?;
+        create_attempt_and_outbox(&mut transaction, run_id, 1, execution.queue_id, None).await?;
         insert_run_event(&mut transaction, run_id, "created", serde_json::json!({})).await?;
         transaction.commit().await.map_err(store_error)?;
         let record = get_run_unscoped(&self.pool, run_id).await?;
@@ -790,11 +915,11 @@ impl ControlPlaneStore for PostgresStore {
     ) -> Result<(), StoreError> {
         sqlx::query(
             "INSERT INTO crono.worker_presence
-                (worker_id, session_id, queue, concurrency, version)
+                (worker_id, session_id, queue_id, concurrency, version)
              VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (worker_id) DO UPDATE SET
                 session_id = EXCLUDED.session_id,
-                queue = EXCLUDED.queue,
+                queue_id = EXCLUDED.queue_id,
                 concurrency = EXCLUDED.concurrency,
                 version = EXCLUDED.version,
                 started_at = CASE
@@ -806,7 +931,7 @@ impl ControlPlaneStore for PostgresStore {
         )
         .bind(&request.worker_id)
         .bind(request.session_id)
-        .bind(&request.queue)
+        .bind(request.queue_id)
         .bind(i32::from(request.concurrency))
         .bind(&request.version)
         .execute(&self.pool)
@@ -821,16 +946,17 @@ impl ControlPlaneStore for PostgresStore {
         after: Option<&str>,
     ) -> Result<Page<WorkerRecord>, StoreError> {
         let rows = sqlx::query_as::<_, WorkerRow>(
-            "SELECT wp.worker_id, wp.queue, wp.concurrency, wp.version,
+            "SELECT wp.worker_id, wp.queue_id, q.name AS queue, wp.concurrency, wp.version,
                     wp.started_at, wp.last_seen_at,
                     count(a.id) FILTER (
                         WHERE a.status = 'running'
                           AND a.lease_expires_at > statement_timestamp()
                     ) AS active_executions
                FROM crono.worker_presence wp
+               JOIN crono.queues q ON q.id = wp.queue_id
                LEFT JOIN crono.run_attempts a ON a.worker_id = wp.worker_id
               WHERE ($1::text IS NULL OR wp.worker_id > $1)
-              GROUP BY wp.worker_id, wp.queue, wp.concurrency, wp.version,
+              GROUP BY wp.worker_id, wp.queue_id, q.name, wp.concurrency, wp.version,
                        wp.started_at, wp.last_seen_at
               ORDER BY wp.worker_id
               LIMIT $2",
@@ -1095,12 +1221,18 @@ impl ControlPlaneStore for PostgresStore {
                 SET status = 'running', worker_id = $3, started_at = statement_timestamp(),
                     heartbeat_at = statement_timestamp(),
                     lease_expires_at = statement_timestamp() + interval '60 seconds'
-              WHERE id = $1 AND run_id = $2 AND status = 'queued'
-              RETURNING run_id",
+               FROM crono.runs r
+              WHERE crono.run_attempts.id = $1
+                AND crono.run_attempts.run_id = $2
+                AND crono.run_attempts.status = 'queued'
+                AND r.id = crono.run_attempts.run_id
+                AND r.queue_id = $4
+              RETURNING crono.run_attempts.run_id",
         )
         .bind(request.attempt_id)
         .bind(request.run_id)
         .bind(&request.worker_id)
+        .bind(request.queue_id)
         .fetch_optional(&mut *transaction)
         .await
         .map_err(store_error)?;
@@ -1387,8 +1519,8 @@ async fn reconcile_due_retries(
     transaction: &mut Transaction<'_, Postgres>,
     limit: u16,
 ) -> Result<usize, StoreError> {
-    let rows = sqlx::query_as::<_, (Uuid, i32, String)>(
-        "SELECT id, attempt_count, execution_snapshot->>'queue'
+    let rows = sqlx::query_as::<_, (Uuid, i32, Uuid)>(
+        "SELECT id, attempt_count, (execution_snapshot->>'queue_id')::uuid
            FROM crono.runs
           WHERE status = 'retry_wait' AND next_retry_at <= statement_timestamp()
           ORDER BY next_retry_at, id
@@ -1399,7 +1531,7 @@ async fn reconcile_due_retries(
     .fetch_all(&mut **transaction)
     .await
     .map_err(store_error)?;
-    for (run_id, attempt_count, queue) in &rows {
+    for (run_id, attempt_count, queue_id) in &rows {
         let next_attempt = attempt_count + 1;
         sqlx::query(
             "UPDATE crono.runs SET status = 'pending_dispatch', attempt_count = $2,
@@ -1411,7 +1543,7 @@ async fn reconcile_due_retries(
         .execute(&mut **transaction)
         .await
         .map_err(store_error)?;
-        create_attempt_and_outbox(transaction, *run_id, next_attempt, queue, None).await?;
+        create_attempt_and_outbox(transaction, *run_id, next_attempt, *queue_id, None).await?;
     }
     Ok(rows.len())
 }
@@ -1420,10 +1552,11 @@ async fn reconcile_expired_leases(
     transaction: &mut Transaction<'_, Postgres>,
     limit: u16,
 ) -> Result<usize, StoreError> {
-    let rows = sqlx::query_as::<_, (Uuid, Uuid, bool, i32, i32, String)>(
+    let rows = sqlx::query_as::<_, (Uuid, Uuid, bool, i32, i32, Uuid)>(
         "SELECT a.id, a.run_id,
                 COALESCE((r.execution_snapshot->>'idempotent')::boolean, false),
-                r.attempt_count, r.max_attempts, r.execution_snapshot->>'queue'
+                r.attempt_count, r.max_attempts,
+                (r.execution_snapshot->>'queue_id')::uuid
            FROM crono.run_attempts a
            JOIN crono.runs r ON r.id = a.run_id
           WHERE a.status = 'running' AND a.lease_expires_at < statement_timestamp()
@@ -1435,7 +1568,7 @@ async fn reconcile_expired_leases(
     .fetch_all(&mut **transaction)
     .await
     .map_err(store_error)?;
-    for (attempt_id, run_id, idempotent, attempt_count, max_attempts, queue) in &rows {
+    for (attempt_id, run_id, idempotent, attempt_count, max_attempts, queue_id) in &rows {
         crate::metrics::global().worker_lease_expired.inc();
         let retry = *idempotent && attempt_count < max_attempts;
         sqlx::query(
@@ -1460,7 +1593,7 @@ async fn reconcile_expired_leases(
             .execute(&mut **transaction)
             .await
             .map_err(store_error)?;
-            create_attempt_and_outbox(transaction, *run_id, next_attempt, queue, None).await?;
+            create_attempt_and_outbox(transaction, *run_id, next_attempt, *queue_id, None).await?;
         } else {
             sqlx::query(
                 "UPDATE crono.runs SET status = 'unknown',
@@ -1483,11 +1616,13 @@ async fn load_execution_ids(
     target_id: Uuid,
 ) -> Result<ExecutionRow, StoreError> {
     sqlx::query_as::<_, ExecutionRow>(
-        "SELECT j.id AS job_id, t.id AS target_id, j.executor, j.queue, j.executable,
+        "SELECT j.id AS job_id, t.id AS target_id, j.executor, j.queue_id,
+                q.name AS queue_name, j.executable,
                 j.arguments AS job_arguments, t.arguments AS target_arguments,
                 j.idempotent, j.max_attempts, j.retry_initial_seconds,
                 j.retry_max_seconds, j.retry_multiplier, j.retry_jitter
            FROM crono.jobs j
+           JOIN crono.queues q ON q.id = j.queue_id
            JOIN crono.targets t ON t.id = $2 AND t.namespace_id = j.namespace_id
           WHERE j.id = $1",
     )
@@ -1522,7 +1657,8 @@ fn execution_snapshot(
         arguments,
         inputs: serde_json::json!({}),
         idempotency_key: run_id,
-        queue: execution.queue.clone(),
+        queue_id: execution.queue_id,
+        queue: execution.queue_name.clone(),
         idempotent: execution.idempotent,
         retry_initial_seconds: u32::try_from(execution.retry_initial_seconds)
             .map_err(|_| StoreError::Internal)?,
@@ -1538,7 +1674,7 @@ async fn create_attempt_and_outbox(
     transaction: &mut Transaction<'_, Postgres>,
     run_id: Uuid,
     attempt: i32,
-    queue: &str,
+    queue_id: Uuid,
     dispatch_deadline: Option<OffsetDateTime>,
 ) -> Result<(), StoreError> {
     let attempt_id = Uuid::now_v7();
@@ -1557,7 +1693,7 @@ async fn create_attempt_and_outbox(
         dispatch_id,
         run_id,
         attempt_id,
-        queue: queue.to_string(),
+        queue_id,
     };
     let payload = serde_json::to_value(envelope).map_err(json_error)?;
     sqlx::query(
@@ -1568,7 +1704,7 @@ async fn create_attempt_and_outbox(
     .bind(dispatch_id)
     .bind(run_id)
     .bind(attempt_id)
-    .bind(format!("crono.dispatch.{queue}"))
+    .bind(format!("crono.dispatch.{queue_id}"))
     .bind(payload)
     .bind(dispatch_deadline)
     .execute(&mut **transaction)
@@ -1593,12 +1729,12 @@ async fn insert_scheduled_occurrence(
     let attempt_count = i32::from(occurrence.execute);
     let inserted = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO crono.runs (
-             id, schedule_id, job_id, target_id, scheduled_at, status,
+             id, schedule_id, job_id, target_id, queue_id, scheduled_at, status,
              execution_snapshot, attempt_count, max_attempts, lateness_seconds,
              terminal_reason, completed_at
          ) VALUES (
-             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-             CASE WHEN $6 = 'skipped' THEN statement_timestamp() ELSE NULL END
+             $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+             CASE WHEN $7 = 'skipped' THEN statement_timestamp() ELSE NULL END
          )
          ON CONFLICT (schedule_id, scheduled_at) WHERE schedule_id IS NOT NULL DO NOTHING
          RETURNING id",
@@ -1607,6 +1743,7 @@ async fn insert_scheduled_occurrence(
     .bind(schedule_id.get())
     .bind(execution.job_id)
     .bind(execution.target_id)
+    .bind(execution.queue_id)
     .bind(occurrence.scheduled_at)
     .bind(status)
     .bind(snapshot)
@@ -1625,7 +1762,7 @@ async fn insert_scheduled_occurrence(
             transaction,
             run_id,
             1,
-            &execution.queue,
+            execution.queue_id,
             occurrence.dispatch_deadline,
         )
         .await?;
@@ -1748,6 +1885,18 @@ fn namespace_from_row(
     ))
 }
 
+fn queue_from_row(row: QueueRow) -> Result<Queue, StoreError> {
+    Ok(Queue::new(
+        QueueId::new(row.id),
+        QueueName::parse(&row.name).map_err(invalid_database_name)?,
+        row.description,
+        row.enabled,
+        row.system,
+        row.created_at,
+        row.updated_at,
+    ))
+}
+
 fn job_from_row(row: JobRow) -> Result<JobRecord, StoreError> {
     let executor = parse_executor(&row.executor)?;
     let arguments = serde_json::from_value(row.arguments).map_err(json_error)?;
@@ -1758,12 +1907,13 @@ fn job_from_row(row: JobRow) -> Result<JobRecord, StoreError> {
         u32::try_from(row.retry_max_seconds).map_err(|_| StoreError::Internal)?;
     Ok(JobRecord {
         namespace: NamespaceName::parse(&row.namespace_name).map_err(invalid_database_name)?,
+        queue_name: QueueName::parse(&row.queue_name).map_err(invalid_database_name)?,
         job: Job::new(JobData {
             id: JobId::new(row.id),
             namespace_id: NamespaceId::new(row.namespace_id),
             name: ResourceName::parse(&row.name).map_err(invalid_database_name)?,
             executor,
-            queue: QueueName::parse(&row.queue).map_err(invalid_database_name)?,
+            queue_id: QueueId::new(row.queue_id),
             executable: row.executable,
             arguments,
             idempotent: row.idempotent,
@@ -1941,6 +2091,7 @@ fn run_from_row(row: RunRow) -> Result<RunRecord, StoreError> {
 fn worker_from_row(row: WorkerRow) -> Result<WorkerRecord, StoreError> {
     Ok(WorkerRecord {
         worker_id: row.worker_id,
+        queue_id: QueueId::new(row.queue_id),
         queue: row.queue,
         concurrency: u16::try_from(row.concurrency).map_err(|_| StoreError::Internal)?,
         version: row.version,
@@ -2102,6 +2253,9 @@ fn store_error(error: sqlx::Error) -> StoreError {
     if is_unique_violation(&error) {
         return StoreError::Conflict;
     }
+    if is_foreign_key_violation(&error) {
+        return StoreError::InUse;
+    }
     match error {
         sqlx::Error::PoolTimedOut | sqlx::Error::PoolClosed | sqlx::Error::Io(_) => {
             StoreError::Unavailable
@@ -2117,4 +2271,10 @@ fn is_unique_violation(error: &sqlx::Error) -> bool {
     error
         .as_database_error()
         .is_some_and(|database| database.code().as_deref() == Some("23505"))
+}
+
+fn is_foreign_key_violation(error: &sqlx::Error) -> bool {
+    error
+        .as_database_error()
+        .is_some_and(|database| matches!(database.code().as_deref(), Some("23001" | "23503")))
 }

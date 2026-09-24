@@ -6,7 +6,7 @@ The project is still a draft. Its HTTP and messaging contracts are intentionally
 
 ## Reliability architecture
 
-PostgreSQL is the source of truth for Namespaces, Jobs, Targets, Target Sets, Schedules, calculated `next_run_at` cursors, Runs, Attempts, retry state, leases, misfires, dispatch state, and audit history. UUIDs are immutable identities and relationship keys. Canonical resource names are strict DNS-1123 labels used for lookup and display; the API rejects invalid input rather than normalizing it. JetStream is a durable, high-throughput execution transport; it is not the scheduler database.
+PostgreSQL is the source of truth for Namespaces, Queues, Jobs, Targets, Target Sets, Schedules, calculated `next_run_at` cursors, Runs, Attempts, retry state, leases, misfires, dispatch state, and audit history. UUIDs are immutable identities and relationship keys. Canonical resource names are strict DNS-1123 labels used for lookup and display; the API rejects invalid input rather than normalizing it. JetStream is a durable, high-throughput execution transport; it is not the scheduler database.
 
 ```mermaid
 flowchart LR
@@ -26,7 +26,7 @@ flowchart LR
     Reconciler <-->|"repair expired state"| PG
     Control <-->|"conditional state transitions"| PG
 
-    Publisher -->|"crono.dispatch.&lt;queue&gt;<br/>wait for persistence ACK"| JS[("NATS JetStream<br/>CRONO_DISPATCH")]
+    Publisher -->|"crono.dispatch.&lt;queue UUID&gt;<br/>wait for persistence ACK"| JS[("NATS JetStream<br/>CRONO_DISPATCH")]
     JS -->|"durable bounded pull"| Worker["crono-worker"]
     Worker -->|"claim · renew · complete"| Control
     Worker -->|"ACK · NAK · in-progress"| JS
@@ -115,15 +115,25 @@ stateDiagram-v2
 
 Execution retries and dispatch retries are separate. NATS unavailability only increments outbox publication attempts; it never consumes a Job execution attempt. Job retry policy exposes `max_attempts`, initial and maximum backoff, multiplier, and jitter. Each retry creates a new immutable Attempt and outbox event for the same logical Run.
 
-Workers share durable queue-scoped pull consumers and fetch no more messages than configured concurrency. A worker must claim an Attempt through the server's NATS request/reply control boundary before starting it. The claim is a conditional PostgreSQL transition. A duplicate delivery for a completed Attempt is acknowledged without execution; a delivery for a currently leased Attempt does not create a concurrent execution.
+Queues are global UUID-backed resources managed through `/api/queues`. Jobs
+store Queue UUIDs, while operators and worker configuration use canonical Queue
+names. A worker resolves its configured name through the server at startup and
+then shares a UUID-scoped durable pull consumer with other workers in that
+pool. The system-managed `default` Queue is always present and enabled; other
+Queues support rename, disable, and guarded deletion. Workers fetch no more
+messages than configured concurrency. A worker must
+claim an Attempt through the server's NATS request/reply control boundary before
+starting it. The claim is a conditional PostgreSQL transition. A duplicate
+delivery for a completed Attempt is acknowledged without execution; a delivery
+for a currently leased Attempt does not create a concurrent execution.
 
 While a process runs, the worker refreshes its PostgreSQL lease and sends JetStream in-progress acknowledgements. Completion is committed to PostgreSQL before the dispatch is ACKed. The process executor uses an absolute executable directly without a shell, clears the environment except for a small allowlist, appends Target arguments to Job arguments, supplies inputs through `CRONO_INPUTS_FILE`, and retains bounded stdout/stderr tails.
 
-Every worker session also sends a presence heartbeat through the server-mediated `crono.worker.presence.*` NATS boundary. Keeping presence separate from execution control prevents older control subscribers from consuming new heartbeat operations during rolling deployments. PostgreSQL records the stable worker ID, process session, queue, concurrency, version, start time, and last-seen time. `GET /api/workers` classifies a worker as online for 30 seconds after its last heartbeat, stale through two minutes, and offline afterward. Offline records remain useful for short incident review and are removed after seven days by bounded reconciliation. Presence is operational metadata only: it does not replace Attempt leases or make a NATS connection authoritative execution state.
+Every worker session also sends a presence heartbeat through the server-mediated `crono.worker.presence.*` NATS boundary. Keeping presence separate from execution control prevents older control subscribers from consuming new heartbeat operations during rolling deployments. PostgreSQL records the stable worker ID, process session, Queue UUID, concurrency, version, start time, and last-seen time; API responses join the current Queue name for display. `GET /api/workers` classifies a worker as online for 30 seconds after its last heartbeat, stale through two minutes, and offline afterward. Offline records remain useful for short incident review and are removed after seven days by bounded reconciliation. Presence is operational metadata only: it does not replace Attempt leases or make a NATS connection authoritative execution state.
 
 ## NATS assumptions
 
-The server creates `CRONO_DISPATCH` for `crono.dispatch.*` with file storage, WorkQueue retention, explicit worker acknowledgements, bounded message size, and discard-new behavior. Development defaults to one replica. Set `CRONO_NATS_REPLICAS=3` for a three-node production JetStream cluster; valid values are 1, 3, and 5. Production NATS must use TLS, authenticated identities, and subject permissions that bind a worker to its identity-scoped control and presence subjects and authorized queue.
+The server creates `CRONO_DISPATCH` for `crono.dispatch.*` with file storage, WorkQueue retention, explicit worker acknowledgements, bounded message size, and discard-new behavior. The final subject token is the immutable Queue UUID, so renaming a Queue does not reroute durable work. Development defaults to one replica. Set `CRONO_NATS_REPLICAS=3` for a three-node production JetStream cluster; valid values are 1, 3, and 5. Production NATS must use TLS, authenticated identities, and subject permissions that bind a worker to its identity-scoped control and presence subjects and authorized Queue UUID.
 
 The server starts and remains ready when NATS is unavailable as long as PostgreSQL is healthy. Its connection manager reconnects and re-establishes the stream. File-backed JetStream storage must be persistent across ordinary NATS restarts. Complete broker-storage loss requires explicit replay/reconciliation from PostgreSQL before affected queued work is considered recovered.
 
@@ -178,7 +188,7 @@ sequenceDiagram
 
 ## Reviewing locally
 
-The GUI exercises Namespace, Job, Target, Target Set, and manual Run workflows. Existing relationships are searchable name selectors backed by UUIDs. Schedule APIs are implemented, while dedicated Schedule screens remain a useful next GUI improvement.
+The GUI exercises Namespace, Queue, Job, Target, Target Set, and manual Run workflows. Queue administration supports rename, enable/disable, and guarded deletion. Existing relationships are searchable name selectors backed by UUIDs. Schedule APIs are implemented, while dedicated Schedule screens remain a useful next GUI improvement.
 
 ```mermaid
 flowchart TD
@@ -187,7 +197,9 @@ flowchart TD
     WorkerCmd["Start crono-worker separately<br/>queue: default"] --> Ready["Worker heartbeat visible in Workers"]
 
     Web --> Namespace["Create a Namespace"]
+    Web --> Queue["Select or manage a Queue"]
     Namespace --> Job["Create a Job"]
+    Queue --> Job
     Job --> Target["Create a Target"]
     Target --> Run["Create a manual Run"]
     Run --> Outbox["Run becomes pending_dispatch"]
@@ -218,6 +230,12 @@ When reviewing failure behavior, stop NATS after creating the definitions but be
 | `crates/telemetry` | Structured logging and optional OTLP export |
 
 Public routes use `/api` directly; there is no `/api/v1` or draft compatibility layer. `crono-server-openapi` emits the route-derived OpenAPI document.
+
+Run `just dev-start` to launch the API and live-reloading web application
+together. The recipe waits for API readiness before starting the web proxy,
+stops the sibling process when either application exits, and reports occupied
+API or web ports before starting. Pressing Ctrl-C therefore leaves no
+half-running development stack.
 
 The common development workflow is:
 

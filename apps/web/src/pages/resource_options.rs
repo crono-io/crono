@@ -42,6 +42,33 @@ pub(super) fn namespaces() -> ResourceOptions {
     }
 }
 
+/// Load enabled Queues once for Job creation and expose name/UUID options.
+pub(super) fn queues() -> ResourceOptions {
+    let resources = LocalResource::new(api::all_queues);
+    ResourceOptions {
+        options: Signal::derive(move || {
+            resources
+                .get()
+                .and_then(Result::ok)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|queue| queue.enabled)
+                .map(|queue| ResourceOption {
+                    id: queue.id,
+                    label: queue.name,
+                })
+                .collect()
+        }),
+        loading: Signal::derive(move || resources.get().is_none()),
+        load_error: Signal::derive(move || {
+            resources
+                .get()
+                .and_then(Result::err)
+                .map(|error| error.message)
+        }),
+    }
+}
+
 /// Load Jobs whenever the selected Namespace changes.
 pub(super) fn jobs(namespace_id: RwSignal<Option<Uuid>>) -> ResourceOptions {
     let resources = LocalResource::new(move || {

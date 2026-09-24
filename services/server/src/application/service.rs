@@ -1,15 +1,15 @@
 //! Authorized orchestration of domain parsing and persistence operations.
 
 use super::{
-    ApplicationError, Authorizer, Capability, ControlPlaneStore, CreateJobInput,
+    ApplicationError, Authorizer, Capability, ControlPlaneStore, CreateJobInput, CreateQueueInput,
     CreateScheduleInput, JobDefinition, JobRecord, NewSchedule, Overview, Page, RequestContext,
     ResourceScope, RunRecord, ScheduleRecord, StoreError, TargetRecord, TargetSetRecord,
-    WorkerRecord,
+    UpdateQueueInput, WorkerRecord,
 };
 use crate::{
     domain::{
-        ExecutorKind, JobId, MisfirePolicy, Namespace, NamespaceId, NamespaceName, QueueName,
-        ResourceName, RunId, ScheduleId, ScheduleTiming, TargetId, TargetSetId,
+        ExecutorKind, JobId, MisfirePolicy, Namespace, NamespaceId, NamespaceName, Queue, QueueId,
+        QueueName, ResourceName, RunId, ScheduleId, ScheduleTiming, TargetId, TargetSetId,
     },
     scheduler::next_cron_occurrence,
 };
@@ -20,6 +20,7 @@ use uuid::Uuid;
 const DEFAULT_LIMIT: u16 = 50;
 const MAX_LIMIT: u16 = 100;
 const MAX_TARGET_SET_MEMBERS: usize = 1_000;
+const MAX_QUEUE_DESCRIPTION_CHARACTERS: usize = 500;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateRunOutcome {
@@ -102,6 +103,126 @@ impl Application {
         Ok(self.store.get_namespace(id).await?)
     }
 
+    /// Authorize, validate, and persist one global worker Queue.
+    ///
+    /// # Errors
+    ///
+    /// Returns validation, authorization, conflict, or dependency failures.
+    pub async fn create_queue(
+        &self,
+        context: &RequestContext,
+        input: CreateQueueInput,
+    ) -> Result<Queue, ApplicationError> {
+        self.authorizer
+            .authorize(
+                context,
+                Capability::QueueCreate,
+                &ResourceScope::ControlPlane,
+            )
+            .await?;
+        let name = QueueName::parse(&input.name).map_err(invalid_name)?;
+        validate_queue_description(input.description.as_deref())?;
+        Ok(self
+            .store
+            .create_queue(&name, input.description.as_deref())
+            .await?)
+    }
+
+    /// List Queues after a global read authorization decision.
+    ///
+    /// # Errors
+    ///
+    /// Returns invalid pagination, authorization, or dependency failures.
+    pub async fn list_queues(
+        &self,
+        context: &RequestContext,
+        limit: Option<u16>,
+        after: Option<&str>,
+    ) -> Result<Page<Queue>, ApplicationError> {
+        self.authorizer
+            .authorize(context, Capability::QueueRead, &ResourceScope::ControlPlane)
+            .await?;
+        Ok(self.store.list_queues(page_limit(limit)?, after).await?)
+    }
+
+    /// Read one Queue by immutable identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns authorization, not-found, or dependency failures.
+    pub async fn get_queue(
+        &self,
+        context: &RequestContext,
+        id: Uuid,
+    ) -> Result<Queue, ApplicationError> {
+        let id = QueueId::new(id);
+        self.authorizer
+            .authorize(context, Capability::QueueRead, &ResourceScope::Queue(id))
+            .await?;
+        Ok(self.store.get_queue(id).await?)
+    }
+
+    /// Replace editable Queue metadata while preserving its routing UUID.
+    ///
+    /// # Errors
+    ///
+    /// Returns validation, authorization, conflict, not-found, or dependency failures.
+    pub async fn update_queue(
+        &self,
+        context: &RequestContext,
+        id: Uuid,
+        input: UpdateQueueInput,
+    ) -> Result<Queue, ApplicationError> {
+        let id = QueueId::new(id);
+        let name = QueueName::parse(&input.name).map_err(invalid_name)?;
+        validate_queue_description(input.description.as_deref())?;
+        self.authorizer
+            .authorize(context, Capability::QueueUpdate, &ResourceScope::Queue(id))
+            .await?;
+        let current = self.store.get_queue(id).await?;
+        if current.system() && name.as_str() != current.name().as_str() {
+            return Err(ApplicationError::invalid(
+                "name",
+                "the system default Queue cannot be renamed",
+            ));
+        }
+        if current.system() && !input.enabled {
+            return Err(ApplicationError::invalid(
+                "enabled",
+                "the system default Queue cannot be disabled",
+            ));
+        }
+        Ok(self
+            .store
+            .update_queue(id, &name, input.description.as_deref(), input.enabled)
+            .await?)
+    }
+
+    /// Delete an unused Queue without orphaning Job or worker relationships.
+    ///
+    /// PostgreSQL reference constraints are authoritative, so a Queue still in
+    /// use returns a conflict rather than detaching related resources.
+    ///
+    /// # Errors
+    ///
+    /// Returns authorization, conflict, not-found, or dependency failures.
+    pub async fn delete_queue(
+        &self,
+        context: &RequestContext,
+        id: Uuid,
+    ) -> Result<(), ApplicationError> {
+        let id = QueueId::new(id);
+        self.authorizer
+            .authorize(context, Capability::QueueDelete, &ResourceScope::Queue(id))
+            .await?;
+        if self.store.get_queue(id).await?.system() {
+            return Err(ApplicationError::invalid_request(
+                "the system default Queue cannot be deleted",
+            ));
+        }
+        Ok(self.store.delete_queue(id).await?)
+    }
+
     /// Create a directly editable Job definition after Namespace authorization.
     ///
     /// # Errors
@@ -115,8 +236,6 @@ impl Application {
     ) -> Result<JobRecord, ApplicationError> {
         let namespace_id = NamespaceId::new(namespace_id);
         let name = ResourceName::parse(&input.name).map_err(invalid_name)?;
-        let queue = QueueName::parse(&input.queue)
-            .map_err(|error| ApplicationError::invalid("queue", error.to_string()))?;
         validate_job(&input)?;
         self.authorizer
             .authorize(
@@ -125,9 +244,30 @@ impl Application {
                 &ResourceScope::Namespace(namespace_id),
             )
             .await?;
+        let queue_id = QueueId::new(input.queue_id);
+        self.authorizer
+            .authorize(
+                context,
+                Capability::QueueRead,
+                &ResourceScope::Queue(queue_id),
+            )
+            .await?;
+        let queue = self.store.get_queue(queue_id).await.map_err(|error| {
+            if error == StoreError::NotFound {
+                ApplicationError::invalid("queue_id", "Select an existing Queue.")
+            } else {
+                error.into()
+            }
+        })?;
+        if !queue.enabled() {
+            return Err(ApplicationError::invalid(
+                "queue_id",
+                "Select an enabled Queue.",
+            ));
+        }
         let definition = JobDefinition {
             executor: input.executor,
-            queue,
+            queue_id,
             executable: input.executable,
             arguments: input.arguments,
             idempotent: input.idempotent,
@@ -688,6 +828,20 @@ fn page_limit(limit: Option<u16>) -> Result<u16, ApplicationError> {
 
 fn invalid_name(error: crate::domain::NameError) -> ApplicationError {
     ApplicationError::invalid("name", error.to_string())
+}
+
+fn validate_queue_description(description: Option<&str>) -> Result<(), ApplicationError> {
+    if description.is_some_and(|value| {
+        value.contains('\0') || value.chars().count() > MAX_QUEUE_DESCRIPTION_CHARACTERS
+    }) {
+        return Err(ApplicationError::invalid(
+            "description",
+            format!(
+                "description must be NUL-free and no longer than {MAX_QUEUE_DESCRIPTION_CHARACTERS} characters"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_arguments(arguments: &[String]) -> Result<(), ApplicationError> {

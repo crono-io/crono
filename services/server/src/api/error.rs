@@ -36,6 +36,12 @@ impl IntoResponse for ApiError {
                 "resource already exists".to_string(),
                 None,
             ),
+            ApplicationError::InUse => (
+                StatusCode::CONFLICT,
+                "resource_in_use",
+                "resource is still in use and cannot be deleted".to_string(),
+                None,
+            ),
             ApplicationError::IdempotencyConflict => (
                 StatusCode::CONFLICT,
                 "idempotency_conflict",

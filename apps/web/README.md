@@ -9,16 +9,19 @@ the GUI.
 The application uses a dark infrastructure-style sidebar, compact top toolbar,
 and light routed workspace as its baseline visual language. Overview displays
 authorized live counts with Material Symbols plus Recent Runs and Workers.
-Namespaces, Jobs, Targets, and Target Sets provide creation and list workflows;
-Runs selects existing resources and displays durable dispatch state; Workers
-shows heartbeat-derived presence and capacity. Reserved pages use truthful
-empty states.
+Namespaces, Queues, Jobs, Targets, and Target Sets provide creation and list
+workflows. Queues additionally support rename, enable/disable, and guarded
+deletion; the bootstrap `default` Queue is visibly protected while its
+description remains editable. Runs selects existing resources and displays
+durable dispatch state; Workers shows heartbeat-derived presence and capacity.
+Reserved pages use truthful empty states.
 
 Resource creation uses the shared DNS-1123 label rule from `crono-api` and
 never rewrites user input. Existing relationships use client-filtered,
 keyboard-accessible selectors that fetch each collection once and retain the
 selected UUID rather than a display name. Target Sets use the same pattern for
-multi-selection. Loading, empty, stale-selection, API, and field validation
+multi-selection, and Job creation selects an enabled Queue by UUID. Loading,
+empty, stale-selection, API, and field validation
 states remain in the form so failed submissions do not discard entered values.
 
 ## Development

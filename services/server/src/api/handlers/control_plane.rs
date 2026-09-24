@@ -1,4 +1,4 @@
-//! Namespace, Job, Target, Run, and overview HTTP endpoints.
+//! Namespace, Queue, Job, Target, Run, and overview HTTP endpoints.
 //!
 //! Handlers translate JSON and paths into the authorization-enforcing
 //! application facade. They never access PostgreSQL or caller-provided claims
@@ -8,12 +8,14 @@
 use crate::{
     api::{error::ApiError, state::AppState},
     application::{
-        CreateJobInput, CreateScheduleInput, JobRecord, Page as ApplicationPage, RequestContext,
-        RunRecord, ScheduleRecord, TargetRecord, TargetSetRecord, WorkerRecord,
+        CreateJobInput, CreateQueueInput, CreateScheduleInput, JobRecord, Page as ApplicationPage,
+        RequestContext, RunRecord, ScheduleRecord, TargetRecord, TargetSetRecord, UpdateQueueInput,
+        WorkerRecord,
     },
     domain::{
         CatchupPolicy as DomainCatchup, ExecutorKind as DomainExecutor,
-        MisfirePolicy as DomainMisfire, Namespace, RunStatus as DomainRunStatus, ScheduleTiming,
+        MisfirePolicy as DomainMisfire, Namespace, Queue, RunStatus as DomainRunStatus,
+        ScheduleTiming,
     },
 };
 use axum::{
@@ -22,11 +24,11 @@ use axum::{
     http::StatusCode,
 };
 use crono_api::{
-    CatchupPolicy, CreateJobRequest, CreateNamespaceRequest, CreateRunRequest,
+    CatchupPolicy, CreateJobRequest, CreateNamespaceRequest, CreateQueueRequest, CreateRunRequest,
     CreateScheduleRequest, CreateTargetRequest, CreateTargetSetRequest, ExecutorKind, JobResource,
-    MisfirePolicy, NamespaceResource, OverviewResource, Page, RunResource, RunStatus,
-    ScheduleResource, TargetReference, TargetResource, TargetSetResource, UpdateScheduleRequest,
-    WorkerResource, WorkerStatus,
+    MisfirePolicy, NamespaceResource, OverviewResource, Page, QueueResource, RunResource,
+    RunStatus, ScheduleResource, TargetReference, TargetResource, TargetSetResource,
+    UpdateQueueRequest, UpdateScheduleRequest, WorkerResource, WorkerStatus,
 };
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
@@ -108,6 +110,111 @@ pub async fn get_namespace(
 
 #[utoipa::path(
     post,
+    path = "/api/queues",
+    request_body = CreateQueueRequest,
+    responses((status = 201, body = QueueResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    tag = "control-plane"
+)]
+pub async fn create_queue(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Json(request): Json<CreateQueueRequest>,
+) -> Result<(StatusCode, Json<QueueResource>), ApiError> {
+    let queue = state
+        .application()
+        .create_queue(
+            &context,
+            CreateQueueInput {
+                name: request.name,
+                description: request.description,
+            },
+        )
+        .await?;
+    Ok((StatusCode::CREATED, Json(queue_resource(&queue)?)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/queues",
+    params(PageQuery),
+    responses((status = 200, body = Page<QueueResource>)),
+    tag = "control-plane"
+)]
+pub async fn list_queues(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Query(query): Query<PageQuery>,
+) -> Result<Json<Page<QueueResource>>, ApiError> {
+    let page = state
+        .application()
+        .list_queues(&context, query.limit, query.after.as_deref())
+        .await?;
+    Ok(Json(map_page(page, |item| queue_resource(&item))?))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/queues/{queue_id}",
+    params(("queue_id" = Uuid, Path, description = "Immutable Queue ID")),
+    responses((status = 200, body = QueueResource), (status = 404, body = crono_api::ErrorEnvelope)),
+    tag = "control-plane"
+)]
+pub async fn get_queue(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(queue_id): Path<Uuid>,
+) -> Result<Json<QueueResource>, ApiError> {
+    let queue = state.application().get_queue(&context, queue_id).await?;
+    Ok(Json(queue_resource(&queue)?))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/queues/{queue_id}",
+    params(("queue_id" = Uuid, Path, description = "Immutable Queue ID")),
+    request_body = UpdateQueueRequest,
+    responses((status = 200, body = QueueResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    tag = "control-plane"
+)]
+pub async fn update_queue(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(queue_id): Path<Uuid>,
+    Json(request): Json<UpdateQueueRequest>,
+) -> Result<Json<QueueResource>, ApiError> {
+    let queue = state
+        .application()
+        .update_queue(
+            &context,
+            queue_id,
+            UpdateQueueInput {
+                name: request.name,
+                description: request.description,
+                enabled: request.enabled,
+            },
+        )
+        .await?;
+    Ok(Json(queue_resource(&queue)?))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/queues/{queue_id}",
+    params(("queue_id" = Uuid, Path, description = "Immutable Queue ID")),
+    responses((status = 204), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    tag = "control-plane"
+)]
+pub async fn delete_queue(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(queue_id): Path<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    state.application().delete_queue(&context, queue_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
     path = "/api/namespaces/{namespace_id}/jobs",
     params(("namespace_id" = Uuid, Path)),
     request_body = CreateJobRequest,
@@ -127,7 +234,7 @@ pub async fn create_job(
             namespace_id,
             CreateJobInput {
                 name: request.name,
-                queue: request.queue,
+                queue_id: request.queue_id,
                 executor: match request.executor {
                     ExecutorKind::Noop => DomainExecutor::Noop,
                     ExecutorKind::Process => DomainExecutor::Process,
@@ -530,6 +637,18 @@ fn namespace_resource(namespace: &Namespace) -> Result<NamespaceResource, ApiErr
     })
 }
 
+fn queue_resource(queue: &Queue) -> Result<QueueResource, ApiError> {
+    Ok(QueueResource {
+        id: queue.id().get(),
+        name: queue.name().to_string(),
+        description: queue.description().map(str::to_string),
+        enabled: queue.enabled(),
+        system: queue.system(),
+        created_at: timestamp(queue.created_at())?,
+        updated_at: timestamp(queue.updated_at())?,
+    })
+}
+
 fn job_resource(record: &JobRecord) -> Result<JobResource, ApiError> {
     let executor = match record.job.executor() {
         DomainExecutor::Noop => ExecutorKind::Noop,
@@ -542,7 +661,8 @@ fn job_resource(record: &JobRecord) -> Result<JobResource, ApiError> {
         name: record.job.name().to_string(),
         qualified_name: format!("{}/{}", record.namespace, record.job.name()),
         executor,
-        queue: record.job.queue().to_string(),
+        queue_id: record.job.queue_id().get(),
+        queue: record.queue_name.to_string(),
         executable: record.job.executable().map(str::to_string),
         arguments: record.job.arguments().to_vec(),
         idempotent: record.job.idempotent(),
@@ -697,6 +817,7 @@ fn worker_resource(
 ) -> Result<WorkerResource, ApiError> {
     Ok(WorkerResource {
         worker_id: record.worker_id.clone(),
+        queue_id: record.queue_id.get(),
         queue: record.queue.clone(),
         concurrency: record.concurrency,
         version: record.version.clone(),

@@ -16,7 +16,7 @@ use leptos_router::components::A;
 pub fn JobsPage() -> impl IntoView {
     let namespace_id = RwSignal::new(None);
     let name = RwSignal::new(String::new());
-    let queue = RwSignal::new("default".to_string());
+    let queue_id = RwSignal::new(None);
     let attempted = RwSignal::new(false);
     let submitting = RwSignal::new(false);
     let name_server_error = RwSignal::new(None::<String>);
@@ -24,6 +24,24 @@ pub fn JobsPage() -> impl IntoView {
     let queue_server_error = RwSignal::new(None::<String>);
     let feedback = RwSignal::new(None::<String>);
     let namespace_choices = resource_options::namespaces();
+    let queue_choices = resource_options::queues();
+    let queue_initialized = RwSignal::new(false);
+    Effect::new(move |_| {
+        if !queue_initialized.get()
+            && !queue_choices.loading.get()
+            && queue_choices.load_error.get().is_none()
+        {
+            queue_initialized.set(true);
+            if let Some(queue) = queue_choices
+                .options
+                .get()
+                .into_iter()
+                .find(|option| option.label == "default")
+            {
+                queue_id.set(Some(queue.id));
+            }
+        }
+    });
     let namespace_field_error = Signal::derive(move || {
         namespace_server_error.get().or_else(|| {
             (attempted.get() && namespace_id.get().is_none())
@@ -35,10 +53,10 @@ pub fn JobsPage() -> impl IntoView {
             .get()
             .or_else(|| visible_name_validation(&name.get(), attempted.get()))
     });
-    let queue_error = Signal::derive(move || {
-        queue_server_error
-            .get()
-            .or_else(|| visible_name_validation(&queue.get(), attempted.get()))
+    let queue_field_error = Signal::derive(move || {
+        queue_server_error.get().or_else(|| {
+            (attempted.get() && queue_id.get().is_none()).then(|| "Select a Queue.".to_string())
+        })
     });
     let jobs = LocalResource::new(move || {
         let selected = namespace_id.get();
@@ -55,12 +73,11 @@ pub fn JobsPage() -> impl IntoView {
     let disabled = Signal::derive(move || {
         submitting.get()
             || namespace_id.get().is_none()
+            || queue_id.get().is_none()
             || name_validation_message(&name.get(), true).is_some()
-            || name_validation_message(&queue.get(), true).is_some()
     });
     let reset = Callback::new(move |()| {
         name.set(String::new());
-        queue.set("default".to_string());
         attempted.set(false);
         name_server_error.set(None);
         namespace_server_error.set(None);
@@ -70,7 +87,7 @@ pub fn JobsPage() -> impl IntoView {
     let submit = job_submit(JobSubmission {
         namespace_id,
         name,
-        queue,
+        queue_id,
         attempted,
         submitting,
         name_server_error,
@@ -82,12 +99,13 @@ pub fn JobsPage() -> impl IntoView {
     job_page(JobPageState {
         namespace_id,
         name,
-        queue,
+        queue_id,
         feedback,
         namespace_choices,
+        queue_choices,
         namespace_field_error,
         name_error,
-        queue_error,
+        queue_field_error,
         jobs,
         disabled,
         reset,
@@ -99,7 +117,7 @@ pub fn JobsPage() -> impl IntoView {
 struct JobSubmission {
     namespace_id: RwSignal<Option<uuid::Uuid>>,
     name: RwSignal<String>,
-    queue: RwSignal<String>,
+    queue_id: RwSignal<Option<uuid::Uuid>>,
     attempted: RwSignal<bool>,
     submitting: RwSignal<bool>,
     name_server_error: RwSignal<Option<String>>,
@@ -117,19 +135,19 @@ fn job_submit(state: JobSubmission) -> Callback<leptos::ev::SubmitEvent> {
         state.namespace_server_error.set(None);
         state.queue_server_error.set(None);
         state.feedback.set(None);
-        let Some(selected) = state.namespace_id.get_untracked() else {
+        let Some(selected_namespace) = state.namespace_id.get_untracked() else {
+            return;
+        };
+        let Some(selected_queue) = state.queue_id.get_untracked() else {
             return;
         };
         let job_name = state.name.get_untracked();
-        let queue_name = state.queue.get_untracked();
-        if name_validation_message(&job_name, true).is_some()
-            || name_validation_message(&queue_name, true).is_some()
-        {
+        if name_validation_message(&job_name, true).is_some() {
             return;
         }
         state.submitting.set(true);
         spawn_local(async move {
-            match api::create_job(selected, job_name, queue_name).await {
+            match api::create_job(selected_namespace, job_name, selected_queue).await {
                 Ok(job) => {
                     state.name.set(String::new());
                     state.attempted.set(false);
@@ -143,7 +161,7 @@ fn job_submit(state: JobSubmission) -> Callback<leptos::ev::SubmitEvent> {
                         state.namespace_server_error.set(Some(error.message));
                     }
                     Some("name") => state.name_server_error.set(Some(error.message)),
-                    Some("queue") => state.queue_server_error.set(Some(error.message)),
+                    Some("queue_id") => state.queue_server_error.set(Some(error.message)),
                     _ => state.feedback.set(Some(error.message)),
                 },
             }
@@ -156,12 +174,13 @@ fn job_submit(state: JobSubmission) -> Callback<leptos::ev::SubmitEvent> {
 struct JobPageState {
     namespace_id: RwSignal<Option<uuid::Uuid>>,
     name: RwSignal<String>,
-    queue: RwSignal<String>,
+    queue_id: RwSignal<Option<uuid::Uuid>>,
     feedback: RwSignal<Option<String>>,
     namespace_choices: resource_options::ResourceOptions,
+    queue_choices: resource_options::ResourceOptions,
     namespace_field_error: Signal<Option<String>>,
     name_error: Signal<Option<String>>,
-    queue_error: Signal<Option<String>>,
+    queue_field_error: Signal<Option<String>>,
     jobs: LocalResource<api::ApiResult<crono_api::Page<crono_api::JobResource>>>,
     disabled: Signal<bool>,
     reset: Callback<()>,
@@ -192,12 +211,22 @@ fn job_page(state: JobPageState) -> impl IntoView {
                         </p>
                     </Show>
                     <ResourceNameInput id="job-name" label="Name" value=state.name error=state.name_error />
-                    <div>
-                        <label for="job-queue" class="block text-sm font-medium text-crono-text">"Queue"<span class="ml-1 text-crono-failed">"*"</span></label>
-                        <input id="job-queue" class="mt-1.5 w-full rounded-md border border-crono-border px-3 py-2.5 text-sm" aria-invalid=move || state.queue_error.get().is_some().then_some("true") prop:value=move || state.queue.get() on:input=move |event| state.queue.set(event_target_value(&event)) />
-                        <p class="mt-1.5 text-xs text-crono-muted">"Queue tokens use lowercase letters, numbers and hyphens."</p>
-                        <p class="mt-1 text-sm text-crono-failed" role="alert">{move || state.queue_error.get().unwrap_or_default()}</p>
-                    </div>
+                    <ResourceSelect
+                        id="job-queue"
+                        label="Worker Queue"
+                        placeholder="Search/select Queue…"
+                        options=state.queue_choices.options
+                        selected=state.queue_id
+                        loading=state.queue_choices.loading
+                        load_error=state.queue_choices.load_error
+                        field_error=state.queue_field_error
+                    />
+                    <Show when=move || !state.queue_choices.loading.get() && state.queue_choices.options.get().is_empty() && state.queue_choices.load_error.get().is_none()>
+                        <p class="rounded-md bg-zinc-50 p-3 text-sm text-crono-muted">
+                            "No enabled Queues exist. "
+                            <A href="/queues" attr:class="font-medium text-crono-primary hover:text-crono-primary-hover">"Create or enable a Queue before creating a Job."</A>
+                        </p>
+                    </Show>
                     <FormActions submit_label="Create Job" disabled=state.disabled on_cancel=state.reset />
                 </form>
                 <p class="mt-3 text-sm text-crono-muted" role="status">{move || state.feedback.get().unwrap_or_default()}</p>

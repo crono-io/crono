@@ -14,7 +14,8 @@ use async_nats::jetstream::{
 };
 use crono_api::{
     ClaimRequest, ClaimResponse, CompletionRequest, DispatchEnvelope, ExecutionSnapshot,
-    ExecutorKind, LeaseRequest, WorkerHeartbeatRequest,
+    ExecutorKind, LeaseRequest, QueueReference, QueueResolutionRequest, QueueResolutionResponse,
+    QueueResolutionStatus, WorkerHeartbeatRequest,
 };
 use futures_util::StreamExt;
 use std::{env, io::Write, process::Stdio, sync::Arc, time::Duration};
@@ -31,6 +32,8 @@ const STREAM_NAME: &str = "CRONO_DISPATCH";
 const OUTPUT_LIMIT: usize = 65_536;
 const INPUT_LIMIT: usize = 65_536;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+const QUEUE_RESOLUTION_ATTEMPTS: u8 = 30;
+const QUEUE_RESOLUTION_RETRY: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Args {
@@ -64,22 +67,23 @@ pub async fn execute(args: Args) -> Result<()> {
         .connect(&args.nats_url)
         .await
         .context("failed to connect worker to NATS")?;
+    let queue = resolve_queue(&client, &args.queue).await?;
     let context = jetstream::new(client.clone());
     let stream = context
         .get_stream(STREAM_NAME)
         .await
         .context("Crono execution stream is unavailable")?;
-    let durable = format!("crono-{}", args.queue);
+    let durable = format!("crono-{}", queue.id);
     let consumer = stream
         .get_or_create_consumer(
             &durable,
             pull::Config {
                 durable_name: Some(durable.clone()),
-                description: Some(format!("Crono workers for queue {}", args.queue)),
+                description: Some(format!("Crono workers for Queue {}", queue.name)),
                 ack_policy: AckPolicy::Explicit,
                 ack_wait: Duration::from_secs(90),
                 max_ack_pending: i64::from(args.concurrency),
-                filter_subject: format!("crono.dispatch.{}", args.queue),
+                filter_subject: format!("crono.dispatch.{}", queue.id),
                 ..pull::Config::default()
             },
         )
@@ -96,6 +100,7 @@ pub async fn execute(args: Args) -> Result<()> {
     let heartbeat = tokio::spawn(run_presence_heartbeat(
         client.clone(),
         Arc::clone(&args),
+        queue.id,
         uuid::Uuid::now_v7(),
         cancellation.child_token(),
     ));
@@ -133,7 +138,7 @@ pub async fn execute(args: Args) -> Result<()> {
         }
         futures_util::stream::iter(batch)
             .for_each_concurrent(usize::from(args.concurrency), |message| {
-                handle_message(client.clone(), Arc::clone(&args), message)
+                handle_message(client.clone(), Arc::clone(&args), queue.id, message)
             })
             .await;
     }
@@ -151,13 +156,14 @@ pub async fn execute(args: Args) -> Result<()> {
 async fn run_presence_heartbeat(
     client: async_nats::Client,
     args: Arc<Args>,
+    queue_id: uuid::Uuid,
     session_id: uuid::Uuid,
     cancellation: CancellationToken,
 ) {
     let request = WorkerHeartbeatRequest {
         worker_id: args.worker_id.clone(),
         session_id,
-        queue: args.queue.clone(),
+        queue_id,
         concurrency: args.concurrency,
         version: env!("CARGO_PKG_VERSION").to_string(),
     };
@@ -184,6 +190,53 @@ async fn run_presence_heartbeat(
     }
 }
 
+async fn resolve_queue(client: &async_nats::Client, name: &str) -> Result<QueueReference> {
+    let subject = format!("crono.worker.queue.resolve.{name}");
+    let request = QueueResolutionRequest {
+        name: name.to_string(),
+    };
+    for attempt in 1..=QUEUE_RESOLUTION_ATTEMPTS {
+        let message = match client
+            .request(subject.clone(), serde_json::to_vec(&request)?.into())
+            .await
+        {
+            Ok(message) => message,
+            Err(error) if attempt < QUEUE_RESOLUTION_ATTEMPTS => {
+                warn!(%error, attempt, queue = name, "Queue resolution responder is not ready");
+                time::sleep(QUEUE_RESOLUTION_RETRY).await;
+                continue;
+            }
+            Err(error) => {
+                return Err(error).context("Crono server did not answer Queue resolution");
+            }
+        };
+        let response: QueueResolutionResponse = serde_json::from_slice(&message.payload)
+            .context("Crono server returned an invalid Queue resolution")?;
+        match response.status {
+            QueueResolutionStatus::Ready => {
+                return response
+                    .queue
+                    .context("Crono server omitted resolved Queue identity");
+            }
+            QueueResolutionStatus::NotFound => {
+                bail!("Queue {name:?} does not exist; create it before starting this worker");
+            }
+            QueueResolutionStatus::Unavailable if attempt < QUEUE_RESOLUTION_ATTEMPTS => {
+                warn!(
+                    attempt,
+                    queue = name,
+                    "Queue resolution is temporarily unavailable"
+                );
+                time::sleep(QUEUE_RESOLUTION_RETRY).await;
+            }
+            QueueResolutionStatus::Unavailable => {
+                bail!("Crono server could not resolve Queue {name:?}");
+            }
+        }
+    }
+    bail!("Crono server could not resolve Queue {name:?}")
+}
+
 async fn presence_request(
     client: &async_nats::Client,
     worker_id: &str,
@@ -197,7 +250,12 @@ async fn presence_request(
     serde_json::from_slice(&response.payload).context("worker presence response is invalid")
 }
 
-async fn handle_message(client: async_nats::Client, args: Arc<Args>, message: jetstream::Message) {
+async fn handle_message(
+    client: async_nats::Client,
+    args: Arc<Args>,
+    queue_id: uuid::Uuid,
+    message: jetstream::Message,
+) {
     let envelope: DispatchEnvelope = match serde_json::from_slice(&message.payload) {
         Ok(envelope) => envelope,
         Err(error) => {
@@ -206,9 +264,19 @@ async fn handle_message(client: async_nats::Client, args: Arc<Args>, message: je
             return;
         }
     };
+    if envelope.queue_id != queue_id {
+        warn!(
+            expected_queue_id = %queue_id,
+            actual_queue_id = %envelope.queue_id,
+            "terminating dispatch delivered to the wrong Queue"
+        );
+        let _ = message.ack_with(AckKind::Term).await;
+        return;
+    }
     let claim = ClaimRequest {
         run_id: envelope.run_id,
         attempt_id: envelope.attempt_id,
+        queue_id,
         worker_id: args.worker_id.clone(),
     };
     let response: ClaimResponse =
@@ -434,16 +502,8 @@ where
 }
 
 fn validate_token(value: &str, label: &str) -> Result<()> {
-    let valid = !value.is_empty()
-        && value.len() <= 63
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
-    if valid {
-        Ok(())
-    } else {
-        bail!("{label} must be a lowercase NATS-safe token")
-    }
+    crono_api::validate_resource_name(value)
+        .with_context(|| format!("{label} must be a canonical DNS-1123 label"))
 }
 
 #[cfg(test)]
@@ -455,6 +515,8 @@ mod tests {
     fn validates_subject_tokens() {
         assert!(validate_token("worker-01", "worker").is_ok());
         assert!(validate_token("Worker.01", "worker").is_err());
+        assert!(validate_token("-worker", "worker").is_err());
+        assert!(validate_token("worker-", "worker").is_err());
     }
 
     #[tokio::test]

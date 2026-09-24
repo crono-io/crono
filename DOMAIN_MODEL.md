@@ -13,9 +13,18 @@ Job + Target + inputs
          |
          v
         Run -> RunAttempt -> Worker
+
+Queue (global) -> Job
+       +-------> Worker
 ```
 
-A Namespace is the ownership and authorization boundary for names. A Job is a directly editable execution definition containing an executor, queue, executable and arguments, idempotency declaration, and retry policy. A Target contains destination-specific arguments. A Target Set is a non-empty named selection of Targets in the same Namespace. A Schedule refers to one Job and Target in the same Namespace. Database triggers reject cross-Namespace references even if an adapter is faulty.
+A Namespace is the ownership and authorization boundary for workload names. A
+Queue is a global worker-pool resource. A Job stores the Queue UUID alongside
+its executor, executable and arguments, idempotency declaration, and retry
+policy. A Target contains destination-specific arguments. A Target Set is a
+non-empty named selection of Targets in the same Namespace. A Schedule refers
+to one Job and Target in the same Namespace. Database constraints reject
+missing Queues and cross-Namespace references even if an adapter is faulty.
 
 This draft deliberately has no JobVersion, TargetVersion, ScheduleVersion, `/api/v1`, or schema-version field in dispatch messages. Editing a catalog object affects only future Runs. Every Run stores an immutable execution snapshot, so already committed work and history do not change when the Job or Target is edited.
 
@@ -23,11 +32,15 @@ This draft deliberately has no JobVersion, TargetVersion, ScheduleVersion, `/api
 
 UUIDv7 values are immutable resource identities and every relationship stores
 those UUIDs. Names are stable lookup and display identifiers, not foreign keys.
-Namespace, Job, Target, Target Set, and Schedule names use one DNS-1123 label
+Namespace, Queue, Job, Target, Target Set, and Schedule names use one DNS-1123 label
 rule: 1 through 63 ASCII lowercase letters, digits, or hyphens, with an
 alphanumeric first and last character. The API rejects invalid names without
 normalizing them. Names are unique inside their owning Namespace; Namespace
-names are unique globally.
+and Queue names are unique globally. Disabling a Queue prevents new Job
+assignments while existing Jobs, Runs, and workers can drain. Deletion succeeds
+only when no durable relationship references the Queue. The bootstrap `default`
+Queue is system-managed: its description may change, but it remains enabled
+and cannot be renamed or deleted because the worker CLI uses it as its default.
 
 A manual Run uses the request UUID as an idempotency key: replaying the same request and definition returns the existing Run, while reusing the key for different work is a conflict. Manual Run and Schedule requests refer to Jobs and Targets by UUID, while API responses also include derived qualified names for display.
 
@@ -49,12 +62,22 @@ An Attempt separately records `pending_dispatch`, `queued`, `running`, and its t
 
 ## Leases and idempotency
 
-The worker has no PostgreSQL credentials. It claims, renews, and completes through identity-scoped NATS request/reply subjects handled by the server. Every operation uses conditional state transitions in PostgreSQL. A healthy worker renews the database lease and JetStream ACK deadline independently.
+The worker has no PostgreSQL credentials. At startup it resolves its configured
+Queue name through a server-owned NATS request/reply boundary, then subscribes
+to a UUID-based dispatch subject. It claims, renews, and completes through
+identity-scoped NATS request/reply subjects handled by the server. Every
+operation uses conditional state transitions in PostgreSQL. A healthy worker
+renews the database lease and JetStream ACK deadline independently.
 
 Lease expiry proves only that ownership was lost. It does not prove that a local process stopped or that a remote effect did not happen. Crono automatically creates another Attempt only for a Job declared idempotent and with attempts remaining. Otherwise the Run becomes `unknown`. Resource-specific idempotency keys or fencing must protect external systems when automatic retries are enabled.
 
 ## Trust boundary
 
-Only the server accepts public control-plane requests and writes PostgreSQL. Only the server publishes execution dispatch. Workers consume authorized queues and use scoped control subjects; a payload's claimed `worker_id` is not sufficient authentication. Production broker credentials must restrict those subjects so the authenticated identity and subject identity agree.
+Only the server accepts public control-plane requests and writes PostgreSQL.
+Only the server publishes execution dispatch. Workers resolve human-readable
+Queue names but consume UUID-addressed Queue subjects and use scoped control
+subjects; a payload's claimed `worker_id` is not sufficient authentication.
+Production broker credentials must restrict those subjects so the authenticated
+identity and subject identity agree.
 
 The process executor does not invoke a shell. Executables must be absolute, arguments remain structured, inputs are passed through a bounded temporary JSON file, and inherited environment is cleared except for an explicit locale/timezone allowlist. This reduces accidental injection but is not a sandbox: a worker process has the privileges and network access of its operating-system identity.

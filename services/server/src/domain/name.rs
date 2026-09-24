@@ -70,16 +70,16 @@ impl fmt::Display for ResourceName {
     }
 }
 
-/// Validated NATS queue token used as one dispatch subject segment.
+/// Validated canonical lookup and display name for a worker Queue.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct QueueName(String);
 
 impl QueueName {
-    /// Validate and own a queue token under the canonical name rules.
+    /// Validate and own a Queue name under the canonical resource-name rules.
     ///
     /// # Errors
     ///
-    /// Returns [`NameError`] for invalid or oversized subject tokens.
+    /// Returns [`NameError`] for invalid or oversized names.
     pub fn parse(value: &str) -> Result<Self, NameError> {
         validate_resource_name(value)?;
         Ok(Self(value.to_string()))

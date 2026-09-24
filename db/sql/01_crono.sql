@@ -17,12 +17,34 @@ CREATE TABLE IF NOT EXISTS crono.namespaces (
     )
 );
 
+CREATE TABLE IF NOT EXISTS crono.queues (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    name text NOT NULL UNIQUE,
+    description text,
+    enabled boolean NOT NULL DEFAULT true,
+    system boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+    updated_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+    CONSTRAINT queues_name_canonical CHECK (
+        name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+    ),
+    CONSTRAINT queues_description_bounded CHECK (
+        description IS NULL OR char_length(description) <= 500
+    ),
+    CONSTRAINT queues_system_enabled CHECK (NOT system OR enabled),
+    CONSTRAINT queues_system_identity CHECK ((name = 'default') = system)
+);
+
+INSERT INTO crono.queues (name, description, system)
+VALUES ('default', 'Default worker queue', true)
+ON CONFLICT (name) DO UPDATE SET enabled = true, system = true;
+
 CREATE TABLE IF NOT EXISTS crono.jobs (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     namespace_id uuid NOT NULL REFERENCES crono.namespaces(id) ON DELETE RESTRICT,
     name text NOT NULL,
     executor text NOT NULL DEFAULT 'noop',
-    queue text NOT NULL DEFAULT 'default',
+    queue_id uuid NOT NULL REFERENCES crono.queues(id) ON DELETE RESTRICT,
     executable text,
     arguments jsonb NOT NULL DEFAULT '[]'::jsonb,
     idempotent boolean NOT NULL DEFAULT false,
@@ -36,9 +58,6 @@ CREATE TABLE IF NOT EXISTS crono.jobs (
     CONSTRAINT jobs_namespace_name_unique UNIQUE (namespace_id, name),
     CONSTRAINT jobs_name_canonical CHECK (
         name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
-    ),
-    CONSTRAINT jobs_queue_canonical CHECK (
-        queue ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
     ),
     CONSTRAINT jobs_executor_supported CHECK (executor IN ('noop', 'process')),
     CONSTRAINT jobs_process_configuration CHECK (
@@ -141,6 +160,7 @@ CREATE TABLE IF NOT EXISTS crono.runs (
     schedule_id uuid REFERENCES crono.schedules(id) ON DELETE RESTRICT,
     job_id uuid NOT NULL REFERENCES crono.jobs(id) ON DELETE RESTRICT,
     target_id uuid NOT NULL REFERENCES crono.targets(id) ON DELETE RESTRICT,
+    queue_id uuid NOT NULL REFERENCES crono.queues(id) ON DELETE RESTRICT,
     scheduled_at timestamptz NOT NULL,
     status text NOT NULL DEFAULT 'pending_dispatch',
     execution_snapshot jsonb NOT NULL,
@@ -200,16 +220,13 @@ CREATE TABLE IF NOT EXISTS crono.run_attempts (
 CREATE TABLE IF NOT EXISTS crono.worker_presence (
     worker_id text PRIMARY KEY,
     session_id uuid NOT NULL,
-    queue text NOT NULL,
+    queue_id uuid NOT NULL REFERENCES crono.queues(id) ON DELETE RESTRICT,
     concurrency integer NOT NULL,
     version text NOT NULL,
     started_at timestamptz NOT NULL DEFAULT statement_timestamp(),
     last_seen_at timestamptz NOT NULL DEFAULT statement_timestamp(),
     CONSTRAINT worker_presence_id_canonical CHECK (
         worker_id ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
-    ),
-    CONSTRAINT worker_presence_queue_canonical CHECK (
-        queue ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
     ),
     CONSTRAINT worker_presence_concurrency_bounded CHECK (concurrency BETWEEN 1 AND 256),
     CONSTRAINT worker_presence_version_bounded CHECK (char_length(version) BETWEEN 1 AND 128),
@@ -236,7 +253,7 @@ CREATE TABLE IF NOT EXISTS crono.outbox (
     CONSTRAINT outbox_attempts_nonnegative CHECK (attempt_count >= 0),
     CONSTRAINT outbox_error_bounded CHECK (last_error IS NULL OR char_length(last_error) <= 1024),
     CONSTRAINT outbox_subject_dispatch CHECK (
-        subject ~ '^crono[.]dispatch[.][a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+        subject ~ '^crono[.]dispatch[.][0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
     ),
     CONSTRAINT outbox_payload_object CHECK (jsonb_typeof(payload) = 'object')
 );
@@ -275,6 +292,8 @@ CREATE INDEX IF NOT EXISTS run_attempts_expired_lease_idx
     ON crono.run_attempts (lease_expires_at, id) WHERE status = 'running';
 CREATE INDEX IF NOT EXISTS worker_presence_last_seen_idx
     ON crono.worker_presence (last_seen_at);
+CREATE INDEX IF NOT EXISTS jobs_queue_idx ON crono.jobs (queue_id, id);
+CREATE INDEX IF NOT EXISTS runs_queue_idx ON crono.runs (queue_id, id);
 CREATE INDEX IF NOT EXISTS outbox_pending_idx
     ON crono.outbox (next_attempt_at, id)
     WHERE published_at IS NULL AND cancelled_at IS NULL;

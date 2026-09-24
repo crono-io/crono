@@ -11,6 +11,7 @@ pub enum ApplicationError {
     },
     NotFound,
     Conflict,
+    InUse,
     IdempotencyConflict,
     Authorization(AuthorizationError),
     Unavailable,
@@ -23,6 +24,7 @@ impl fmt::Display for ApplicationError {
             Self::InvalidInput { message, .. } => formatter.write_str(message),
             Self::NotFound => formatter.write_str("resource was not found"),
             Self::Conflict => formatter.write_str("resource already exists"),
+            Self::InUse => formatter.write_str("resource is still in use"),
             Self::IdempotencyConflict => {
                 formatter.write_str("request ID was reused with different inputs")
             }
@@ -66,6 +68,7 @@ impl From<StoreError> for ApplicationError {
         match value {
             StoreError::NotFound => Self::NotFound,
             StoreError::Conflict | StoreError::StaleRevision => Self::Conflict,
+            StoreError::InUse => Self::InUse,
             StoreError::IdempotencyConflict => Self::IdempotencyConflict,
             StoreError::Unavailable => Self::Unavailable,
             StoreError::Internal => Self::Internal,

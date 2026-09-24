@@ -57,11 +57,14 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
     let suffix = Uuid::now_v7().simple().to_string();
     let namespace =
         NamespaceName::parse(&format!("outage-{}", suffix.get(..12).unwrap_or("test")))?;
-    let queue = QueueName::parse(&format!("outage-{}", suffix.get(..12).unwrap_or("test")))?;
+    let queue_name = QueueName::parse(&format!("outage-{}", suffix.get(..12).unwrap_or("test")))?;
     let job = ResourceName::parse("noop")?;
     let unsafe_job = ResourceName::parse("unsafe-noop")?;
     let target = ResourceName::parse("local")?;
     let namespace_record = store.create_namespace(&namespace).await?;
+    let queue_record = store.create_queue(&queue_name, None).await?;
+    let queue_id = queue_record.id();
+    let queue_routing_id = queue_id.get().to_string();
     let namespace_id = namespace_record.id();
     let job_record = store
         .create_job(
@@ -69,7 +72,7 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
             &job,
             &JobDefinition {
                 executor: ExecutorKind::Noop,
-                queue: queue.clone(),
+                queue_id,
                 executable: None,
                 arguments: Vec::new(),
                 idempotent: true,
@@ -87,7 +90,7 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
             &unsafe_job,
             &JobDefinition {
                 executor: ExecutorKind::Noop,
-                queue: queue.clone(),
+                queue_id,
                 executable: None,
                 arguments: Vec::new(),
                 idempotent: false,
@@ -180,7 +183,7 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
 
     container("start").await?;
     wait_for_transport(&publisher).await?;
-    execute_one(&nats_url, queue.as_str()).await?;
+    execute_one(&nats_url, &queue_routing_id).await?;
     wait_for_status(&pool, namespace.as_str(), "late", "succeeded").await?;
 
     dispatcher_cancellation.cancel();
@@ -192,7 +195,7 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
         &nats_url,
         job_id,
         target_id,
-        queue.as_str(),
+        &queue_routing_id,
     )
     .await?;
     verify_worker_crash_windows(
@@ -203,7 +206,7 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
         job_id,
         unsafe_job_id,
         target_id,
-        queue.as_str(),
+        &queue_routing_id,
     )
     .await?;
 
@@ -515,6 +518,7 @@ async fn claim(
         &ClaimRequest {
             run_id: envelope.run_id,
             attempt_id: envelope.attempt_id,
+            queue_id: envelope.queue_id,
             worker_id: worker_id.to_string(),
         },
     )

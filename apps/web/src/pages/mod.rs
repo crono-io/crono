@@ -7,6 +7,7 @@
 mod jobs;
 mod namespaces;
 mod overview;
+mod queues;
 mod resource_options;
 mod runs;
 mod settings;
@@ -17,6 +18,7 @@ mod workers;
 pub use jobs::JobsPage;
 pub use namespaces::NamespacesPage;
 pub use overview::OverviewPage;
+pub use queues::QueuesPage;
 pub use runs::RunsPage;
 pub use settings::SettingsPage;
 pub use target_sets::TargetSetsPage;

@@ -9,6 +9,7 @@
 pub enum AppRoute {
     Overview,
     Namespaces,
+    Queues,
     Jobs,
     Targets,
     TargetSets,
@@ -24,6 +25,7 @@ impl AppRoute {
         match self {
             Self::Overview => "/",
             Self::Namespaces => "/namespaces",
+            Self::Queues => "/queues",
             Self::Jobs => "/jobs",
             Self::Targets => "/targets",
             Self::TargetSets => "/target-sets",
@@ -39,6 +41,7 @@ impl AppRoute {
         match self {
             Self::Overview => "Overview",
             Self::Namespaces => "Namespaces",
+            Self::Queues => "Queues",
             Self::Jobs => "Jobs",
             Self::Targets => "Targets",
             Self::TargetSets => "Target Sets",
@@ -54,6 +57,7 @@ impl AppRoute {
         match self {
             Self::Overview => MaterialSymbol::Dashboard,
             Self::Namespaces => MaterialSymbol::AccountTree,
+            Self::Queues => MaterialSymbol::Queue,
             Self::Jobs => MaterialSymbol::Work,
             Self::Targets => MaterialSymbol::Dns,
             Self::TargetSets => MaterialSymbol::Lan,
@@ -85,6 +89,7 @@ pub enum MaterialSymbol {
     LightMode,
     Memory,
     PlayCircle,
+    Queue,
     SearchOff,
     Settings,
     Work,
@@ -104,6 +109,7 @@ impl MaterialSymbol {
             Self::LightMode => "light_mode",
             Self::Memory => "memory",
             Self::PlayCircle => "play_circle",
+            Self::Queue => "queue",
             Self::SearchOff => "search_off",
             Self::Settings => "settings",
             Self::Work => "work",
@@ -121,6 +127,7 @@ pub struct NavigationGroup {
 const OVERVIEW_ROUTES: &[AppRoute] = &[AppRoute::Overview];
 const RESOURCE_ROUTES: &[AppRoute] = &[
     AppRoute::Namespaces,
+    AppRoute::Queues,
     AppRoute::Jobs,
     AppRoute::Targets,
     AppRoute::TargetSets,
@@ -129,9 +136,10 @@ const EXECUTION_ROUTES: &[AppRoute] = &[AppRoute::Runs, AppRoute::Workers];
 const SYSTEM_ROUTES: &[AppRoute] = &[AppRoute::Settings];
 
 /// Complete route inventory used for exact matching and verification.
-pub const ALL_ROUTES: [AppRoute; 8] = [
+pub const ALL_ROUTES: [AppRoute; 9] = [
     AppRoute::Overview,
     AppRoute::Namespaces,
+    AppRoute::Queues,
     AppRoute::Jobs,
     AppRoute::Targets,
     AppRoute::TargetSets,
@@ -175,6 +183,7 @@ mod tests {
         let expected = [
             "/",
             "/namespaces",
+            "/queues",
             "/jobs",
             "/targets",
             "/target-sets",

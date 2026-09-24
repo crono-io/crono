@@ -26,6 +26,15 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
             control_plane::list_namespaces
         ))
         .routes(routes!(control_plane::get_namespace))
+        .routes(routes!(
+            control_plane::create_queue,
+            control_plane::list_queues
+        ))
+        .routes(routes!(
+            control_plane::get_queue,
+            control_plane::update_queue,
+            control_plane::delete_queue
+        ))
         .routes(routes!(control_plane::create_job, control_plane::list_jobs))
         .routes(routes!(control_plane::get_job))
         .routes(routes!(

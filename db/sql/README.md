@@ -6,9 +6,10 @@
 
 - `00_init.sql` creates the `crono` database, owner/runtime roles, and grants,
   then loads the schema.
-- `01_crono.sql` is the idempotent draft schema baseline for Namespaces, direct
-  Job and Target definitions, explicit Target Sets, Schedules, Runs, Attempts,
-  worker presence, audit events, leases, and the transactional outbox.
+- `01_crono.sql` is the idempotent draft schema baseline for Namespaces, global
+  worker Queues, direct Job and Target definitions, explicit Target Sets,
+  Schedules, Runs, Attempts, worker presence, audit events, leases, and the
+  transactional outbox.
 - `container-entrypoint.sql` lets the official PostgreSQL image run the canonical
   bootstrap while keeping relative includes working.
 - `check.sql` verifies database ownership, role safety, schema ownership, and
@@ -58,9 +59,13 @@ The application role is `crono_runtime`. It can connect and manipulate objects
 created by `crono_owner`, but it cannot create schema objects. `crono_owner` is a
 non-login role reserved for bootstrap and migrations.
 
-Canonical names are DNS-1123 labels and are unique inside their owning
-Namespace. UUIDs are the immutable keys for every relationship. Constraint
-triggers reject cross-Namespace Target Set membership and Job, Target,
+Canonical names are DNS-1123 labels. Workload names are unique inside their
+owning Namespace; Queue and Namespace names are globally unique. UUIDs are the
+immutable keys for every relationship. Jobs, Runs, and worker presence retain
+Queue UUIDs while Queue names remain editable display and lookup identifiers.
+The bootstrap `default` Queue is system-managed and remains enabled so worker
+configuration has a stable default. Constraint triggers reject cross-Namespace
+Target Set membership and Job, Target,
 Schedule, and Run combinations even if an adapter is faulty. A Run stores an immutable execution snapshot. The scheduler or
 manual Run path inserts the Run, first Attempt, and outbox row in one
 transaction. The dispatcher marks the outbox, Attempt, and Run queued only

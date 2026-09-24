@@ -1,7 +1,7 @@
 //! Strong UUID identities for control-plane resource kinds.
 //!
 //! PostgreSQL 18 allocates `UUIDv7` values, while separate Rust wrappers prevent
-//! accidental interchange between Namespace, Job, Target, Schedule, Run,
+//! accidental interchange between Namespace, Queue, Job, Target, Schedule, Run,
 //! Attempt, and dispatch identities.
 
 use uuid::Uuid;
@@ -29,6 +29,7 @@ macro_rules! identifier {
 }
 
 identifier!(NamespaceId, "Stable internal identity of a Namespace.");
+identifier!(QueueId, "Stable internal identity of a worker Queue.");
 identifier!(JobId, "Stable internal identity of a Job.");
 identifier!(TargetId, "Stable internal identity of a Target.");
 identifier!(TargetSetId, "Stable internal identity of a `TargetSet`.");

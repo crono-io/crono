@@ -109,8 +109,82 @@ web address="0.0.0.0" port="3000":
   cd apps/web && NO_COLOR=true trunk serve --address "$1" --port "$2"
 
 [doc("Start the complete development stack on non-conflicting ports.")]
-[parallel]
-dev-start address="0.0.0.0" web-port="3000" server-port="8080" verbosity="-v": (server server-port verbosity) (web address web-port)
+[positional-arguments]
+dev-start address="0.0.0.0" web-port="3000" server-port="8080" verbosity="-v":
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  readonly address="$1"
+  readonly web_port="$2"
+  readonly server_port="$3"
+  readonly verbosity="$4"
+  child_pids=()
+
+  cleanup() {
+    for pid in "${child_pids[@]}"; do
+      if kill -0 -- "-$pid" 2>/dev/null; then
+        kill -TERM -- "-$pid" 2>/dev/null || true
+      fi
+    done
+    for pid in "${child_pids[@]}"; do
+      wait "$pid" 2>/dev/null || true
+    done
+  }
+  trap cleanup EXIT
+  trap 'exit 130' INT TERM
+
+  port_is_open() {
+    (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+  }
+
+  if port_is_open "$server_port"; then
+    echo "API port $server_port is already in use; stop the existing process or choose another server-port" >&2
+    exit 1
+  fi
+  if port_is_open "$web_port"; then
+    echo "Web port $web_port is already in use; stop the existing process or choose another web-port" >&2
+    exit 1
+  fi
+
+  setsid just server "$server_port" "$verbosity" &
+  server_pid=$!
+  child_pids+=("$server_pid")
+
+  ready=false
+  for ((attempt = 1; attempt <= 120; attempt++)); do
+    if ! kill -0 "$server_pid" 2>/dev/null; then
+      if wait "$server_pid"; then
+        status=1
+      else
+        status=$?
+      fi
+      echo "Crono API exited before becoming ready" >&2
+      exit "$status"
+    fi
+    if curl --fail --silent --output /dev/null "http://127.0.0.1:${server_port}/ready"; then
+      ready=true
+      break
+    fi
+    sleep 1
+  done
+  if [[ "$ready" != true ]]; then
+    echo "Crono API did not become ready within 120 seconds" >&2
+    exit 1
+  fi
+
+  setsid just web "$address" "$web_port" &
+  web_pid=$!
+  child_pids+=("$web_pid")
+
+  set +e
+  wait -n "$server_pid" "$web_pid"
+  status=$?
+  set -e
+  if ((status == 0)); then
+    echo "A Crono development service stopped unexpectedly" >&2
+    exit 1
+  fi
+  exit "$status"
 
 # Stop local infrastructure containers while preserving their data volumes.
 dev-stop:

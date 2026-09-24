@@ -9,8 +9,14 @@
 //! these subjects with NATS credentials.
 
 use super::NatsPublisher;
-use crate::application::ControlPlaneStore;
-use crono_api::{ClaimRequest, CompletionRequest, LeaseRequest, WorkerHeartbeatRequest};
+use crate::{
+    application::{ControlPlaneStore, StoreError},
+    domain::{QueueId, QueueName},
+};
+use crono_api::{
+    ClaimRequest, CompletionRequest, LeaseRequest, QueueReference, QueueResolutionRequest,
+    QueueResolutionResponse, QueueResolutionStatus, WorkerHeartbeatRequest, validate_resource_name,
+};
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::{sync::Arc, time::Duration};
@@ -22,6 +28,8 @@ const CONTROL_SUBJECT: &str = "crono.worker.control.*.*";
 const CONTROL_QUEUE: &str = "crono-server-control";
 const PRESENCE_SUBJECT: &str = "crono.worker.presence.*";
 const PRESENCE_QUEUE: &str = "crono-server-presence";
+const QUEUE_RESOLUTION_SUBJECT: &str = "crono.worker.queue.resolve.*";
+const QUEUE_RESOLUTION_QUEUE: &str = "crono-server-queue-resolution";
 
 /// Serve worker state transitions whenever NATS is connected.
 pub async fn run_worker_control(
@@ -62,6 +70,17 @@ pub async fn run_worker_control(
                 continue;
             }
         };
+        let mut queue_resolution = match client
+            .queue_subscribe(QUEUE_RESOLUTION_SUBJECT, QUEUE_RESOLUTION_QUEUE.to_string())
+            .await
+        {
+            Ok(messages) => messages,
+            Err(error) => {
+                warn!(%error, "failed to subscribe to worker Queue resolution subjects");
+                time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
         loop {
             tokio::select! {
                 () = cancellation.cancelled() => break,
@@ -79,6 +98,14 @@ pub async fn run_worker_control(
                     };
                     if let Err(error) = handle_presence(&store, &client, message).await {
                         warn!(%error, "worker presence request failed");
+                    }
+                }
+                message = queue_resolution.next() => {
+                    let Some(message) = message else {
+                        break;
+                    };
+                    if let Err(error) = handle_queue_resolution(&store, &client, message).await {
+                        warn!(%error, "worker Queue resolution request failed");
                     }
                 }
             }
@@ -140,14 +167,55 @@ async fn handle_presence(
         .unwrap_or_default();
     let request: WorkerHeartbeatRequest = serde_json::from_slice(&message.payload)?;
     validate_heartbeat(&request, subject_worker)?;
+    store.get_queue(QueueId::new(request.queue_id)).await?;
     store.record_worker_heartbeat(&request).await?;
     respond(client, reply, &true).await
 }
 
+async fn handle_queue_resolution(
+    store: &Arc<dyn ControlPlaneStore>,
+    client: &async_nats::Client,
+    message: async_nats::Message,
+) -> anyhow::Result<()> {
+    let Some(reply) = message.reply.clone() else {
+        return Ok(());
+    };
+    let subject_name = message
+        .subject
+        .as_str()
+        .split('.')
+        .nth(4)
+        .unwrap_or_default();
+    let request: QueueResolutionRequest = serde_json::from_slice(&message.payload)?;
+    let name = QueueName::parse(&request.name)?;
+    if name.as_str() != subject_name {
+        anyhow::bail!("Queue name does not match resolution subject");
+    }
+    let response = match store.get_queue_by_name(&name).await {
+        Ok(queue) => QueueResolutionResponse {
+            status: QueueResolutionStatus::Ready,
+            queue: Some(QueueReference {
+                id: queue.id().get(),
+                name: queue.name().to_string(),
+            }),
+        },
+        Err(StoreError::NotFound) => QueueResolutionResponse {
+            status: QueueResolutionStatus::NotFound,
+            queue: None,
+        },
+        Err(_) => QueueResolutionResponse {
+            status: QueueResolutionStatus::Unavailable,
+            queue: None,
+        },
+    };
+    respond(client, reply, &response).await
+}
+
 /// Validate presence metadata at the server trust boundary.
 ///
-/// The subject identity must agree with the payload, while worker IDs and queues
-/// remain restricted to the same single-token grammar used by dispatch subjects.
+/// The subject identity must agree with the payload, while worker IDs remain
+/// restricted to one safe NATS subject token. Queue identity is authoritative
+/// only after the store lookup performed by the presence handler.
 fn validate_heartbeat(
     request: &WorkerHeartbeatRequest,
     subject_worker: &str,
@@ -155,16 +223,8 @@ fn validate_heartbeat(
     if request.worker_id != subject_worker {
         anyhow::bail!("worker identity does not match control subject");
     }
-    for (value, label) in [(&request.worker_id, "worker ID"), (&request.queue, "queue")] {
-        let valid = !value.is_empty()
-            && value.len() <= 63
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
-        if !valid {
-            anyhow::bail!("{label} must be a lowercase NATS-safe token");
-        }
-    }
+    validate_resource_name(&request.worker_id)
+        .map_err(|error| anyhow::anyhow!("worker ID is invalid: {error}"))?;
     if !(1..=256).contains(&request.concurrency) {
         anyhow::bail!("worker concurrency must be between 1 and 256");
     }
@@ -195,7 +255,7 @@ mod tests {
         WorkerHeartbeatRequest {
             worker_id: "worker-01".to_string(),
             session_id: Uuid::now_v7(),
-            queue: "default".to_string(),
+            queue_id: Uuid::now_v7(),
             concurrency: 8,
             version: "0.1.0".to_string(),
         }
@@ -210,9 +270,9 @@ mod tests {
         mismatched.worker_id = "worker-02".to_string();
         assert!(validate_heartbeat(&mismatched, "worker-01").is_err());
 
-        let mut invalid_queue = request();
-        invalid_queue.queue = "other.queue".to_string();
-        assert!(validate_heartbeat(&invalid_queue, "worker-01").is_err());
+        let mut invalid_worker = request();
+        invalid_worker.worker_id = "-worker".to_string();
+        assert!(validate_heartbeat(&invalid_worker, "-worker").is_err());
 
         let mut invalid_concurrency = request();
         invalid_concurrency.concurrency = 0;

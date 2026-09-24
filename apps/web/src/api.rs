@@ -7,9 +7,10 @@
 //! server-side validation messages beside the relevant control.
 
 use crono_api::{
-    CreateJobRequest, CreateNamespaceRequest, CreateRunRequest, CreateTargetRequest,
-    CreateTargetSetRequest, ErrorEnvelope, ExecutorKind, JobResource, NamespaceResource,
-    OverviewResource, Page, RunResource, TargetResource, TargetSetResource, WorkerResource,
+    CreateJobRequest, CreateNamespaceRequest, CreateQueueRequest, CreateRunRequest,
+    CreateTargetRequest, CreateTargetSetRequest, ErrorEnvelope, ExecutorKind, JobResource,
+    NamespaceResource, OverviewResource, Page, QueueResource, RunResource, TargetResource,
+    TargetSetResource, UpdateQueueRequest, WorkerResource,
 };
 use gloo_net::http::{Request, Response};
 use serde::{Serialize, de::DeserializeOwned};
@@ -48,6 +49,43 @@ pub async fn create_namespace(name: String) -> ApiResult<NamespaceResource> {
     .await
 }
 
+pub async fn list_queues() -> ApiResult<Page<QueueResource>> {
+    get(&format!("{API_ROOT}/queues?limit=100")).await
+}
+
+pub async fn all_queues() -> ApiResult<Vec<QueueResource>> {
+    get_all(&format!("{API_ROOT}/queues")).await
+}
+
+pub async fn create_queue(name: String, description: Option<String>) -> ApiResult<QueueResource> {
+    post(
+        &format!("{API_ROOT}/queues"),
+        &CreateQueueRequest { name, description },
+    )
+    .await
+}
+
+pub async fn update_queue(
+    id: Uuid,
+    name: String,
+    description: Option<String>,
+    enabled: bool,
+) -> ApiResult<QueueResource> {
+    put(
+        &format!("{API_ROOT}/queues/{id}"),
+        &UpdateQueueRequest {
+            name,
+            description,
+            enabled,
+        },
+    )
+    .await
+}
+
+pub async fn delete_queue(id: Uuid) -> ApiResult<()> {
+    delete_empty(&format!("{API_ROOT}/queues/{id}")).await
+}
+
 pub async fn list_jobs(namespace_id: Uuid) -> ApiResult<Page<JobResource>> {
     get(&format!("{}?limit=100", jobs_path(namespace_id))).await
 }
@@ -56,24 +94,28 @@ pub async fn all_jobs(namespace_id: Uuid) -> ApiResult<Vec<JobResource>> {
     get_all(&jobs_path(namespace_id)).await
 }
 
-pub async fn create_job(namespace_id: Uuid, name: String, queue: String) -> ApiResult<JobResource> {
-    post(
-        &jobs_path(namespace_id),
-        &CreateJobRequest {
-            name,
-            queue,
-            executor: ExecutorKind::Noop,
-            executable: None,
-            arguments: Vec::new(),
-            idempotent: false,
-            max_attempts: 1,
-            retry_initial_seconds: 1,
-            retry_max_seconds: 60,
-            retry_multiplier: 2.0,
-            retry_jitter: 0.2,
-        },
-    )
-    .await
+pub async fn create_job(
+    namespace_id: Uuid,
+    name: String,
+    queue_id: Uuid,
+) -> ApiResult<JobResource> {
+    post(&jobs_path(namespace_id), &job_request(name, queue_id)).await
+}
+
+fn job_request(name: String, queue_id: Uuid) -> CreateJobRequest {
+    CreateJobRequest {
+        name,
+        queue_id,
+        executor: ExecutorKind::Noop,
+        executable: None,
+        arguments: Vec::new(),
+        idempotent: false,
+        max_attempts: 1,
+        retry_initial_seconds: 1,
+        retry_max_seconds: 60,
+        retry_multiplier: 2.0,
+        retry_jitter: 0.2,
+    }
 }
 
 pub async fn list_targets(namespace_id: Uuid) -> ApiResult<Page<TargetResource>> {
@@ -165,6 +207,32 @@ where
     decode(response).await
 }
 
+async fn put<T, B>(url: &str, body: &B) -> ApiResult<T>
+where
+    T: DeserializeOwned,
+    B: Serialize,
+{
+    let request = Request::put(url)
+        .json(body)
+        .map_err(|error| client_error(format!("Could not encode the request: {error}")))?;
+    let response = request
+        .send()
+        .await
+        .map_err(|error| client_error(format!("Crono API is unreachable: {error}")))?;
+    decode(response).await
+}
+
+async fn delete_empty(url: &str) -> ApiResult<()> {
+    let response = Request::delete(url)
+        .send()
+        .await
+        .map_err(|error| client_error(format!("Crono API is unreachable: {error}")))?;
+    if response.ok() {
+        return Ok(());
+    }
+    Err(decode_error(response).await)
+}
+
 async fn decode<T: DeserializeOwned>(response: Response) -> ApiResult<T> {
     if response.ok() {
         return response
@@ -172,19 +240,17 @@ async fn decode<T: DeserializeOwned>(response: Response) -> ApiResult<T> {
             .await
             .map_err(|error| client_error(format!("Crono API returned invalid JSON: {error}")));
     }
+    Err(decode_error(response).await)
+}
+
+async fn decode_error(response: Response) -> ApiError {
     let status = response.status();
     response.json::<ErrorEnvelope>().await.map_or_else(
-        |_| {
-            Err(client_error(format!(
-                "Crono API request failed with HTTP {status}"
-            )))
-        },
-        |envelope| {
-            Err(ApiError {
-                code: envelope.error.code,
-                message: envelope.error.message,
-                field: envelope.error.field,
-            })
+        |_| client_error(format!("Crono API request failed with HTTP {status}")),
+        |envelope| ApiError {
+            code: envelope.error.code,
+            message: envelope.error.message,
+            field: envelope.error.field,
         },
     )
 }
@@ -220,7 +286,7 @@ fn client_error(message: String) -> ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::{jobs_path, run_request, targets_path};
+    use super::{job_request, jobs_path, run_request, targets_path};
     use uuid::Uuid;
     use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -241,5 +307,7 @@ mod tests {
         let request = run_request(job_id, target_id);
         assert_eq!(request.job_id, job_id);
         assert_eq!(request.target_id, target_id);
+        let job = job_request("nightly".to_string(), job_id);
+        assert_eq!(job.queue_id, job_id);
     }
 }
