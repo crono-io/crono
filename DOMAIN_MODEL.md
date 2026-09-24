@@ -6,6 +6,7 @@ Crono's draft model separates what runs from where it runs, then snapshots both 
 Namespace
    +-- Job
    +-- Target
+   +-- Target Set --> Target membership
    +-- Schedule -> occurrence
 
 Job + Target + inputs
@@ -14,13 +15,21 @@ Job + Target + inputs
         Run -> RunAttempt -> Worker
 ```
 
-A Namespace is the ownership and authorization boundary for names. A Job is a directly editable execution definition containing an executor, queue, executable and arguments, idempotency declaration, and retry policy. A Target contains destination-specific arguments. A Schedule refers to one Job and Target in the same Namespace. Database triggers reject cross-Namespace references even if an adapter is faulty.
+A Namespace is the ownership and authorization boundary for names. A Job is a directly editable execution definition containing an executor, queue, executable and arguments, idempotency declaration, and retry policy. A Target contains destination-specific arguments. A Target Set is a non-empty named selection of Targets in the same Namespace. A Schedule refers to one Job and Target in the same Namespace. Database triggers reject cross-Namespace references even if an adapter is faulty.
 
 This draft deliberately has no JobVersion, TargetVersion, ScheduleVersion, `/api/v1`, or schema-version field in dispatch messages. Editing a catalog object affects only future Runs. Every Run stores an immutable execution snapshot, so already committed work and history do not change when the Job or Target is edited.
 
 ## Identities and occurrence uniqueness
 
-Names are lowercase canonical resource names and are unique inside their Namespace. Internal identities are UUIDv7 values. A manual Run uses the request UUID as an idempotency key: replaying the same request and definition returns the existing Run, while reusing the key for different work is a conflict.
+UUIDv7 values are immutable resource identities and every relationship stores
+those UUIDs. Names are stable lookup and display identifiers, not foreign keys.
+Namespace, Job, Target, Target Set, and Schedule names use one DNS-1123 label
+rule: 1 through 63 ASCII lowercase letters, digits, or hyphens, with an
+alphanumeric first and last character. The API rejects invalid names without
+normalizing them. Names are unique inside their owning Namespace; Namespace
+names are unique globally.
+
+A manual Run uses the request UUID as an idempotency key: replaying the same request and definition returns the existing Run, while reusing the key for different work is a conflict. Manual Run and Schedule requests refer to Jobs and Targets by UUID, while API responses also include derived qualified names for display.
 
 A scheduled occurrence is identified by `(schedule_id, scheduled_at)`. PostgreSQL enforces that pair as unique. Scheduler claims improve concurrency, but this constraint is the final correctness boundary during failover or competing scheduler instances.
 

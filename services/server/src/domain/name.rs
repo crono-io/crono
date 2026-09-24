@@ -6,49 +6,11 @@
 //! between. Slash-separated qualification is constructed elsewhere from these
 //! already validated segments.
 
-use std::{error::Error, fmt};
+use crono_api::{ResourceNameError, validate_resource_name};
+use std::fmt;
 
-/// Maximum bytes accepted for canonical names and queue tokens.
-pub const MAX_NAME_LEN: usize = 63;
-
-/// Reason a Namespace or resource name was rejected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NameError {
-    /// The supplied name contained no characters.
-    Empty,
-    /// The first or last character was not an ASCII lowercase letter or digit.
-    InvalidBoundary,
-    /// An interior character was outside the canonical name alphabet.
-    InvalidCharacter {
-        /// Byte position of the invalid character.
-        position: usize,
-        /// Invalid character encountered during validation.
-        character: char,
-    },
-    /// The supplied name exceeded the public and database limit.
-    TooLong,
-}
-
-impl fmt::Display for NameError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => formatter.write_str("name must not be empty"),
-            Self::InvalidBoundary => {
-                formatter.write_str("name must start and end with a lowercase letter or digit")
-            }
-            Self::InvalidCharacter {
-                position,
-                character,
-            } => write!(
-                formatter,
-                "name contains invalid character {character:?} at byte {position}"
-            ),
-            Self::TooLong => write!(formatter, "name must not exceed {MAX_NAME_LEN} bytes"),
-        }
-    }
-}
-
-impl Error for NameError {}
+/// Shared reason a Namespace or resource name was rejected.
+pub type NameError = ResourceNameError;
 
 /// Validated canonical Namespace name.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -62,7 +24,7 @@ impl NamespaceName {
     /// Returns [`NameError`] when the value is empty, has invalid boundaries,
     /// or contains characters outside lowercase ASCII letters, digits, and `-`.
     pub fn parse(value: &str) -> Result<Self, NameError> {
-        validate(value)?;
+        validate_resource_name(value)?;
         Ok(Self(value.to_string()))
     }
 
@@ -91,7 +53,7 @@ impl ResourceName {
     /// Returns [`NameError`] under the same centralized rules used for
     /// Namespace names.
     pub fn parse(value: &str) -> Result<Self, NameError> {
-        validate(value)?;
+        validate_resource_name(value)?;
         Ok(Self(value.to_string()))
     }
 
@@ -119,7 +81,7 @@ impl QueueName {
     ///
     /// Returns [`NameError`] for invalid or oversized subject tokens.
     pub fn parse(value: &str) -> Result<Self, NameError> {
-        validate(value)?;
+        validate_resource_name(value)?;
         Ok(Self(value.to_string()))
     }
 
@@ -136,47 +98,11 @@ impl fmt::Display for QueueName {
     }
 }
 
-fn validate(value: &str) -> Result<(), NameError> {
-    if value.len() > MAX_NAME_LEN {
-        return Err(NameError::TooLong);
-    }
-    let mut characters = value.char_indices();
-    let Some((_, first)) = characters.next() else {
-        return Err(NameError::Empty);
-    };
-    if !is_boundary(first) {
-        return Err(NameError::InvalidBoundary);
-    }
-
-    let mut last = first;
-    for (position, character) in characters {
-        if !is_allowed(character) {
-            return Err(NameError::InvalidCharacter {
-                position,
-                character,
-            });
-        }
-        last = character;
-    }
-
-    if !is_boundary(last) {
-        return Err(NameError::InvalidBoundary);
-    }
-    Ok(())
-}
-
-const fn is_boundary(character: char) -> bool {
-    character.is_ascii_lowercase() || character.is_ascii_digit()
-}
-
-const fn is_allowed(character: char) -> bool {
-    is_boundary(character) || character == '-'
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{MAX_NAME_LEN, NamespaceName, QueueName, ResourceName};
+    use super::{NamespaceName, QueueName, ResourceName};
     use anyhow::Result;
+    use crono_api::RESOURCE_NAME_MAX_LENGTH;
 
     #[test]
     fn namespace_names_accept_canonical_path_segments() -> Result<()> {
@@ -218,8 +144,8 @@ mod tests {
 
     #[test]
     fn names_and_queues_have_one_shared_length_bound() {
-        let maximum = "a".repeat(MAX_NAME_LEN);
-        let oversized = "a".repeat(MAX_NAME_LEN + 1);
+        let maximum = "a".repeat(RESOURCE_NAME_MAX_LENGTH);
+        let oversized = "a".repeat(RESOURCE_NAME_MAX_LENGTH + 1);
         assert!(NamespaceName::parse(&maximum).is_ok());
         assert!(ResourceName::parse(&maximum).is_ok());
         assert!(QueueName::parse("database-default").is_ok());

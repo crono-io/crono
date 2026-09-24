@@ -5,7 +5,7 @@
 //! resource scope that a future RBAC or external policy adapter will evaluate.
 //! Decisions are side-effect free and never trust client-provided roles.
 
-use crate::domain::NamespaceId;
+use crate::domain::{JobId, NamespaceId, ScheduleId, TargetId, TargetSetId};
 use async_trait::async_trait;
 use std::{collections::BTreeSet, error::Error, fmt};
 use uuid::Uuid;
@@ -92,6 +92,8 @@ pub enum Capability {
     TargetCreate,
     TargetRead,
     TargetUse,
+    TargetSetCreate,
+    TargetSetRead,
     ScheduleCreate,
     ScheduleRead,
     ScheduleUpdate,
@@ -104,10 +106,11 @@ pub enum Capability {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResourceScope {
     ControlPlane,
-    Namespace(String),
-    Job { namespace: String, job: String },
-    Target { namespace: String, target: String },
-    Schedule { namespace: String, schedule: String },
+    Namespace(NamespaceId),
+    Job(JobId),
+    Target(TargetId),
+    TargetSet(TargetSetId),
+    Schedule(ScheduleId),
     Run(Uuid),
 }
 
@@ -213,6 +216,8 @@ mod tests {
             Capability::TargetCreate,
             Capability::TargetRead,
             Capability::TargetUse,
+            Capability::TargetSetCreate,
+            Capability::TargetSetRead,
             Capability::ScheduleCreate,
             Capability::ScheduleRead,
             Capability::ScheduleUpdate,

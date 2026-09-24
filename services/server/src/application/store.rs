@@ -5,12 +5,13 @@
 //! process-local coordination.
 
 use super::{
-    JobRecord, Overview, Page, RunRecord, ScheduleRecord, TargetRecord, VisibilityScope,
-    WorkerRecord,
+    JobRecord, Overview, Page, RunRecord, ScheduleRecord, TargetRecord, TargetSetRecord,
+    VisibilityScope, WorkerRecord,
 };
 use crate::domain::{
-    AttemptId, CatchupPolicy, DispatchId, ExecutorKind, MisfirePolicy, Namespace, NamespaceName,
-    QueueName, ResourceName, RunId, Schedule, ScheduleId,
+    AttemptId, CatchupPolicy, DispatchId, ExecutorKind, JobId, MisfirePolicy, Namespace,
+    NamespaceId, NamespaceName, QueueName, ResourceName, RunId, Schedule, ScheduleId, TargetId,
+    TargetSetId,
 };
 use async_trait::async_trait;
 use crono_api::{
@@ -36,10 +37,10 @@ pub struct JobDefinition {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewSchedule {
-    pub namespace: NamespaceName,
+    pub namespace_id: NamespaceId,
     pub name: ResourceName,
-    pub job_name: ResourceName,
-    pub target_name: ResourceName,
+    pub job_id: JobId,
+    pub target_id: TargetId,
     pub cron_expression: Option<String>,
     pub execute_at: Option<OffsetDateTime>,
     pub timezone: String,
@@ -122,56 +123,58 @@ pub trait ControlPlaneStore: Send + Sync {
         limit: u16,
         after: Option<&str>,
     ) -> Result<Page<Namespace>, StoreError>;
-    async fn get_namespace(&self, name: &NamespaceName) -> Result<Namespace, StoreError>;
+    async fn get_namespace(&self, id: NamespaceId) -> Result<Namespace, StoreError>;
     async fn create_job(
         &self,
-        namespace: &NamespaceName,
+        namespace_id: NamespaceId,
         name: &ResourceName,
         definition: &JobDefinition,
     ) -> Result<JobRecord, StoreError>;
     async fn list_jobs(
         &self,
-        namespace: &NamespaceName,
+        namespace_id: NamespaceId,
         visibility: &VisibilityScope,
         limit: u16,
         after: Option<&str>,
     ) -> Result<Page<JobRecord>, StoreError>;
-    async fn get_job(
-        &self,
-        namespace: &NamespaceName,
-        name: &ResourceName,
-    ) -> Result<JobRecord, StoreError>;
+    async fn get_job(&self, id: JobId) -> Result<JobRecord, StoreError>;
     async fn create_target(
         &self,
-        namespace: &NamespaceName,
+        namespace_id: NamespaceId,
         name: &ResourceName,
         arguments: &[String],
     ) -> Result<TargetRecord, StoreError>;
     async fn list_targets(
         &self,
-        namespace: &NamespaceName,
+        namespace_id: NamespaceId,
         visibility: &VisibilityScope,
         limit: u16,
         after: Option<&str>,
     ) -> Result<Page<TargetRecord>, StoreError>;
-    async fn get_target(
+    async fn get_target(&self, id: TargetId) -> Result<TargetRecord, StoreError>;
+    async fn create_target_set(
         &self,
-        namespace: &NamespaceName,
+        namespace_id: NamespaceId,
         name: &ResourceName,
-    ) -> Result<TargetRecord, StoreError>;
+        target_ids: &[TargetId],
+    ) -> Result<TargetSetRecord, StoreError>;
+    async fn list_target_sets(
+        &self,
+        namespace_id: NamespaceId,
+        visibility: &VisibilityScope,
+        limit: u16,
+        after: Option<&str>,
+    ) -> Result<Page<TargetSetRecord>, StoreError>;
+    async fn get_target_set(&self, id: TargetSetId) -> Result<TargetSetRecord, StoreError>;
     async fn create_schedule(&self, schedule: &NewSchedule) -> Result<ScheduleRecord, StoreError>;
     async fn list_schedules(
         &self,
-        namespace: &NamespaceName,
+        namespace_id: NamespaceId,
         visibility: &VisibilityScope,
         limit: u16,
         after: Option<&str>,
     ) -> Result<Page<ScheduleRecord>, StoreError>;
-    async fn get_schedule(
-        &self,
-        namespace: &NamespaceName,
-        name: &ResourceName,
-    ) -> Result<ScheduleRecord, StoreError>;
+    async fn get_schedule(&self, id: ScheduleId) -> Result<ScheduleRecord, StoreError>;
     async fn set_schedule_enabled(
         &self,
         id: ScheduleId,
@@ -182,10 +185,8 @@ pub trait ControlPlaneStore: Send + Sync {
     async fn create_run(
         &self,
         request_id: Uuid,
-        job_namespace: &NamespaceName,
-        job_name: &ResourceName,
-        target_namespace: &NamespaceName,
-        target_name: &ResourceName,
+        job_id: JobId,
+        target_id: TargetId,
     ) -> Result<(RunRecord, bool), StoreError>;
     async fn list_runs(
         &self,

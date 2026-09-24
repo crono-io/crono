@@ -5,7 +5,10 @@ use std::{error::Error, fmt};
 
 #[derive(Debug)]
 pub enum ApplicationError {
-    InvalidInput(String),
+    InvalidInput {
+        field: Option<&'static str>,
+        message: String,
+    },
     NotFound,
     Conflict,
     IdempotencyConflict,
@@ -17,7 +20,7 @@ pub enum ApplicationError {
 impl fmt::Display for ApplicationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidInput(message) => formatter.write_str(message),
+            Self::InvalidInput { message, .. } => formatter.write_str(message),
             Self::NotFound => formatter.write_str("resource was not found"),
             Self::Conflict => formatter.write_str("resource already exists"),
             Self::IdempotencyConflict => {
@@ -26,6 +29,26 @@ impl fmt::Display for ApplicationError {
             Self::Authorization(error) => error.fmt(formatter),
             Self::Unavailable => formatter.write_str("application dependency is unavailable"),
             Self::Internal => formatter.write_str("internal application error"),
+        }
+    }
+}
+
+impl ApplicationError {
+    /// Construct a safe validation failure associated with one request field.
+    #[must_use]
+    pub fn invalid(field: &'static str, message: impl Into<String>) -> Self {
+        Self::InvalidInput {
+            field: Some(field),
+            message: message.into(),
+        }
+    }
+
+    /// Construct a safe validation failure spanning the request as a whole.
+    #[must_use]
+    pub fn invalid_request(message: impl Into<String>) -> Self {
+        Self::InvalidInput {
+            field: None,
+            message: message.into(),
         }
     }
 }

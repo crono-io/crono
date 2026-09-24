@@ -7,6 +7,7 @@
 mod jobs;
 mod namespaces;
 mod overview;
+mod resource_options;
 mod runs;
 mod settings;
 mod target_sets;

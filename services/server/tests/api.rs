@@ -9,7 +9,7 @@ fn openapi_contains_health_and_control_plane_contracts() -> Result<()> {
     let document = crono_server::api::openapi();
     assert_eq!(document.info.title, "crono-server");
     assert_eq!(document.info.version, env!("CARGO_PKG_VERSION"));
-    assert_eq!(document.paths.paths.len(), 16);
+    assert_eq!(document.paths.paths.len(), 18);
     for path in [
         "/live",
         "/ready",
@@ -17,13 +17,15 @@ fn openapi_contains_health_and_control_plane_contracts() -> Result<()> {
         "/metrics",
         "/api/overview",
         "/api/namespaces",
-        "/api/namespaces/{namespace}",
-        "/api/namespaces/{namespace}/jobs",
-        "/api/namespaces/{namespace}/jobs/{job}",
-        "/api/namespaces/{namespace}/targets",
-        "/api/namespaces/{namespace}/targets/{target}",
-        "/api/namespaces/{namespace}/schedules",
-        "/api/namespaces/{namespace}/schedules/{schedule}",
+        "/api/namespaces/{namespace_id}",
+        "/api/namespaces/{namespace_id}/jobs",
+        "/api/jobs/{job_id}",
+        "/api/namespaces/{namespace_id}/targets",
+        "/api/targets/{target_id}",
+        "/api/namespaces/{namespace_id}/target-sets",
+        "/api/target-sets/{target_set_id}",
+        "/api/namespaces/{namespace_id}/schedules",
+        "/api/schedules/{schedule_id}",
         "/api/runs",
         "/api/runs/{run_id}",
         "/api/workers",

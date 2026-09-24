@@ -89,6 +89,8 @@ BEGIN
         'crono.namespaces',
         'crono.jobs',
         'crono.targets',
+        'crono.target_sets',
+        'crono.target_set_members',
         'crono.schedules',
         'crono.runs',
         'crono.run_attempts',

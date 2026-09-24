@@ -69,7 +69,7 @@ pub fn WorkersPage() -> impl IntoView {
                             </table>
                         </div>
                     }.into_any(),
-                    Err(error) => view! { <p class="px-6 py-10 text-center text-sm text-crono-failed">{error.clone()}</p> }.into_any(),
+                    Err(error) => view! { <p class="px-6 py-10 text-center text-sm text-crono-failed">{error.message.clone()}</p> }.into_any(),
                 }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading workers…"</p> }.into_any())}
             </section>
         </div>

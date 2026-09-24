@@ -17,40 +17,49 @@ impl From<ApplicationError> for ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
-        let (status, code, message) = match &self.0 {
-            ApplicationError::InvalidInput(message) => {
-                (StatusCode::BAD_REQUEST, "invalid_request", message.clone())
-            }
+        let (status, code, message, field) = match &self.0 {
+            ApplicationError::InvalidInput { field, message } => (
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                message.clone(),
+                field.map(str::to_string),
+            ),
             ApplicationError::NotFound => (
                 StatusCode::NOT_FOUND,
                 "not_found",
                 "resource was not found".to_string(),
+                None,
             ),
             ApplicationError::Conflict => (
                 StatusCode::CONFLICT,
                 "already_exists",
                 "resource already exists".to_string(),
+                None,
             ),
             ApplicationError::IdempotencyConflict => (
                 StatusCode::CONFLICT,
                 "idempotency_conflict",
                 "request ID was reused with different inputs".to_string(),
+                None,
             ),
             ApplicationError::Authorization(AuthorizationError::Unauthenticated) => (
                 StatusCode::UNAUTHORIZED,
                 "unauthenticated",
                 "authentication is required".to_string(),
+                None,
             ),
             ApplicationError::Authorization(AuthorizationError::Forbidden) => (
                 StatusCode::FORBIDDEN,
                 "forbidden",
                 "operation is not authorized".to_string(),
+                None,
             ),
             ApplicationError::Authorization(AuthorizationError::Unavailable)
             | ApplicationError::Unavailable => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "dependency_unavailable",
                 "a required service is unavailable".to_string(),
+                None,
             ),
             ApplicationError::Internal => {
                 error!("internal application failure returned by HTTP API");
@@ -58,6 +67,7 @@ impl IntoResponse for ApiError {
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "internal_error",
                     "internal server error".to_string(),
+                    None,
                 )
             }
         };
@@ -67,6 +77,7 @@ impl IntoResponse for ApiError {
                 error: ErrorBody {
                     code: code.to_string(),
                     message,
+                    field,
                 },
             }),
         )

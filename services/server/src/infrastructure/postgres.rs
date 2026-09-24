@@ -11,12 +11,12 @@ use crate::{
     application::{
         ControlPlaneStore, JobDefinition, JobRecord, MetricsSnapshot, NewSchedule, OutboxRecord,
         Overview, Page, RunRecord, SchedulePlan, ScheduleRecord, StoreError, TargetRecord,
-        VisibilityScope, WorkerRecord,
+        TargetSetRecord, VisibilityScope, WorkerRecord,
     },
     domain::{
         AttemptId, CatchupPolicy, DispatchId, ExecutorKind, Job, JobData, JobId, MisfirePolicy,
         Namespace, NamespaceId, NamespaceName, QueueName, ResourceName, Run, RunData, RunId,
-        RunStatus, Schedule, ScheduleId, ScheduleTiming, Target, TargetId,
+        RunStatus, Schedule, ScheduleId, ScheduleTiming, Target, TargetId, TargetSet, TargetSetId,
     },
 };
 use async_trait::async_trait;
@@ -58,6 +58,15 @@ struct TargetRow {
     arguments: serde_json::Value,
     created_at: OffsetDateTime,
     updated_at: OffsetDateTime,
+    namespace_name: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct TargetSetRow {
+    id: Uuid,
+    namespace_id: Uuid,
+    name: String,
+    created_at: OffsetDateTime,
     namespace_name: String,
 }
 
@@ -222,11 +231,11 @@ impl ControlPlaneStore for PostgresStore {
         })
     }
 
-    async fn get_namespace(&self, name: &NamespaceName) -> Result<Namespace, StoreError> {
+    async fn get_namespace(&self, id: NamespaceId) -> Result<Namespace, StoreError> {
         let row = sqlx::query_as::<_, (Uuid, String, OffsetDateTime)>(
-            "SELECT id, name, created_at FROM crono.namespaces WHERE name = $1",
+            "SELECT id, name, created_at FROM crono.namespaces WHERE id = $1",
         )
-        .bind(name.as_str())
+        .bind(id.get())
         .fetch_optional(&self.pool)
         .await
         .map_err(store_error)?
@@ -236,7 +245,7 @@ impl ControlPlaneStore for PostgresStore {
 
     async fn create_job(
         &self,
-        namespace: &NamespaceName,
+        namespace_id: NamespaceId,
         name: &ResourceName,
         definition: &JobDefinition,
     ) -> Result<JobRecord, StoreError> {
@@ -249,14 +258,14 @@ impl ControlPlaneStore for PostgresStore {
                  retry_max_seconds, retry_multiplier, retry_jitter
              )
              SELECT id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-               FROM crono.namespaces WHERE name = $1
+               FROM crono.namespaces WHERE id = $1
              RETURNING id, namespace_id, name, executor, queue, executable,
                        arguments, idempotent, max_attempts, retry_initial_seconds,
                        retry_max_seconds, retry_multiplier, retry_jitter,
                        created_at, updated_at,
-                       $1 AS namespace_name",
+                       (SELECT name FROM crono.namespaces WHERE id = $1) AS namespace_name",
         )
-        .bind(namespace.as_str())
+        .bind(namespace_id.get())
         .bind(name.as_str())
         .bind(executor)
         .bind(definition.queue.as_str())
@@ -277,7 +286,7 @@ impl ControlPlaneStore for PostgresStore {
 
     async fn list_jobs(
         &self,
-        namespace: &NamespaceName,
+        namespace_id: NamespaceId,
         visibility: &VisibilityScope,
         limit: u16,
         after: Option<&str>,
@@ -294,11 +303,11 @@ impl ControlPlaneStore for PostgresStore {
                     j.created_at, j.updated_at,
                     n.name AS namespace_name
              FROM crono.jobs j JOIN crono.namespaces n ON n.id = j.namespace_id
-             WHERE n.name = $1 AND ($2::text IS NULL OR j.name > $2)
+             WHERE n.id = $1 AND ($2::text IS NULL OR j.name > $2)
                AND (NOT $3 OR n.id = ANY($4::uuid[]))
              ORDER BY j.name LIMIT $5",
         )
-        .bind(namespace.as_str())
+        .bind(namespace_id.get())
         .bind(after)
         .bind(restrict)
         .bind(&ids)
@@ -311,11 +320,7 @@ impl ControlPlaneStore for PostgresStore {
         })
     }
 
-    async fn get_job(
-        &self,
-        namespace: &NamespaceName,
-        name: &ResourceName,
-    ) -> Result<JobRecord, StoreError> {
+    async fn get_job(&self, id: JobId) -> Result<JobRecord, StoreError> {
         let row = sqlx::query_as::<_, JobRow>(
             "SELECT j.id, j.namespace_id, j.name, j.executor, j.queue, j.executable,
                     j.arguments, j.idempotent, j.max_attempts, j.retry_initial_seconds,
@@ -323,10 +328,9 @@ impl ControlPlaneStore for PostgresStore {
                     j.created_at, j.updated_at,
                     n.name AS namespace_name
              FROM crono.jobs j JOIN crono.namespaces n ON n.id = j.namespace_id
-             WHERE n.name = $1 AND j.name = $2",
+             WHERE j.id = $1",
         )
-        .bind(namespace.as_str())
-        .bind(name.as_str())
+        .bind(id.get())
         .fetch_optional(&self.pool)
         .await
         .map_err(store_error)?
@@ -336,18 +340,18 @@ impl ControlPlaneStore for PostgresStore {
 
     async fn create_target(
         &self,
-        namespace: &NamespaceName,
+        namespace_id: NamespaceId,
         name: &ResourceName,
         arguments: &[String],
     ) -> Result<TargetRecord, StoreError> {
         let arguments = serde_json::to_value(arguments).map_err(json_error)?;
         let row = sqlx::query_as::<_, TargetRow>(
             "INSERT INTO crono.targets (namespace_id, name, arguments)
-             SELECT id, $2, $3 FROM crono.namespaces WHERE name = $1
+             SELECT id, $2, $3 FROM crono.namespaces WHERE id = $1
              RETURNING id, namespace_id, name, arguments, created_at, updated_at,
-                       $1 AS namespace_name",
+                       (SELECT name FROM crono.namespaces WHERE id = $1) AS namespace_name",
         )
-        .bind(namespace.as_str())
+        .bind(namespace_id.get())
         .bind(name.as_str())
         .bind(arguments)
         .fetch_optional(&self.pool)
@@ -359,7 +363,7 @@ impl ControlPlaneStore for PostgresStore {
 
     async fn list_targets(
         &self,
-        namespace: &NamespaceName,
+        namespace_id: NamespaceId,
         visibility: &VisibilityScope,
         limit: u16,
         after: Option<&str>,
@@ -373,11 +377,11 @@ impl ControlPlaneStore for PostgresStore {
             "SELECT t.id, t.namespace_id, t.name, t.arguments, t.created_at, t.updated_at,
                     n.name AS namespace_name
              FROM crono.targets t JOIN crono.namespaces n ON n.id = t.namespace_id
-             WHERE n.name = $1 AND ($2::text IS NULL OR t.name > $2)
+             WHERE n.id = $1 AND ($2::text IS NULL OR t.name > $2)
                AND (NOT $3 OR n.id = ANY($4::uuid[]))
              ORDER BY t.name LIMIT $5",
         )
-        .bind(namespace.as_str())
+        .bind(namespace_id.get())
         .bind(after)
         .bind(restrict)
         .bind(&ids)
@@ -390,24 +394,119 @@ impl ControlPlaneStore for PostgresStore {
         })
     }
 
-    async fn get_target(
-        &self,
-        namespace: &NamespaceName,
-        name: &ResourceName,
-    ) -> Result<TargetRecord, StoreError> {
+    async fn get_target(&self, id: TargetId) -> Result<TargetRecord, StoreError> {
         let row = sqlx::query_as::<_, TargetRow>(
             "SELECT t.id, t.namespace_id, t.name, t.arguments, t.created_at, t.updated_at,
                     n.name AS namespace_name
              FROM crono.targets t JOIN crono.namespaces n ON n.id = t.namespace_id
-             WHERE n.name = $1 AND t.name = $2",
+             WHERE t.id = $1",
         )
-        .bind(namespace.as_str())
-        .bind(name.as_str())
+        .bind(id.get())
         .fetch_optional(&self.pool)
         .await
         .map_err(store_error)?
         .ok_or(StoreError::NotFound)?;
         target_from_row(row)
+    }
+
+    async fn create_target_set(
+        &self,
+        namespace_id: NamespaceId,
+        name: &ResourceName,
+        target_ids: &[TargetId],
+    ) -> Result<TargetSetRecord, StoreError> {
+        let ids: Vec<Uuid> = target_ids.iter().map(|id| id.get()).collect();
+        let mut transaction = self.pool.begin().await.map_err(store_error)?;
+        let row = sqlx::query_as::<_, TargetSetRow>(
+            "INSERT INTO crono.target_sets (namespace_id, name)
+             SELECT id, $2 FROM crono.namespaces WHERE id = $1
+             RETURNING id, namespace_id, name, created_at,
+                       (SELECT name FROM crono.namespaces WHERE id = $1) AS namespace_name",
+        )
+        .bind(namespace_id.get())
+        .bind(name.as_str())
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(store_error)?
+        .ok_or(StoreError::NotFound)?;
+        let targets = target_rows_for_ids(&mut transaction, namespace_id, &ids).await?;
+        if targets.len() != ids.len() {
+            return Err(StoreError::NotFound);
+        }
+        sqlx::query(
+            "INSERT INTO crono.target_set_members (target_set_id, target_id)
+             SELECT $1, target_id FROM unnest($2::uuid[]) AS members(target_id)",
+        )
+        .bind(row.id)
+        .bind(&ids)
+        .execute(&mut *transaction)
+        .await
+        .map_err(store_error)?;
+        transaction.commit().await.map_err(store_error)?;
+        target_set_from_rows(&row, targets)
+    }
+
+    async fn list_target_sets(
+        &self,
+        namespace_id: NamespaceId,
+        visibility: &VisibilityScope,
+        limit: u16,
+        after: Option<&str>,
+    ) -> Result<Page<TargetSetRecord>, StoreError> {
+        if matches!(visibility, VisibilityScope::None) {
+            return Ok(empty_page());
+        }
+        let ids = Self::namespace_ids(visibility);
+        let restrict = matches!(visibility, VisibilityScope::Namespaces(_));
+        let rows = sqlx::query_as::<_, TargetSetRow>(
+            "SELECT ts.id, ts.namespace_id, ts.name, ts.created_at,
+                    n.name AS namespace_name
+               FROM crono.target_sets ts
+               JOIN crono.namespaces n ON n.id = ts.namespace_id
+              WHERE n.id = $1 AND ($2::text IS NULL OR ts.name > $2)
+                AND (NOT $3 OR n.id = ANY($4::uuid[]))
+              ORDER BY ts.name LIMIT $5",
+        )
+        .bind(namespace_id.get())
+        .bind(after)
+        .bind(restrict)
+        .bind(&ids)
+        .bind(i64::from(limit) + 1)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+        let has_more = rows.len() > usize::from(limit);
+        let mut records = Vec::with_capacity(rows.len().min(usize::from(limit)));
+        for row in rows.into_iter().take(usize::from(limit)) {
+            records.push(load_target_set_record(&self.pool, row).await?);
+        }
+        let next_cursor = if has_more {
+            records
+                .last()
+                .map(|record| record.target_set.name().to_string())
+        } else {
+            None
+        };
+        Ok(Page {
+            items: records,
+            next_cursor,
+        })
+    }
+
+    async fn get_target_set(&self, id: TargetSetId) -> Result<TargetSetRecord, StoreError> {
+        let row = sqlx::query_as::<_, TargetSetRow>(
+            "SELECT ts.id, ts.namespace_id, ts.name, ts.created_at,
+                    n.name AS namespace_name
+               FROM crono.target_sets ts
+               JOIN crono.namespaces n ON n.id = ts.namespace_id
+              WHERE ts.id = $1",
+        )
+        .bind(id.get())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(store_error)?
+        .ok_or(StoreError::NotFound)?;
+        load_target_set_record(&self.pool, row).await
     }
 
     async fn create_schedule(&self, schedule: &NewSchedule) -> Result<ScheduleRecord, StoreError> {
@@ -417,28 +516,36 @@ impl ControlPlaneStore for PostgresStore {
             "once"
         };
         let row = sqlx::query_as::<_, ScheduleRow>(
-            "INSERT INTO crono.schedules (
-                 namespace_id, job_id, target_id, name, schedule_type,
-                 cron_expression, execute_at, timezone, next_run_at,
-                 misfire_policy, misfire_grace_seconds, catchup_policy,
-                 max_catchup_runs, max_catchup_age_seconds
+            "WITH inserted AS (
+                 INSERT INTO crono.schedules (
+                     namespace_id, job_id, target_id, name, schedule_type,
+                     cron_expression, execute_at, timezone, next_run_at,
+                     misfire_policy, misfire_grace_seconds, catchup_policy,
+                     max_catchup_runs, max_catchup_age_seconds
+                 )
+                 SELECT n.id, j.id, t.id, $2, $5, $6, $7, $8, $9,
+                        $10, $11, $12, $13, $14
+                   FROM crono.namespaces n
+                   JOIN crono.jobs j ON j.namespace_id = n.id AND j.id = $3
+                   JOIN crono.targets t ON t.namespace_id = n.id AND t.id = $4
+                  WHERE n.id = $1
+                 RETURNING *
              )
-             SELECT n.id, j.id, t.id, $2, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
-               FROM crono.namespaces n
-               JOIN crono.jobs j ON j.namespace_id = n.id AND j.name = $3
-               JOIN crono.targets t ON t.namespace_id = n.id AND t.name = $4
-              WHERE n.name = $1
-             RETURNING id, namespace_id, job_id, target_id, name, schedule_type,
-                       cron_expression, execute_at, timezone, enabled, next_run_at,
-                       last_run_at, misfire_policy, misfire_grace_seconds,
-                       catchup_policy, max_catchup_runs, max_catchup_age_seconds,
-                       revision, created_at, updated_at,
-                       $1 AS namespace_name, $3 AS job_name, $4 AS target_name",
+             SELECT s.id, s.namespace_id, s.job_id, s.target_id, s.name, s.schedule_type,
+                    s.cron_expression, s.execute_at, s.timezone, s.enabled, s.next_run_at,
+                    s.last_run_at, s.misfire_policy, s.misfire_grace_seconds,
+                    s.catchup_policy, s.max_catchup_runs, s.max_catchup_age_seconds,
+                    s.revision, s.created_at, s.updated_at,
+                    n.name AS namespace_name, j.name AS job_name, t.name AS target_name
+               FROM inserted s
+               JOIN crono.namespaces n ON n.id = s.namespace_id
+               JOIN crono.jobs j ON j.id = s.job_id
+               JOIN crono.targets t ON t.id = s.target_id",
         )
-        .bind(schedule.namespace.as_str())
+        .bind(schedule.namespace_id.get())
         .bind(schedule.name.as_str())
-        .bind(schedule.job_name.as_str())
-        .bind(schedule.target_name.as_str())
+        .bind(schedule.job_id.get())
+        .bind(schedule.target_id.get())
         .bind(schedule_type)
         .bind(&schedule.cron_expression)
         .bind(schedule.execute_at)
@@ -458,7 +565,7 @@ impl ControlPlaneStore for PostgresStore {
 
     async fn list_schedules(
         &self,
-        namespace: &NamespaceName,
+        namespace_id: NamespaceId,
         visibility: &VisibilityScope,
         limit: u16,
         after: Option<&str>,
@@ -479,11 +586,11 @@ impl ControlPlaneStore for PostgresStore {
              JOIN crono.namespaces n ON n.id = s.namespace_id
              JOIN crono.jobs j ON j.id = s.job_id
              JOIN crono.targets t ON t.id = s.target_id
-             WHERE n.name = $1 AND ($2::text IS NULL OR s.name > $2)
+             WHERE n.id = $1 AND ($2::text IS NULL OR s.name > $2)
                AND (NOT $3 OR n.id = ANY($4::uuid[]))
              ORDER BY s.name LIMIT $5",
         )
-        .bind(namespace.as_str())
+        .bind(namespace_id.get())
         .bind(after)
         .bind(restrict)
         .bind(&ids)
@@ -499,11 +606,7 @@ impl ControlPlaneStore for PostgresStore {
         )
     }
 
-    async fn get_schedule(
-        &self,
-        namespace: &NamespaceName,
-        name: &ResourceName,
-    ) -> Result<ScheduleRecord, StoreError> {
+    async fn get_schedule(&self, id: ScheduleId) -> Result<ScheduleRecord, StoreError> {
         let row = sqlx::query_as::<_, ScheduleRow>(
             "SELECT s.id, s.namespace_id, s.job_id, s.target_id, s.name, s.schedule_type,
                     s.cron_expression, s.execute_at, s.timezone, s.enabled, s.next_run_at,
@@ -515,10 +618,9 @@ impl ControlPlaneStore for PostgresStore {
              JOIN crono.namespaces n ON n.id = s.namespace_id
              JOIN crono.jobs j ON j.id = s.job_id
              JOIN crono.targets t ON t.id = s.target_id
-             WHERE n.name = $1 AND s.name = $2",
+             WHERE s.id = $1",
         )
-        .bind(namespace.as_str())
-        .bind(name.as_str())
+        .bind(id.get())
         .fetch_optional(&self.pool)
         .await
         .map_err(store_error)?
@@ -568,29 +670,14 @@ impl ControlPlaneStore for PostgresStore {
     async fn create_run(
         &self,
         request_id: Uuid,
-        job_namespace: &NamespaceName,
-        job_name: &ResourceName,
-        target_namespace: &NamespaceName,
-        target_name: &ResourceName,
+        job_id: JobId,
+        target_id: TargetId,
     ) -> Result<(RunRecord, bool), StoreError> {
         if let Some(existing) = find_run_by_request(&self.pool, request_id).await? {
-            return compare_idempotent(
-                existing,
-                job_namespace,
-                job_name,
-                target_namespace,
-                target_name,
-            );
+            return compare_idempotent(existing, job_id, target_id);
         }
         let mut transaction = self.pool.begin().await.map_err(store_error)?;
-        let execution = load_execution(
-            &mut transaction,
-            job_namespace,
-            job_name,
-            target_namespace,
-            target_name,
-        )
-        .await?;
+        let execution = load_execution_ids(&mut transaction, job_id.get(), target_id.get()).await?;
         let run_id = Uuid::now_v7();
         let now = OffsetDateTime::now_utc();
         let snapshot = execution_snapshot(run_id, &execution)?;
@@ -615,13 +702,7 @@ impl ControlPlaneStore for PostgresStore {
                 let existing = find_run_by_request(&self.pool, request_id)
                     .await?
                     .ok_or(StoreError::Internal)?;
-                return compare_idempotent(
-                    existing,
-                    job_namespace,
-                    job_name,
-                    target_namespace,
-                    target_name,
-                );
+                return compare_idempotent(existing, job_id, target_id);
             }
             return Err(store_error(error));
         }
@@ -770,17 +851,19 @@ impl ControlPlaneStore for PostgresStore {
                 namespaces: 0,
                 jobs: 0,
                 targets: 0,
+                target_sets: 0,
                 schedules: 0,
                 runs: 0,
             });
         }
         let ids = Self::namespace_ids(visibility);
         let restrict = matches!(visibility, VisibilityScope::Namespaces(_));
-        let row = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
+        let row = sqlx::query_as::<_, (i64, i64, i64, i64, i64, i64)>(
             "SELECT
                 (SELECT count(*) FROM crono.namespaces n WHERE NOT $1 OR n.id = ANY($2::uuid[])),
                 (SELECT count(*) FROM crono.jobs j WHERE NOT $1 OR j.namespace_id = ANY($2::uuid[])),
                 (SELECT count(*) FROM crono.targets t WHERE NOT $1 OR t.namespace_id = ANY($2::uuid[])),
+                (SELECT count(*) FROM crono.target_sets ts WHERE NOT $1 OR ts.namespace_id = ANY($2::uuid[])),
                 (SELECT count(*) FROM crono.schedules s WHERE NOT $1 OR s.namespace_id = ANY($2::uuid[])),
                 (SELECT count(*) FROM crono.runs r JOIN crono.jobs j ON j.id = r.job_id
                     WHERE NOT $1 OR j.namespace_id = ANY($2::uuid[]))",
@@ -794,8 +877,9 @@ impl ControlPlaneStore for PostgresStore {
             namespaces: count(row.0)?,
             jobs: count(row.1)?,
             targets: count(row.2)?,
-            schedules: count(row.3)?,
-            runs: count(row.4)?,
+            target_sets: count(row.3)?,
+            schedules: count(row.4)?,
+            runs: count(row.5)?,
         })
     }
 
@@ -1393,34 +1477,6 @@ async fn reconcile_expired_leases(
     Ok(rows.len())
 }
 
-async fn load_execution(
-    transaction: &mut Transaction<'_, Postgres>,
-    job_namespace: &NamespaceName,
-    job_name: &ResourceName,
-    target_namespace: &NamespaceName,
-    target_name: &ResourceName,
-) -> Result<ExecutionRow, StoreError> {
-    sqlx::query_as::<_, ExecutionRow>(
-        "SELECT j.id AS job_id, t.id AS target_id, j.executor, j.queue, j.executable,
-                j.arguments AS job_arguments, t.arguments AS target_arguments,
-                j.idempotent, j.max_attempts, j.retry_initial_seconds,
-                j.retry_max_seconds, j.retry_multiplier, j.retry_jitter
-           FROM crono.jobs j
-           JOIN crono.namespaces jn ON jn.id = j.namespace_id
-           JOIN crono.targets t ON t.namespace_id = j.namespace_id
-           JOIN crono.namespaces tn ON tn.id = t.namespace_id
-          WHERE jn.name = $1 AND j.name = $2 AND tn.name = $3 AND t.name = $4",
-    )
-    .bind(job_namespace.as_str())
-    .bind(job_name.as_str())
-    .bind(target_namespace.as_str())
-    .bind(target_name.as_str())
-    .fetch_optional(&mut **transaction)
-    .await
-    .map_err(store_error)?
-    .ok_or(StoreError::NotFound)
-}
-
 async fn load_execution_ids(
     transaction: &mut Transaction<'_, Postgres>,
     job_id: Uuid,
@@ -1672,16 +1728,10 @@ async fn get_run_unscoped(pool: &PgPool, run_id: Uuid) -> Result<RunRecord, Stor
 
 fn compare_idempotent(
     existing: RunRecord,
-    job_namespace: &NamespaceName,
-    job_name: &ResourceName,
-    target_namespace: &NamespaceName,
-    target_name: &ResourceName,
+    job_id: JobId,
+    target_id: TargetId,
 ) -> Result<(RunRecord, bool), StoreError> {
-    if &existing.job_namespace == job_namespace
-        && &existing.job_name == job_name
-        && &existing.target_namespace == target_namespace
-        && &existing.target_name == target_name
-    {
+    if existing.run.job_id() == job_id && existing.run.target_id() == target_id {
         Ok((existing, false))
     } else {
         Err(StoreError::IdempotencyConflict)
@@ -1740,6 +1790,72 @@ fn target_from_row(row: TargetRow) -> Result<TargetRecord, StoreError> {
             row.created_at,
             row.updated_at,
         ),
+    })
+}
+
+async fn target_rows_for_ids(
+    transaction: &mut Transaction<'_, Postgres>,
+    namespace_id: NamespaceId,
+    ids: &[Uuid],
+) -> Result<Vec<TargetRow>, StoreError> {
+    sqlx::query_as::<_, TargetRow>(
+        "SELECT t.id, t.namespace_id, t.name, t.arguments, t.created_at, t.updated_at,
+                n.name AS namespace_name
+           FROM crono.targets t
+           JOIN crono.namespaces n ON n.id = t.namespace_id
+          WHERE t.namespace_id = $1 AND t.id = ANY($2::uuid[])
+          ORDER BY t.name",
+    )
+    .bind(namespace_id.get())
+    .bind(ids)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(store_error)
+}
+
+async fn load_target_set_record(
+    pool: &PgPool,
+    row: TargetSetRow,
+) -> Result<TargetSetRecord, StoreError> {
+    let targets = sqlx::query_as::<_, TargetRow>(
+        "SELECT t.id, t.namespace_id, t.name, t.arguments, t.created_at, t.updated_at,
+                n.name AS namespace_name
+           FROM crono.target_set_members member
+           JOIN crono.targets t ON t.id = member.target_id
+           JOIN crono.namespaces n ON n.id = t.namespace_id
+          WHERE member.target_set_id = $1
+          ORDER BY t.name",
+    )
+    .bind(row.id)
+    .fetch_all(pool)
+    .await
+    .map_err(store_error)?;
+    target_set_from_rows(&row, targets)
+}
+
+fn target_set_from_rows(
+    row: &TargetSetRow,
+    target_rows: Vec<TargetRow>,
+) -> Result<TargetSetRecord, StoreError> {
+    let namespace_id = NamespaceId::new(row.namespace_id);
+    let mut target_set = TargetSet::new(
+        TargetSetId::new(row.id),
+        namespace_id,
+        ResourceName::parse(&row.name).map_err(invalid_database_name)?,
+        row.created_at,
+    );
+    let mut targets = Vec::with_capacity(target_rows.len());
+    for target_row in target_rows {
+        let record = target_from_row(target_row)?;
+        target_set
+            .add_target(&record.target)
+            .map_err(|_| StoreError::Internal)?;
+        targets.push(record.target);
+    }
+    Ok(TargetSetRecord {
+        namespace: NamespaceName::parse(&row.namespace_name).map_err(invalid_database_name)?,
+        target_set,
+        targets,
     })
 }
 

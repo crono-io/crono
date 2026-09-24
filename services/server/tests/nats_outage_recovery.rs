@@ -11,7 +11,10 @@ use async_nats::jetstream::{self, consumer::pull};
 use crono_api::{ClaimRequest, ClaimResponse, CompletionRequest, DispatchEnvelope};
 use crono_server::{
     application::{ControlPlaneStore, JobDefinition, NewSchedule},
-    domain::{CatchupPolicy, ExecutorKind, MisfirePolicy, NamespaceName, QueueName, ResourceName},
+    domain::{
+        CatchupPolicy, ExecutorKind, JobId, MisfirePolicy, NamespaceId, NamespaceName, QueueName,
+        ResourceName, TargetId,
+    },
     infrastructure::{
         DispatcherConfig, NatsPublisher, PostgresStore, run_dispatcher, run_worker_control,
     },
@@ -58,10 +61,11 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
     let job = ResourceName::parse("noop")?;
     let unsafe_job = ResourceName::parse("unsafe-noop")?;
     let target = ResourceName::parse("local")?;
-    store.create_namespace(&namespace).await?;
-    store
+    let namespace_record = store.create_namespace(&namespace).await?;
+    let namespace_id = namespace_record.id();
+    let job_record = store
         .create_job(
-            &namespace,
+            namespace_id,
             &job,
             &JobDefinition {
                 executor: ExecutorKind::Noop,
@@ -77,9 +81,9 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
             },
         )
         .await?;
-    store
+    let unsafe_job_record = store
         .create_job(
-            &namespace,
+            namespace_id,
             &unsafe_job,
             &JobDefinition {
                 executor: ExecutorKind::Noop,
@@ -95,7 +99,10 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
             },
         )
         .await?;
-    store.create_target(&namespace, &target, &[]).await?;
+    let target_record = store.create_target(namespace_id, &target, &[]).await?;
+    let job_id = job_record.job.id();
+    let unsafe_job_id = unsafe_job_record.job.id();
+    let target_id = target_record.target.id();
 
     let scheduler = tokio::spawn(run_scheduler(
         Arc::clone(&store),
@@ -121,9 +128,9 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
     let now = OffsetDateTime::now_utc();
     create_once(
         &store,
-        &namespace,
-        &job,
-        &target,
+        namespace_id,
+        job_id,
+        target_id,
         "late",
         now - TimeDuration::seconds(31),
         MisfirePolicy::RunLate,
@@ -132,9 +139,9 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
     .await?;
     create_once(
         &store,
-        &namespace,
-        &job,
-        &target,
+        namespace_id,
+        job_id,
+        target_id,
         "skip",
         now - TimeDuration::seconds(31),
         MisfirePolicy::Skip,
@@ -143,9 +150,9 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
     .await?;
     create_once(
         &store,
-        &namespace,
-        &job,
-        &target,
+        namespace_id,
+        job_id,
+        target_id,
         "grace",
         now + TimeDuration::seconds(1),
         MisfirePolicy::GracePeriod,
@@ -183,9 +190,8 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
         &pool,
         &publisher,
         &nats_url,
-        &namespace,
-        &job,
-        &target,
+        job_id,
+        target_id,
         queue.as_str(),
     )
     .await?;
@@ -194,10 +200,9 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
         &pool,
         &publisher,
         &nats_url,
-        &namespace,
-        &job,
-        &unsafe_job,
-        &target,
+        job_id,
+        unsafe_job_id,
+        target_id,
         queue.as_str(),
     )
     .await?;
@@ -217,15 +222,12 @@ async fn verify_worker_crash_windows(
     pool: &PgPool,
     publisher: &NatsPublisher,
     nats_url: &str,
-    namespace: &NamespaceName,
-    job: &ResourceName,
-    unsafe_job: &ResourceName,
-    target: &ResourceName,
+    job_id: JobId,
+    unsafe_job_id: JobId,
+    target_id: TargetId,
     queue: &str,
 ) -> Result<()> {
-    let (before_execution, created) = store
-        .create_run(Uuid::now_v7(), namespace, job, namespace, target)
-        .await?;
+    let (before_execution, created) = store.create_run(Uuid::now_v7(), job_id, target_id).await?;
     assert!(created);
     publish_next(store, publisher).await?;
     let crashed_attempt = claim_then_nak(nats_url, queue, "crash-before-execution").await?;
@@ -251,9 +253,7 @@ async fn verify_worker_crash_windows(
     .await?;
     assert_eq!(attempts, ("succeeded".to_string(), 2));
 
-    let (before_ack, created) = store
-        .create_run(Uuid::now_v7(), namespace, job, namespace, target)
-        .await?;
+    let (before_ack, created) = store.create_run(Uuid::now_v7(), job_id, target_id).await?;
     assert!(created);
     publish_next(store, publisher).await?;
     complete_then_nak(nats_url, queue, "crash-before-ack").await?;
@@ -269,7 +269,7 @@ async fn verify_worker_crash_windows(
     assert_eq!(state, ("succeeded".to_string(), 1));
 
     let (ambiguous, created) = store
-        .create_run(Uuid::now_v7(), namespace, unsafe_job, namespace, target)
+        .create_run(Uuid::now_v7(), unsafe_job_id, target_id)
         .await?;
     assert!(created);
     publish_next(store, publisher).await?;
@@ -366,14 +366,11 @@ async fn verify_publisher_crash_window(
     pool: &PgPool,
     publisher: &NatsPublisher,
     nats_url: &str,
-    namespace: &NamespaceName,
-    job: &ResourceName,
-    target: &ResourceName,
+    job_id: JobId,
+    target_id: TargetId,
     queue: &str,
 ) -> Result<()> {
-    let (run, created) = store
-        .create_run(Uuid::now_v7(), namespace, job, namespace, target)
-        .await?;
+    let (run, created) = store.create_run(Uuid::now_v7(), job_id, target_id).await?;
     assert!(created);
 
     let first_owner = Uuid::now_v7();
@@ -436,9 +433,9 @@ async fn verify_publisher_crash_window(
 #[allow(clippy::too_many_arguments)]
 async fn create_once(
     store: &Arc<dyn ControlPlaneStore>,
-    namespace: &NamespaceName,
-    job: &ResourceName,
-    target: &ResourceName,
+    namespace_id: NamespaceId,
+    job_id: JobId,
+    target_id: TargetId,
     name: &str,
     execute_at: OffsetDateTime,
     misfire_policy: MisfirePolicy,
@@ -446,10 +443,10 @@ async fn create_once(
 ) -> Result<()> {
     store
         .create_schedule(&NewSchedule {
-            namespace: namespace.clone(),
+            namespace_id,
             name: ResourceName::parse(name)?,
-            job_name: job.clone(),
-            target_name: target.clone(),
+            job_id,
+            target_id,
             cron_expression: None,
             execute_at: Some(execute_at),
             timezone: "UTC".to_string(),

@@ -9,7 +9,7 @@ use crate::{
     api::{error::ApiError, state::AppState},
     application::{
         CreateJobInput, CreateScheduleInput, JobRecord, Page as ApplicationPage, RequestContext,
-        RunRecord, ScheduleRecord, TargetRecord, WorkerRecord,
+        RunRecord, ScheduleRecord, TargetRecord, TargetSetRecord, WorkerRecord,
     },
     domain::{
         CatchupPolicy as DomainCatchup, ExecutorKind as DomainExecutor,
@@ -23,9 +23,10 @@ use axum::{
 };
 use crono_api::{
     CatchupPolicy, CreateJobRequest, CreateNamespaceRequest, CreateRunRequest,
-    CreateScheduleRequest, CreateTargetRequest, ExecutorKind, JobResource, MisfirePolicy,
-    NamespaceResource, OverviewResource, Page, RunResource, RunStatus, ScheduleResource,
-    TargetResource, UpdateScheduleRequest, WorkerResource, WorkerStatus,
+    CreateScheduleRequest, CreateTargetRequest, CreateTargetSetRequest, ExecutorKind, JobResource,
+    MisfirePolicy, NamespaceResource, OverviewResource, Page, RunResource, RunStatus,
+    ScheduleResource, TargetReference, TargetResource, TargetSetResource, UpdateScheduleRequest,
+    WorkerResource, WorkerStatus,
 };
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
@@ -88,27 +89,27 @@ pub async fn list_namespaces(
 
 #[utoipa::path(
     get,
-    path = "/api/namespaces/{namespace}",
-    params(("namespace" = String, Path, description = "Canonical Namespace name")),
+    path = "/api/namespaces/{namespace_id}",
+    params(("namespace_id" = Uuid, Path, description = "Immutable Namespace ID")),
     responses((status = 200, body = NamespaceResource), (status = 404, body = crono_api::ErrorEnvelope)),
     tag = "control-plane"
 )]
 pub async fn get_namespace(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace): Path<String>,
+    Path(namespace_id): Path<Uuid>,
 ) -> Result<Json<NamespaceResource>, ApiError> {
     let namespace = state
         .application()
-        .get_namespace(&context, &namespace)
+        .get_namespace(&context, namespace_id)
         .await?;
     Ok(Json(namespace_resource(&namespace)?))
 }
 
 #[utoipa::path(
     post,
-    path = "/api/namespaces/{namespace}/jobs",
-    params(("namespace" = String, Path)),
+    path = "/api/namespaces/{namespace_id}/jobs",
+    params(("namespace_id" = Uuid, Path)),
     request_body = CreateJobRequest,
     responses((status = 201, body = JobResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
     tag = "control-plane"
@@ -116,14 +117,14 @@ pub async fn get_namespace(
 pub async fn create_job(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace): Path<String>,
+    Path(namespace_id): Path<Uuid>,
     Json(request): Json<CreateJobRequest>,
 ) -> Result<(StatusCode, Json<JobResource>), ApiError> {
     let job = state
         .application()
         .create_job(
             &context,
-            &namespace,
+            namespace_id,
             CreateJobInput {
                 name: request.name,
                 queue: request.queue,
@@ -147,47 +148,44 @@ pub async fn create_job(
 
 #[utoipa::path(
     get,
-    path = "/api/namespaces/{namespace}/jobs",
-    params(("namespace" = String, Path), PageQuery),
+    path = "/api/namespaces/{namespace_id}/jobs",
+    params(("namespace_id" = Uuid, Path), PageQuery),
     responses((status = 200, body = Page<JobResource>)),
     tag = "control-plane"
 )]
 pub async fn list_jobs(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace): Path<String>,
+    Path(namespace_id): Path<Uuid>,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<Page<JobResource>>, ApiError> {
     let page = state
         .application()
-        .list_jobs(&context, &namespace, query.limit, query.after.as_deref())
+        .list_jobs(&context, namespace_id, query.limit, query.after.as_deref())
         .await?;
     Ok(Json(map_page(page, |item| job_resource(&item))?))
 }
 
 #[utoipa::path(
     get,
-    path = "/api/namespaces/{namespace}/jobs/{job}",
-    params(("namespace" = String, Path), ("job" = String, Path)),
+    path = "/api/jobs/{job_id}",
+    params(("job_id" = Uuid, Path)),
     responses((status = 200, body = JobResource), (status = 404, body = crono_api::ErrorEnvelope)),
     tag = "control-plane"
 )]
 pub async fn get_job(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path((namespace, job)): Path<(String, String)>,
+    Path(job_id): Path<Uuid>,
 ) -> Result<Json<JobResource>, ApiError> {
-    let job = state
-        .application()
-        .get_job(&context, &namespace, &job)
-        .await?;
+    let job = state.application().get_job(&context, job_id).await?;
     Ok(Json(job_resource(&job)?))
 }
 
 #[utoipa::path(
     post,
-    path = "/api/namespaces/{namespace}/targets",
-    params(("namespace" = String, Path)),
+    path = "/api/namespaces/{namespace_id}/targets",
+    params(("namespace_id" = Uuid, Path)),
     request_body = CreateTargetRequest,
     responses((status = 201, body = TargetResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
     tag = "control-plane"
@@ -195,59 +193,116 @@ pub async fn get_job(
 pub async fn create_target(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace): Path<String>,
+    Path(namespace_id): Path<Uuid>,
     Json(request): Json<CreateTargetRequest>,
 ) -> Result<(StatusCode, Json<TargetResource>), ApiError> {
     let target = state
         .application()
-        .create_target(&context, &namespace, &request.name, request.arguments)
+        .create_target(&context, namespace_id, &request.name, request.arguments)
         .await?;
     Ok((StatusCode::CREATED, Json(target_resource(&target)?)))
 }
 
 #[utoipa::path(
     get,
-    path = "/api/namespaces/{namespace}/targets",
-    params(("namespace" = String, Path), PageQuery),
+    path = "/api/namespaces/{namespace_id}/targets",
+    params(("namespace_id" = Uuid, Path), PageQuery),
     responses((status = 200, body = Page<TargetResource>)),
     tag = "control-plane"
 )]
 pub async fn list_targets(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace): Path<String>,
+    Path(namespace_id): Path<Uuid>,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<Page<TargetResource>>, ApiError> {
     let page = state
         .application()
-        .list_targets(&context, &namespace, query.limit, query.after.as_deref())
+        .list_targets(&context, namespace_id, query.limit, query.after.as_deref())
         .await?;
     Ok(Json(map_page(page, |item| target_resource(&item))?))
 }
 
 #[utoipa::path(
     get,
-    path = "/api/namespaces/{namespace}/targets/{target}",
-    params(("namespace" = String, Path), ("target" = String, Path)),
+    path = "/api/targets/{target_id}",
+    params(("target_id" = Uuid, Path)),
     responses((status = 200, body = TargetResource), (status = 404, body = crono_api::ErrorEnvelope)),
     tag = "control-plane"
 )]
 pub async fn get_target(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path((namespace, target)): Path<(String, String)>,
+    Path(target_id): Path<Uuid>,
 ) -> Result<Json<TargetResource>, ApiError> {
-    let target = state
-        .application()
-        .get_target(&context, &namespace, &target)
-        .await?;
+    let target = state.application().get_target(&context, target_id).await?;
     Ok(Json(target_resource(&target)?))
 }
 
 #[utoipa::path(
     post,
-    path = "/api/namespaces/{namespace}/schedules",
-    params(("namespace" = String, Path)),
+    path = "/api/namespaces/{namespace_id}/target-sets",
+    params(("namespace_id" = Uuid, Path)),
+    request_body = CreateTargetSetRequest,
+    responses((status = 201, body = TargetSetResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    tag = "control-plane"
+)]
+pub async fn create_target_set(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(namespace_id): Path<Uuid>,
+    Json(request): Json<CreateTargetSetRequest>,
+) -> Result<(StatusCode, Json<TargetSetResource>), ApiError> {
+    let target_set = state
+        .application()
+        .create_target_set(&context, namespace_id, &request.name, request.target_ids)
+        .await?;
+    Ok((StatusCode::CREATED, Json(target_set_resource(&target_set)?)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/namespaces/{namespace_id}/target-sets",
+    params(("namespace_id" = Uuid, Path), PageQuery),
+    responses((status = 200, body = Page<TargetSetResource>)),
+    tag = "control-plane"
+)]
+pub async fn list_target_sets(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(namespace_id): Path<Uuid>,
+    Query(query): Query<PageQuery>,
+) -> Result<Json<Page<TargetSetResource>>, ApiError> {
+    let page = state
+        .application()
+        .list_target_sets(&context, namespace_id, query.limit, query.after.as_deref())
+        .await?;
+    Ok(Json(map_page(page, |item| target_set_resource(&item))?))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/target-sets/{target_set_id}",
+    params(("target_set_id" = Uuid, Path)),
+    responses((status = 200, body = TargetSetResource), (status = 404, body = crono_api::ErrorEnvelope)),
+    tag = "control-plane"
+)]
+pub async fn get_target_set(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(target_set_id): Path<Uuid>,
+) -> Result<Json<TargetSetResource>, ApiError> {
+    let target_set = state
+        .application()
+        .get_target_set(&context, target_set_id)
+        .await?;
+    Ok(Json(target_set_resource(&target_set)?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/namespaces/{namespace_id}/schedules",
+    params(("namespace_id" = Uuid, Path)),
     request_body = CreateScheduleRequest,
     responses((status = 201, body = ScheduleResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
     tag = "control-plane"
@@ -255,7 +310,7 @@ pub async fn get_target(
 pub async fn create_schedule(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace): Path<String>,
+    Path(namespace_id): Path<Uuid>,
     Json(request): Json<CreateScheduleRequest>,
 ) -> Result<(StatusCode, Json<ScheduleResource>), ApiError> {
     let timing = match (request.cron_expression, request.execute_at) {
@@ -265,15 +320,16 @@ pub async fn create_schedule(
         },
         (None, Some(execute_at)) => ScheduleTiming::Once {
             execute_at: time::OffsetDateTime::parse(&execute_at, &Rfc3339).map_err(|_| {
-                ApiError::from(crate::application::ApplicationError::InvalidInput(
-                    "execute_at must be an RFC 3339 timestamp".to_string(),
+                ApiError::from(crate::application::ApplicationError::invalid(
+                    "execute_at",
+                    "execute_at must be an RFC 3339 timestamp",
                 ))
             })?,
         },
         _ => {
             return Err(ApiError::from(
-                crate::application::ApplicationError::InvalidInput(
-                    "exactly one of cron_expression or execute_at is required".to_string(),
+                crate::application::ApplicationError::invalid_request(
+                    "exactly one of cron_expression or execute_at is required",
                 ),
             ));
         }
@@ -282,11 +338,11 @@ pub async fn create_schedule(
         .application()
         .create_schedule(
             &context,
-            &namespace,
+            namespace_id,
             CreateScheduleInput {
                 name: request.name,
-                job: request.job,
-                target: request.target,
+                job_id: crate::domain::JobId::new(request.job_id),
+                target_id: crate::domain::TargetId::new(request.target_id),
                 timing,
                 misfire_policy: domain_misfire(request.misfire_policy),
                 misfire_grace_seconds: request.misfire_grace_seconds,
@@ -301,47 +357,47 @@ pub async fn create_schedule(
 
 #[utoipa::path(
     get,
-    path = "/api/namespaces/{namespace}/schedules",
-    params(("namespace" = String, Path), PageQuery),
+    path = "/api/namespaces/{namespace_id}/schedules",
+    params(("namespace_id" = Uuid, Path), PageQuery),
     responses((status = 200, body = Page<ScheduleResource>)),
     tag = "control-plane"
 )]
 pub async fn list_schedules(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace): Path<String>,
+    Path(namespace_id): Path<Uuid>,
     Query(query): Query<PageQuery>,
 ) -> Result<Json<Page<ScheduleResource>>, ApiError> {
     let page = state
         .application()
-        .list_schedules(&context, &namespace, query.limit, query.after.as_deref())
+        .list_schedules(&context, namespace_id, query.limit, query.after.as_deref())
         .await?;
     Ok(Json(map_page(page, |item| schedule_resource(&item))?))
 }
 
 #[utoipa::path(
     get,
-    path = "/api/namespaces/{namespace}/schedules/{schedule}",
-    params(("namespace" = String, Path), ("schedule" = String, Path)),
+    path = "/api/schedules/{schedule_id}",
+    params(("schedule_id" = Uuid, Path)),
     responses((status = 200, body = ScheduleResource), (status = 404, body = crono_api::ErrorEnvelope)),
     tag = "control-plane"
 )]
 pub async fn get_schedule(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path((namespace, schedule)): Path<(String, String)>,
+    Path(schedule_id): Path<Uuid>,
 ) -> Result<Json<ScheduleResource>, ApiError> {
     let record = state
         .application()
-        .get_schedule(&context, &namespace, &schedule)
+        .get_schedule(&context, schedule_id)
         .await?;
     Ok(Json(schedule_resource(&record)?))
 }
 
 #[utoipa::path(
     patch,
-    path = "/api/namespaces/{namespace}/schedules/{schedule}",
-    params(("namespace" = String, Path), ("schedule" = String, Path)),
+    path = "/api/schedules/{schedule_id}",
+    params(("schedule_id" = Uuid, Path)),
     request_body = UpdateScheduleRequest,
     responses((status = 200, body = ScheduleResource), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
     tag = "control-plane"
@@ -349,18 +405,12 @@ pub async fn get_schedule(
 pub async fn update_schedule(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path((namespace, schedule)): Path<(String, String)>,
+    Path(schedule_id): Path<Uuid>,
     Json(request): Json<UpdateScheduleRequest>,
 ) -> Result<Json<ScheduleResource>, ApiError> {
     let record = state
         .application()
-        .set_schedule_enabled(
-            &context,
-            &namespace,
-            &schedule,
-            request.revision,
-            request.enabled,
-        )
+        .set_schedule_enabled(&context, schedule_id, request.revision, request.enabled)
         .await?;
     Ok(Json(schedule_resource(&record)?))
 }
@@ -379,7 +429,12 @@ pub async fn create_run(
 ) -> Result<(StatusCode, Json<RunResource>), ApiError> {
     let outcome = state
         .application()
-        .create_run(&context, request.request_id, &request.job, &request.target)
+        .create_run(
+            &context,
+            request.request_id,
+            request.job_id,
+            request.target_id,
+        )
         .await?;
     let status = if outcome.created {
         StatusCode::CREATED
@@ -461,6 +516,7 @@ pub async fn overview(
         namespaces: overview.namespaces,
         jobs: overview.jobs,
         targets: overview.targets,
+        target_sets: overview.target_sets,
         schedules: overview.schedules,
         runs: overview.runs,
     }))
@@ -481,6 +537,7 @@ fn job_resource(record: &JobRecord) -> Result<JobResource, ApiError> {
     };
     Ok(JobResource {
         id: record.job.id().get(),
+        namespace_id: record.job.namespace_id().get(),
         namespace: record.namespace.to_string(),
         name: record.job.name().to_string(),
         qualified_name: format!("{}/{}", record.namespace, record.job.name()),
@@ -502,12 +559,33 @@ fn job_resource(record: &JobRecord) -> Result<JobResource, ApiError> {
 fn target_resource(record: &TargetRecord) -> Result<TargetResource, ApiError> {
     Ok(TargetResource {
         id: record.target.id().get(),
+        namespace_id: record.target.namespace_id().get(),
         namespace: record.namespace.to_string(),
         name: record.target.name().to_string(),
         qualified_name: format!("{}/{}", record.namespace, record.target.name()),
         arguments: record.target.arguments().to_vec(),
         created_at: timestamp(record.target.created_at())?,
         updated_at: timestamp(record.target.updated_at())?,
+    })
+}
+
+fn target_set_resource(record: &TargetSetRecord) -> Result<TargetSetResource, ApiError> {
+    let targets = record
+        .targets
+        .iter()
+        .map(|target| TargetReference {
+            id: target.id().get(),
+            name: target.name().to_string(),
+        })
+        .collect();
+    Ok(TargetSetResource {
+        id: record.target_set.id().get(),
+        namespace_id: record.target_set.namespace_id().get(),
+        namespace: record.namespace.to_string(),
+        name: record.target_set.name().to_string(),
+        qualified_name: format!("{}/{}", record.namespace, record.target_set.name()),
+        targets,
+        created_at: timestamp(record.target_set.created_at())?,
     })
 }
 
@@ -523,9 +601,12 @@ fn schedule_resource(record: &ScheduleRecord) -> Result<ScheduleResource, ApiErr
     };
     Ok(ScheduleResource {
         id: record.schedule.id.get(),
+        namespace_id: record.schedule.namespace_id.get(),
         namespace: record.namespace.to_string(),
         name: record.schedule.name.to_string(),
+        job_id: record.schedule.job_id.get(),
         job: format!("{}/{}", record.namespace, record.job_name),
+        target_id: record.schedule.target_id.get(),
         target: format!("{}/{}", record.namespace, record.target_name),
         cron_expression,
         execute_at,
@@ -593,7 +674,9 @@ fn run_resource(record: &RunRecord) -> Result<RunResource, ApiError> {
         id: record.run.id().get(),
         request_id: record.run.request_id(),
         schedule_id: record.run.schedule_id().map(crate::domain::ScheduleId::get),
+        job_id: record.run.job_id().get(),
         job: format!("{}/{}", record.job_namespace, record.job_name),
+        target_id: record.run.target_id().get(),
         target: format!("{}/{}", record.target_namespace, record.target_name),
         status,
         scheduled_at: timestamp(record.run.scheduled_at())?,

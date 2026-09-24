@@ -77,8 +77,10 @@ impl AppRoute {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaterialSymbol {
     AccountTree,
+    Check,
     Dashboard,
     Dns,
+    ExpandMore,
     Lan,
     LightMode,
     Memory,
@@ -94,8 +96,10 @@ impl MaterialSymbol {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::AccountTree => "account_tree",
+            Self::Check => "check",
             Self::Dashboard => "dashboard",
             Self::Dns => "dns",
+            Self::ExpandMore => "expand_more",
             Self::Lan => "lan",
             Self::LightMode => "light_mode",
             Self::Memory => "memory",
@@ -218,7 +222,12 @@ mod tests {
 
     #[test]
     fn shell_symbols_are_explicit() {
-        let shell_symbols = [MaterialSymbol::LightMode, MaterialSymbol::SearchOff];
+        let shell_symbols = [
+            MaterialSymbol::Check,
+            MaterialSymbol::ExpandMore,
+            MaterialSymbol::LightMode,
+            MaterialSymbol::SearchOff,
+        ];
 
         assert!(
             shell_symbols

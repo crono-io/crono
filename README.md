@@ -6,7 +6,7 @@ The project is still a draft. Its HTTP and messaging contracts are intentionally
 
 ## Reliability architecture
 
-PostgreSQL is the source of truth for Jobs, Targets, Schedules, calculated `next_run_at` cursors, Runs, Attempts, retry state, leases, misfires, dispatch state, and audit history. JetStream is a durable, high-throughput execution transport; it is not the scheduler database.
+PostgreSQL is the source of truth for Namespaces, Jobs, Targets, Target Sets, Schedules, calculated `next_run_at` cursors, Runs, Attempts, retry state, leases, misfires, dispatch state, and audit history. UUIDs are immutable identities and relationship keys. Canonical resource names are strict DNS-1123 labels used for lookup and display; the API rejects invalid input rather than normalizing it. JetStream is a durable, high-throughput execution transport; it is not the scheduler database.
 
 ```mermaid
 flowchart LR
@@ -178,7 +178,7 @@ sequenceDiagram
 
 ## Reviewing locally
 
-The GUI currently exercises Namespace, Job, Target, and manual Run workflows. Schedule APIs are implemented, while dedicated Schedule screens remain a useful next GUI improvement.
+The GUI exercises Namespace, Job, Target, Target Set, and manual Run workflows. Existing relationships are searchable name selectors backed by UUIDs. Schedule APIs are implemented, while dedicated Schedule screens remain a useful next GUI improvement.
 
 ```mermaid
 flowchart TD
@@ -226,6 +226,11 @@ just dev-infra
 cargo run --locked -p crono-server --bin crono-server -- --port 8080
 cargo run --locked -p crono-worker -- run --queue default
 ```
+
+To discard all local Crono PostgreSQL and JetStream state and recreate both
+services from empty named volumes, run `just dev-reset`. The command requires
+confirmation and only targets the `crono-postgres` and `crono-nats` development
+containers and their named volumes.
 
 PostgreSQL uses `CRONO_DATABASE_URL`, NATS uses `CRONO_NATS_URL`, and the worker accepts `--nats-url`, `--queue`, `--worker-id`, and `--concurrency`. Local defaults target loopback development services. Deployed public HTTP must sit behind TLS termination; clients do not receive NATS or PostgreSQL credentials.
 

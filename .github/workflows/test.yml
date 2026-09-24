@@ -52,6 +52,21 @@ jobs:
       - name: Check all features
         run: cargo check --locked --workspace --all-features
 
+  browser:
+    name: Browser UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install browser test runner
+        run: cargo install wasm-bindgen-cli --version 0.2.128 --locked
+
+      - name: Test web components in headless Chrome
+        run: cargo test --locked -p crono-web --target wasm32-unknown-unknown
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -59,6 +74,7 @@ jobs:
       - format
       - lint
       - check
+      - browser
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable

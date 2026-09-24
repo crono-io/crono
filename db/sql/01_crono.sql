@@ -69,6 +69,24 @@ CREATE TABLE IF NOT EXISTS crono.targets (
     CONSTRAINT targets_arguments_array CHECK (jsonb_typeof(arguments) = 'array')
 );
 
+CREATE TABLE IF NOT EXISTS crono.target_sets (
+    id uuid PRIMARY KEY DEFAULT uuidv7(),
+    namespace_id uuid NOT NULL REFERENCES crono.namespaces(id) ON DELETE RESTRICT,
+    name text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+    CONSTRAINT target_sets_namespace_name_unique UNIQUE (namespace_id, name),
+    CONSTRAINT target_sets_name_canonical CHECK (
+        name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+    )
+);
+
+CREATE TABLE IF NOT EXISTS crono.target_set_members (
+    target_set_id uuid NOT NULL REFERENCES crono.target_sets(id) ON DELETE RESTRICT,
+    target_id uuid NOT NULL REFERENCES crono.targets(id) ON DELETE RESTRICT,
+    created_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+    PRIMARY KEY (target_set_id, target_id)
+);
+
 CREATE TABLE IF NOT EXISTS crono.schedules (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     namespace_id uuid NOT NULL REFERENCES crono.namespaces(id) ON DELETE RESTRICT,
@@ -264,6 +282,8 @@ CREATE INDEX IF NOT EXISTS run_events_run_created_idx
     ON crono.run_events (run_id, created_at);
 CREATE INDEX IF NOT EXISTS schedule_events_schedule_created_idx
     ON crono.schedule_events (schedule_id, created_at);
+CREATE INDEX IF NOT EXISTS target_set_members_target_idx
+    ON crono.target_set_members (target_id, target_set_id);
 
 CREATE OR REPLACE FUNCTION crono.enforce_run_namespace_match()
 RETURNS trigger
@@ -303,6 +323,27 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION crono.enforce_target_set_namespace_match()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, crono
+AS $$
+DECLARE
+    set_namespace_id uuid;
+    target_namespace_id uuid;
+BEGIN
+    SELECT namespace_id INTO STRICT set_namespace_id
+      FROM crono.target_sets WHERE id = NEW.target_set_id;
+    SELECT namespace_id INTO STRICT target_namespace_id
+      FROM crono.targets WHERE id = NEW.target_id;
+    IF set_namespace_id <> target_namespace_id THEN
+        RAISE EXCEPTION 'Target Set and Target must belong to the same Namespace'
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
 DROP TRIGGER IF EXISTS schedules_namespace_match ON crono.schedules;
 CREATE CONSTRAINT TRIGGER schedules_namespace_match
 AFTER INSERT OR UPDATE OF namespace_id, job_id, target_id ON crono.schedules
@@ -314,3 +355,9 @@ CREATE CONSTRAINT TRIGGER runs_namespace_match
 AFTER INSERT OR UPDATE OF job_id, target_id ON crono.runs
 DEFERRABLE INITIALLY IMMEDIATE
 FOR EACH ROW EXECUTE FUNCTION crono.enforce_run_namespace_match();
+
+DROP TRIGGER IF EXISTS target_set_members_namespace_match ON crono.target_set_members;
+CREATE CONSTRAINT TRIGGER target_set_members_namespace_match
+AFTER INSERT OR UPDATE OF target_set_id, target_id ON crono.target_set_members
+DEFERRABLE INITIALLY IMMEDIATE
+FOR EACH ROW EXECUTE FUNCTION crono.enforce_target_set_namespace_match();

@@ -5,7 +5,86 @@
 //! remains in PostgreSQL, allowing the transport to be rebuilt safely.
 
 use serde::{Deserialize, Serialize};
+use std::{error::Error, fmt};
 use uuid::Uuid;
+
+/// Maximum byte length of a canonical DNS-1123 resource label.
+pub const RESOURCE_NAME_MAX_LENGTH: usize = 63;
+
+/// Why a canonical Namespace or resource name was rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceNameError {
+    Empty,
+    InvalidBoundary,
+    InvalidCharacter { position: usize, character: char },
+    TooLong,
+}
+
+impl fmt::Display for ResourceNameError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => formatter.write_str("name must contain at least one character"),
+            Self::InvalidBoundary => {
+                formatter.write_str("name must start and end with a lowercase letter or number")
+            }
+            Self::InvalidCharacter {
+                position,
+                character,
+            } => write!(
+                formatter,
+                "name contains invalid character {character:?} at byte {position}; use lowercase letters, numbers, and '-'"
+            ),
+            Self::TooLong => write!(
+                formatter,
+                "name must not exceed {RESOURCE_NAME_MAX_LENGTH} characters"
+            ),
+        }
+    }
+}
+
+impl Error for ResourceNameError {}
+
+/// Validate one canonical DNS-1123 label without changing the supplied value.
+///
+/// # Errors
+///
+/// Rejects empty or oversized values, non-ASCII characters, characters other
+/// than lowercase letters, digits, and `-`, and labels with `-` boundaries.
+pub fn validate_resource_name(value: &str) -> Result<(), ResourceNameError> {
+    if value.len() > RESOURCE_NAME_MAX_LENGTH {
+        return Err(ResourceNameError::TooLong);
+    }
+    let mut characters = value.char_indices();
+    let Some((_, first)) = characters.next() else {
+        return Err(ResourceNameError::Empty);
+    };
+    if !is_name_boundary(first) {
+        return Err(ResourceNameError::InvalidBoundary);
+    }
+
+    let mut last = first;
+    for (position, character) in characters {
+        if !is_name_character(character) {
+            return Err(ResourceNameError::InvalidCharacter {
+                position,
+                character,
+            });
+        }
+        last = character;
+    }
+    if !is_name_boundary(last) {
+        return Err(ResourceNameError::InvalidBoundary);
+    }
+    Ok(())
+}
+
+const fn is_name_boundary(character: char) -> bool {
+    character.is_ascii_lowercase() || character.is_ascii_digit()
+}
+
+const fn is_name_character(character: char) -> bool {
+    is_name_boundary(character) || character == '-'
+}
 
 /// One bounded page of public API resources.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +173,7 @@ const fn default_retry_jitter() -> f64 {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct JobResource {
     pub id: Uuid,
+    pub namespace_id: Uuid,
     pub namespace: String,
     pub name: String,
     pub qualified_name: String,
@@ -124,12 +204,42 @@ pub struct CreateTargetRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct TargetResource {
     pub id: Uuid,
+    pub namespace_id: Uuid,
     pub namespace: String,
     pub name: String,
     pub qualified_name: String,
     pub arguments: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// Create a named, explicit selection of Targets in one Namespace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct CreateTargetSetRequest {
+    pub name: String,
+    pub target_ids: Vec<Uuid>,
+}
+
+/// Display metadata for one Target selected by a Target Set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TargetReference {
+    pub id: Uuid,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct TargetSetResource {
+    pub id: Uuid,
+    pub namespace_id: Uuid,
+    pub namespace: String,
+    pub name: String,
+    pub qualified_name: String,
+    pub targets: Vec<TargetReference>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,8 +267,8 @@ pub enum CatchupPolicy {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateScheduleRequest {
     pub name: String,
-    pub job: String,
-    pub target: String,
+    pub job_id: Uuid,
+    pub target_id: Uuid,
     pub cron_expression: Option<String>,
     pub execute_at: Option<String>,
     #[serde(default = "default_timezone")]
@@ -189,9 +299,12 @@ const fn default_catchup_age() -> u32 {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ScheduleResource {
     pub id: Uuid,
+    pub namespace_id: Uuid,
     pub namespace: String,
     pub name: String,
+    pub job_id: Uuid,
     pub job: String,
+    pub target_id: Uuid,
     pub target: String,
     pub cron_expression: Option<String>,
     pub execute_at: Option<String>,
@@ -222,8 +335,8 @@ pub struct UpdateScheduleRequest {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateRunRequest {
     pub request_id: Uuid,
-    pub job: String,
-    pub target: String,
+    pub job_id: Uuid,
+    pub target_id: Uuid,
 }
 
 /// Durable logical execution state.
@@ -249,7 +362,9 @@ pub struct RunResource {
     pub id: Uuid,
     pub request_id: Option<Uuid>,
     pub schedule_id: Option<Uuid>,
+    pub job_id: Uuid,
     pub job: String,
+    pub target_id: Uuid,
     pub target: String,
     pub status: RunStatus,
     pub scheduled_at: String,
@@ -293,6 +408,7 @@ pub struct OverviewResource {
     pub namespaces: u64,
     pub jobs: u64,
     pub targets: u64,
+    pub target_sets: u64,
     pub schedules: u64,
     pub runs: u64,
 }
@@ -308,6 +424,40 @@ pub struct ErrorEnvelope {
 pub struct ErrorBody {
     pub code: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
+}
+
+#[cfg(test)]
+mod resource_name_tests {
+    use super::{RESOURCE_NAME_MAX_LENGTH, validate_resource_name};
+
+    #[test]
+    fn dns_1123_labels_accept_the_public_examples() {
+        for value in ["production", "job-01", "a", "a1", "aws-eu-central-1"] {
+            assert!(validate_resource_name(value).is_ok(), "{value:?}");
+        }
+        assert!(validate_resource_name(&"a".repeat(RESOURCE_NAME_MAX_LENGTH)).is_ok());
+    }
+
+    #[test]
+    fn dns_1123_labels_reject_noncanonical_values() {
+        for value in [
+            "",
+            "Production",
+            "hello_world",
+            "hello world",
+            "hello.world",
+            "hello/world",
+            "-job",
+            "job-",
+            "Zürich",
+            "🚀",
+        ] {
+            assert!(validate_resource_name(value).is_err(), "{value:?}");
+        }
+        assert!(validate_resource_name(&"a".repeat(RESOURCE_NAME_MAX_LENGTH + 1)).is_err());
+    }
 }
 
 /// Minimal durable dispatch message; PostgreSQL owns all execution details.

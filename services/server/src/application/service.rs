@@ -3,21 +3,23 @@
 use super::{
     ApplicationError, Authorizer, Capability, ControlPlaneStore, CreateJobInput,
     CreateScheduleInput, JobDefinition, JobRecord, NewSchedule, Overview, Page, RequestContext,
-    ResourceScope, RunRecord, ScheduleRecord, TargetRecord, WorkerRecord,
+    ResourceScope, RunRecord, ScheduleRecord, StoreError, TargetRecord, TargetSetRecord,
+    WorkerRecord,
 };
 use crate::{
     domain::{
-        ExecutorKind, MisfirePolicy, Namespace, NamespaceName, QueueName, ResourceName, RunId,
-        ScheduleTiming,
+        ExecutorKind, JobId, MisfirePolicy, Namespace, NamespaceId, NamespaceName, QueueName,
+        ResourceName, RunId, ScheduleId, ScheduleTiming, TargetId, TargetSetId,
     },
     scheduler::next_cron_occurrence,
 };
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 const DEFAULT_LIMIT: u16 = 50;
 const MAX_LIMIT: u16 = 100;
+const MAX_TARGET_SET_MEMBERS: usize = 1_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateRunOutcome {
@@ -54,7 +56,7 @@ impl Application {
                 &ResourceScope::ControlPlane,
             )
             .await?;
-        let name = NamespaceName::parse(value).map_err(invalid)?;
+        let name = NamespaceName::parse(value).map_err(invalid_name)?;
         Ok(self.store.create_namespace(&name).await?)
     }
 
@@ -87,17 +89,17 @@ impl Application {
     pub async fn get_namespace(
         &self,
         context: &RequestContext,
-        value: &str,
+        id: Uuid,
     ) -> Result<Namespace, ApplicationError> {
-        let name = NamespaceName::parse(value).map_err(invalid)?;
+        let id = NamespaceId::new(id);
         self.authorizer
             .authorize(
                 context,
                 Capability::NamespaceRead,
-                &ResourceScope::Namespace(name.to_string()),
+                &ResourceScope::Namespace(id),
             )
             .await?;
-        Ok(self.store.get_namespace(&name).await?)
+        Ok(self.store.get_namespace(id).await?)
     }
 
     /// Create a directly editable Job definition after Namespace authorization.
@@ -108,18 +110,19 @@ impl Application {
     pub async fn create_job(
         &self,
         context: &RequestContext,
-        namespace: &str,
+        namespace_id: Uuid,
         input: CreateJobInput,
     ) -> Result<JobRecord, ApplicationError> {
-        let namespace = NamespaceName::parse(namespace).map_err(invalid)?;
-        let name = ResourceName::parse(&input.name).map_err(invalid)?;
-        let queue = QueueName::parse(&input.queue).map_err(invalid)?;
+        let namespace_id = NamespaceId::new(namespace_id);
+        let name = ResourceName::parse(&input.name).map_err(invalid_name)?;
+        let queue = QueueName::parse(&input.queue)
+            .map_err(|error| ApplicationError::invalid("queue", error.to_string()))?;
         validate_job(&input)?;
         self.authorizer
             .authorize(
                 context,
                 Capability::JobCreate,
-                &ResourceScope::Namespace(namespace.to_string()),
+                &ResourceScope::Namespace(namespace_id),
             )
             .await?;
         let definition = JobDefinition {
@@ -136,7 +139,7 @@ impl Application {
         };
         Ok(self
             .store
-            .create_job(&namespace, &name, &definition)
+            .create_job(namespace_id, &name, &definition)
             .await?)
     }
 
@@ -148,16 +151,16 @@ impl Application {
     pub async fn list_jobs(
         &self,
         context: &RequestContext,
-        namespace: &str,
+        namespace_id: Uuid,
         limit: Option<u16>,
         after: Option<&str>,
     ) -> Result<Page<JobRecord>, ApplicationError> {
-        let namespace = NamespaceName::parse(namespace).map_err(invalid)?;
+        let namespace_id = NamespaceId::new(namespace_id);
         self.authorizer
             .authorize(
                 context,
                 Capability::JobRead,
-                &ResourceScope::Namespace(namespace.to_string()),
+                &ResourceScope::Namespace(namespace_id),
             )
             .await?;
         let visibility = self
@@ -166,7 +169,7 @@ impl Application {
             .await?;
         Ok(self
             .store
-            .list_jobs(&namespace, &visibility, page_limit(limit)?, after)
+            .list_jobs(namespace_id, &visibility, page_limit(limit)?, after)
             .await?)
     }
 
@@ -178,22 +181,13 @@ impl Application {
     pub async fn get_job(
         &self,
         context: &RequestContext,
-        namespace: &str,
-        name: &str,
+        id: Uuid,
     ) -> Result<JobRecord, ApplicationError> {
-        let namespace = NamespaceName::parse(namespace).map_err(invalid)?;
-        let name = ResourceName::parse(name).map_err(invalid)?;
+        let id = JobId::new(id);
         self.authorizer
-            .authorize(
-                context,
-                Capability::JobRead,
-                &ResourceScope::Job {
-                    namespace: namespace.to_string(),
-                    job: name.to_string(),
-                },
-            )
+            .authorize(context, Capability::JobRead, &ResourceScope::Job(id))
             .await?;
-        Ok(self.store.get_job(&namespace, &name).await?)
+        Ok(self.store.get_job(id).await?)
     }
 
     /// Create a Target whose arguments will be snapshotted into future Runs.
@@ -204,23 +198,23 @@ impl Application {
     pub async fn create_target(
         &self,
         context: &RequestContext,
-        namespace: &str,
+        namespace_id: Uuid,
         name: &str,
         arguments: Vec<String>,
     ) -> Result<TargetRecord, ApplicationError> {
-        let namespace = NamespaceName::parse(namespace).map_err(invalid)?;
-        let name = ResourceName::parse(name).map_err(invalid)?;
+        let namespace_id = NamespaceId::new(namespace_id);
+        let name = ResourceName::parse(name).map_err(invalid_name)?;
         validate_arguments(&arguments)?;
         self.authorizer
             .authorize(
                 context,
                 Capability::TargetCreate,
-                &ResourceScope::Namespace(namespace.to_string()),
+                &ResourceScope::Namespace(namespace_id),
             )
             .await?;
         Ok(self
             .store
-            .create_target(&namespace, &name, &arguments)
+            .create_target(namespace_id, &name, &arguments)
             .await?)
     }
 
@@ -232,16 +226,16 @@ impl Application {
     pub async fn list_targets(
         &self,
         context: &RequestContext,
-        namespace: &str,
+        namespace_id: Uuid,
         limit: Option<u16>,
         after: Option<&str>,
     ) -> Result<Page<TargetRecord>, ApplicationError> {
-        let namespace = NamespaceName::parse(namespace).map_err(invalid)?;
+        let namespace_id = NamespaceId::new(namespace_id);
         self.authorizer
             .authorize(
                 context,
                 Capability::TargetRead,
-                &ResourceScope::Namespace(namespace.to_string()),
+                &ResourceScope::Namespace(namespace_id),
             )
             .await?;
         let visibility = self
@@ -250,7 +244,7 @@ impl Application {
             .await?;
         Ok(self
             .store
-            .list_targets(&namespace, &visibility, page_limit(limit)?, after)
+            .list_targets(namespace_id, &visibility, page_limit(limit)?, after)
             .await?)
     }
 
@@ -262,22 +256,126 @@ impl Application {
     pub async fn get_target(
         &self,
         context: &RequestContext,
-        namespace: &str,
-        name: &str,
+        id: Uuid,
     ) -> Result<TargetRecord, ApplicationError> {
-        let namespace = NamespaceName::parse(namespace).map_err(invalid)?;
-        let name = ResourceName::parse(name).map_err(invalid)?;
+        let id = TargetId::new(id);
+        self.authorizer
+            .authorize(context, Capability::TargetRead, &ResourceScope::Target(id))
+            .await?;
+        Ok(self.store.get_target(id).await?)
+    }
+
+    /// Create a non-empty Target Set from explicit same-Namespace Target IDs.
+    ///
+    /// # Errors
+    ///
+    /// Returns validation, authorization, not-found, conflict, or storage failures.
+    pub async fn create_target_set(
+        &self,
+        context: &RequestContext,
+        namespace_id: Uuid,
+        name: &str,
+        target_ids: Vec<Uuid>,
+    ) -> Result<TargetSetRecord, ApplicationError> {
+        let namespace_id = NamespaceId::new(namespace_id);
+        let name = ResourceName::parse(name).map_err(invalid_name)?;
+        if target_ids.is_empty() || target_ids.len() > MAX_TARGET_SET_MEMBERS {
+            return Err(ApplicationError::invalid(
+                "target_ids",
+                format!("target_ids must contain between 1 and {MAX_TARGET_SET_MEMBERS} values"),
+            ));
+        }
+        let unique: BTreeSet<Uuid> = target_ids.iter().copied().collect();
+        if unique.len() != target_ids.len() {
+            return Err(ApplicationError::invalid(
+                "target_ids",
+                "target_ids must not contain duplicates",
+            ));
+        }
         self.authorizer
             .authorize(
                 context,
-                Capability::TargetRead,
-                &ResourceScope::Target {
-                    namespace: namespace.to_string(),
-                    target: name.to_string(),
-                },
+                Capability::TargetSetCreate,
+                &ResourceScope::Namespace(namespace_id),
             )
             .await?;
-        Ok(self.store.get_target(&namespace, &name).await?)
+        let ids: Vec<TargetId> = target_ids.into_iter().map(TargetId::new).collect();
+        for id in &ids {
+            self.authorizer
+                .authorize(context, Capability::TargetRead, &ResourceScope::Target(*id))
+                .await?;
+            let target = match self.store.get_target(*id).await {
+                Ok(target) => target,
+                Err(StoreError::NotFound) => {
+                    return Err(ApplicationError::invalid(
+                        "target_ids",
+                        "one or more selected Targets no longer exist",
+                    ));
+                }
+                Err(error) => return Err(error.into()),
+            };
+            if target.target.namespace_id() != namespace_id {
+                return Err(ApplicationError::invalid(
+                    "target_ids",
+                    "all selected Targets must belong to the Target Set Namespace",
+                ));
+            }
+        }
+        Ok(self
+            .store
+            .create_target_set(namespace_id, &name, &ids)
+            .await?)
+    }
+
+    /// List visible Target Sets from one authorized Namespace.
+    ///
+    /// # Errors
+    ///
+    /// Returns invalid pagination, authorization, or storage failures.
+    pub async fn list_target_sets(
+        &self,
+        context: &RequestContext,
+        namespace_id: Uuid,
+        limit: Option<u16>,
+        after: Option<&str>,
+    ) -> Result<Page<TargetSetRecord>, ApplicationError> {
+        let namespace_id = NamespaceId::new(namespace_id);
+        self.authorizer
+            .authorize(
+                context,
+                Capability::TargetSetRead,
+                &ResourceScope::Namespace(namespace_id),
+            )
+            .await?;
+        let visibility = self
+            .authorizer
+            .visibility(context, Capability::TargetSetRead)
+            .await?;
+        Ok(self
+            .store
+            .list_target_sets(namespace_id, &visibility, page_limit(limit)?, after)
+            .await?)
+    }
+
+    /// Read one Target Set by immutable identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns authorization, not-found, or storage failures.
+    pub async fn get_target_set(
+        &self,
+        context: &RequestContext,
+        id: Uuid,
+    ) -> Result<TargetSetRecord, ApplicationError> {
+        let id = TargetSetId::new(id);
+        self.authorizer
+            .authorize(
+                context,
+                Capability::TargetSetRead,
+                &ResourceScope::TargetSet(id),
+            )
+            .await?;
+        Ok(self.store.get_target_set(id).await?)
     }
 
     /// Create a durable Schedule without consulting NATS.
@@ -288,16 +386,37 @@ impl Application {
     pub async fn create_schedule(
         &self,
         context: &RequestContext,
-        namespace: &str,
+        namespace_id: Uuid,
         input: CreateScheduleInput,
     ) -> Result<ScheduleRecord, ApplicationError> {
-        let namespace = NamespaceName::parse(namespace).map_err(invalid)?;
-        let name = ResourceName::parse(&input.name).map_err(invalid)?;
-        let (job_namespace, job_name) = qualified(&input.job)?;
-        let (target_namespace, target_name) = qualified(&input.target)?;
-        if namespace != job_namespace || namespace != target_namespace {
-            return Err(ApplicationError::InvalidInput(
-                "Schedule, Job, and Target must belong to the same Namespace".to_string(),
+        let namespace_id = NamespaceId::new(namespace_id);
+        let name = ResourceName::parse(&input.name).map_err(invalid_name)?;
+        self.authorizer
+            .authorize(
+                context,
+                Capability::ScheduleCreate,
+                &ResourceScope::Namespace(namespace_id),
+            )
+            .await?;
+        self.authorizer
+            .authorize(
+                context,
+                Capability::JobRead,
+                &ResourceScope::Job(input.job_id),
+            )
+            .await?;
+        self.authorizer
+            .authorize(
+                context,
+                Capability::TargetRead,
+                &ResourceScope::Target(input.target_id),
+            )
+            .await?;
+        let job = self.store.get_job(input.job_id).await?;
+        let target = self.store.get_target(input.target_id).await?;
+        if job.job.namespace_id() != namespace_id || target.target.namespace_id() != namespace_id {
+            return Err(ApplicationError::invalid_request(
+                "Schedule, Job, and Target must belong to the same Namespace",
             ));
         }
         validate_schedule_policy(
@@ -312,27 +431,21 @@ impl Application {
                 expression,
                 timezone,
             } => {
-                let next = next_cron_occurrence(&expression, &timezone, now)
-                    .map_err(|error| ApplicationError::InvalidInput(error.to_string()))?;
+                let next = next_cron_occurrence(&expression, &timezone, now).map_err(|error| {
+                    ApplicationError::invalid("cron_expression", error.to_string())
+                })?;
                 (Some(expression), None, timezone, next)
             }
             ScheduleTiming::Once { execute_at } => {
                 (None, Some(execute_at), "UTC".to_string(), execute_at)
             }
         };
-        self.authorizer
-            .authorize(
-                context,
-                Capability::ScheduleCreate,
-                &ResourceScope::Namespace(namespace.to_string()),
-            )
-            .await?;
         self.store
             .create_schedule(&NewSchedule {
-                namespace,
+                namespace_id,
                 name,
-                job_name,
-                target_name,
+                job_id: input.job_id,
+                target_id: input.target_id,
                 cron_expression,
                 execute_at,
                 timezone,
@@ -355,16 +468,16 @@ impl Application {
     pub async fn list_schedules(
         &self,
         context: &RequestContext,
-        namespace: &str,
+        namespace_id: Uuid,
         limit: Option<u16>,
         after: Option<&str>,
     ) -> Result<Page<ScheduleRecord>, ApplicationError> {
-        let namespace = NamespaceName::parse(namespace).map_err(invalid)?;
+        let namespace_id = NamespaceId::new(namespace_id);
         self.authorizer
             .authorize(
                 context,
                 Capability::ScheduleRead,
-                &ResourceScope::Namespace(namespace.to_string()),
+                &ResourceScope::Namespace(namespace_id),
             )
             .await?;
         let visibility = self
@@ -373,7 +486,7 @@ impl Application {
             .await?;
         Ok(self
             .store
-            .list_schedules(&namespace, &visibility, page_limit(limit)?, after)
+            .list_schedules(namespace_id, &visibility, page_limit(limit)?, after)
             .await?)
     }
 
@@ -385,22 +498,17 @@ impl Application {
     pub async fn get_schedule(
         &self,
         context: &RequestContext,
-        namespace: &str,
-        name: &str,
+        id: Uuid,
     ) -> Result<ScheduleRecord, ApplicationError> {
-        let namespace = NamespaceName::parse(namespace).map_err(invalid)?;
-        let name = ResourceName::parse(name).map_err(invalid)?;
+        let id = ScheduleId::new(id);
         self.authorizer
             .authorize(
                 context,
                 Capability::ScheduleRead,
-                &ResourceScope::Schedule {
-                    namespace: namespace.to_string(),
-                    schedule: name.to_string(),
-                },
+                &ResourceScope::Schedule(id),
             )
             .await?;
-        Ok(self.store.get_schedule(&namespace, &name).await?)
+        Ok(self.store.get_schedule(id).await?)
     }
 
     /// Enable or disable a Schedule using optimistic revision matching.
@@ -411,20 +519,17 @@ impl Application {
     pub async fn set_schedule_enabled(
         &self,
         context: &RequestContext,
-        namespace: &str,
-        name: &str,
+        id: Uuid,
         revision: u64,
         enabled: bool,
     ) -> Result<ScheduleRecord, ApplicationError> {
-        let record = self.get_schedule(context, namespace, name).await?;
+        let id = ScheduleId::new(id);
+        let record = self.get_schedule(context, id.get()).await?;
         self.authorizer
             .authorize(
                 context,
                 Capability::ScheduleUpdate,
-                &ResourceScope::Schedule {
-                    namespace: namespace.to_string(),
-                    schedule: name.to_string(),
-                },
+                &ResourceScope::Schedule(id),
             )
             .await?;
         let next = if enabled {
@@ -433,8 +538,9 @@ impl Application {
                     expression,
                     timezone,
                 } => Some(
-                    next_cron_occurrence(expression, timezone, OffsetDateTime::now_utc())
-                        .map_err(|error| ApplicationError::InvalidInput(error.to_string()))?,
+                    next_cron_occurrence(expression, timezone, OffsetDateTime::now_utc()).map_err(
+                        |error| ApplicationError::invalid("cron_expression", error.to_string()),
+                    )?,
                 ),
                 ScheduleTiming::Once { execute_at } => Some(*execute_at),
             }
@@ -456,53 +562,36 @@ impl Application {
         &self,
         context: &RequestContext,
         request_id: Uuid,
-        job: &str,
-        target: &str,
+        job_id: Uuid,
+        target_id: Uuid,
     ) -> Result<CreateRunOutcome, ApplicationError> {
-        let (job_namespace, job_name) = qualified(job)?;
-        let (target_namespace, target_name) = qualified(target)?;
-        if job_namespace != target_namespace {
-            return Err(ApplicationError::InvalidInput(
-                "Job and Target must belong to the same Namespace".to_string(),
+        let job_id = JobId::new(job_id);
+        let target_id = TargetId::new(target_id);
+        self.authorizer
+            .authorize(context, Capability::JobExecute, &ResourceScope::Job(job_id))
+            .await?;
+        self.authorizer
+            .authorize(
+                context,
+                Capability::TargetUse,
+                &ResourceScope::Target(target_id),
+            )
+            .await?;
+        let job = self.store.get_job(job_id).await?;
+        let target = self.store.get_target(target_id).await?;
+        if job.job.namespace_id() != target.target.namespace_id() {
+            return Err(ApplicationError::invalid_request(
+                "Job and Target must belong to the same Namespace",
             ));
         }
         self.authorizer
             .authorize(
                 context,
                 Capability::RunCreate,
-                &ResourceScope::Namespace(job_namespace.to_string()),
+                &ResourceScope::Namespace(job.job.namespace_id()),
             )
             .await?;
-        self.authorizer
-            .authorize(
-                context,
-                Capability::JobExecute,
-                &ResourceScope::Job {
-                    namespace: job_namespace.to_string(),
-                    job: job_name.to_string(),
-                },
-            )
-            .await?;
-        self.authorizer
-            .authorize(
-                context,
-                Capability::TargetUse,
-                &ResourceScope::Target {
-                    namespace: target_namespace.to_string(),
-                    target: target_name.to_string(),
-                },
-            )
-            .await?;
-        let (run, created) = self
-            .store
-            .create_run(
-                request_id,
-                &job_namespace,
-                &job_name,
-                &target_namespace,
-                &target_name,
-            )
-            .await?;
+        let (run, created) = self.store.create_run(request_id, job_id, target_id).await?;
         Ok(CreateRunOutcome { run, created })
     }
 
@@ -588,33 +677,17 @@ impl Application {
 fn page_limit(limit: Option<u16>) -> Result<u16, ApplicationError> {
     let limit = limit.unwrap_or(DEFAULT_LIMIT);
     if limit == 0 || limit > MAX_LIMIT {
-        Err(ApplicationError::InvalidInput(format!(
-            "limit must be between 1 and {MAX_LIMIT}"
-        )))
+        Err(ApplicationError::invalid(
+            "limit",
+            format!("limit must be between 1 and {MAX_LIMIT}"),
+        ))
     } else {
         Ok(limit)
     }
 }
 
-fn invalid(error: crate::domain::NameError) -> ApplicationError {
-    ApplicationError::InvalidInput(error.to_string())
-}
-
-fn qualified(value: &str) -> Result<(NamespaceName, ResourceName), ApplicationError> {
-    let Some((namespace, resource)) = value.split_once('/') else {
-        return Err(ApplicationError::InvalidInput(
-            "qualified resource names must use namespace/resource".to_string(),
-        ));
-    };
-    if resource.contains('/') {
-        return Err(ApplicationError::InvalidInput(
-            "qualified resource names must contain one slash".to_string(),
-        ));
-    }
-    Ok((
-        NamespaceName::parse(namespace).map_err(invalid)?,
-        ResourceName::parse(resource).map_err(invalid)?,
-    ))
+fn invalid_name(error: crate::domain::NameError) -> ApplicationError {
+    ApplicationError::invalid("name", error.to_string())
 }
 
 fn validate_arguments(arguments: &[String]) -> Result<(), ApplicationError> {
@@ -623,8 +696,9 @@ fn validate_arguments(arguments: &[String]) -> Result<(), ApplicationError> {
             .iter()
             .any(|argument| argument.len() > 4096 || argument.contains('\0'))
     {
-        return Err(ApplicationError::InvalidInput(
-            "arguments must contain at most 128 bounded, NUL-free values".to_string(),
+        return Err(ApplicationError::invalid(
+            "arguments",
+            "arguments must contain at most 128 bounded, NUL-free values",
         ));
     }
     Ok(())
@@ -633,8 +707,9 @@ fn validate_arguments(arguments: &[String]) -> Result<(), ApplicationError> {
 fn validate_job(input: &CreateJobInput) -> Result<(), ApplicationError> {
     validate_arguments(&input.arguments)?;
     if !(1..=100).contains(&input.max_attempts) {
-        return Err(ApplicationError::InvalidInput(
-            "max_attempts must be between 1 and 100".to_string(),
+        return Err(ApplicationError::invalid(
+            "max_attempts",
+            "max_attempts must be between 1 and 100",
         ));
     }
     if !(1..=86_400).contains(&input.retry_initial_seconds)
@@ -645,8 +720,8 @@ fn validate_job(input: &CreateJobInput) -> Result<(), ApplicationError> {
         || !input.retry_jitter.is_finite()
         || !(0.0..=1.0).contains(&input.retry_jitter)
     {
-        return Err(ApplicationError::InvalidInput(
-            "execution retry policy is outside supported bounds".to_string(),
+        return Err(ApplicationError::invalid_request(
+            "execution retry policy is outside supported bounds",
         ));
     }
     match (input.executor, input.executable.as_deref()) {
@@ -654,8 +729,9 @@ fn validate_job(input: &CreateJobInput) -> Result<(), ApplicationError> {
         (ExecutorKind::Process, Some(path)) if path.starts_with('/') && !path.contains('\0') => {
             Ok(())
         }
-        _ => Err(ApplicationError::InvalidInput(
-            "process jobs require an absolute executable; noop jobs require none".to_string(),
+        _ => Err(ApplicationError::invalid(
+            "executable",
+            "process jobs require an absolute executable; noop jobs require none",
         )),
     }
 }
@@ -667,15 +743,16 @@ fn validate_schedule_policy(
     max_catchup_age_seconds: u32,
 ) -> Result<(), ApplicationError> {
     if matches!(policy, MisfirePolicy::GracePeriod) != grace_seconds.is_some() {
-        return Err(ApplicationError::InvalidInput(
-            "grace_period requires grace seconds and other policies forbid it".to_string(),
+        return Err(ApplicationError::invalid(
+            "misfire_grace_seconds",
+            "grace_period requires grace seconds and other policies forbid it",
         ));
     }
     if !(1..=1000).contains(&max_catchup_runs)
         || !(60..=31_536_000).contains(&max_catchup_age_seconds)
     {
-        return Err(ApplicationError::InvalidInput(
-            "catch-up limits are outside supported bounds".to_string(),
+        return Err(ApplicationError::invalid_request(
+            "catch-up limits are outside supported bounds",
         ));
     }
     Ok(())

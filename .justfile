@@ -122,6 +122,29 @@ dev-stop:
     fi
   done
 
+# Delete and recreate Crono's local PostgreSQL and NATS state.
+[confirm("Delete all local Crono PostgreSQL and NATS data and recreate clean services?")]
+dev-reset:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  readonly containers=(crono-postgres crono-nats)
+  readonly volumes=(crono-postgres-data crono-nats-data)
+
+  for container in "${containers[@]}"; do
+    if podman container exists "$container"; then
+      podman rm --force "$container" >/dev/null
+    fi
+  done
+
+  for volume in "${volumes[@]}"; do
+    if podman volume exists "$volume"; then
+      podman volume rm "$volume" >/dev/null
+    fi
+  done
+
+  just dev-infra
+  echo "Crono development PostgreSQL and NATS state was reset"
+
 # Run the Crono CLI, forwarding its arguments and connection configuration.
 [positional-arguments]
 cli *args:

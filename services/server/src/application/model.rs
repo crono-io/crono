@@ -1,8 +1,8 @@
 //! Application query records composed from pure domain entities.
 
 use crate::domain::{
-    CatchupPolicy, ExecutorKind, Job, MisfirePolicy, NamespaceName, Run, Schedule, ScheduleTiming,
-    Target,
+    CatchupPolicy, ExecutorKind, Job, JobId, MisfirePolicy, NamespaceName, Run, Schedule,
+    ScheduleTiming, Target, TargetId, TargetSet,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,8 +23,8 @@ pub struct CreateJobInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateScheduleInput {
     pub name: String,
-    pub job: String,
-    pub target: String,
+    pub job_id: JobId,
+    pub target_id: TargetId,
     pub timing: ScheduleTiming,
     pub misfire_policy: MisfirePolicy,
     pub misfire_grace_seconds: Option<u32>,
@@ -49,6 +49,13 @@ pub struct JobRecord {
 pub struct TargetRecord {
     pub namespace: NamespaceName,
     pub target: Target,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetSetRecord {
+    pub namespace: NamespaceName,
+    pub target_set: TargetSet,
+    pub targets: Vec<Target>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,6 +92,7 @@ pub struct Overview {
     pub namespaces: u64,
     pub jobs: u64,
     pub targets: u64,
+    pub target_sets: u64,
     pub schedules: u64,
     pub runs: u64,
 }
