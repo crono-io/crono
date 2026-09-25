@@ -27,11 +27,31 @@ The Resources sidebar's Jobs submenu links to All Jobs (`/jobs`) and Create Job
 (`/jobs/new`), never to individual Job records. Browsing requires a selected
 Namespace and offers a Create Job action and an actionable empty state. Each
 Job's Edit link opens `/jobs/{id}/edit`; the page reloads that Job by ID and
-retains the existing update API. The shared create/edit form includes an
-argument-template example and a preview of the command and merged inputs for a
+retains the existing update API. The shared create/edit form distinguishes
+direct Process execution from a literal Shell script with an absolute
+interpreter. Shell input templates are passed as positional arguments (`$1`,
+`$2`, …), never inserted into shell syntax. Both modes include examples and a
+preview of the command and merged inputs for a
 selected Target or Target Set. The preview does not create a Run or include
 later invocation inputs. Recent Runs load authorized Attempt stdout, stderr,
-and errors when an operator opens their output.
+and errors when an operator opens their output. The Runs history keeps Job/Target,
+Started, Finished, and Status aligned for comparison on wide screens and labels
+those fields on narrow screens. Start and finish retain seconds and exact-time
+tooltips; the finish cell labels duration as elapsed time. History actions use
+decorative Material Symbols alongside visible Details, Output, and Re-run text,
+and the Re-run confirmation expands beneath the action row on narrow screens.
+Run details offer Refresh status only while the Run can still change. Opened
+Attempt output likewise offers Refresh output only for nonterminal Runs; terminal
+outcomes load output on demand without a redundant refresh control. Eligible
+terminal Runs still offer Re-run.
+
+During an active Attempt, the worker uploads bounded, redacted output tails
+about once per second. Refresh output fetches that saved progress; a script
+must print a line before a sleep if progress is expected during the sleep.
+Worker names link from `/workers` to `/workers/{worker_id}`, where the same
+WorkerRead authorization guards heartbeat-backed host/platform, default shell,
+and allowlisted child-environment diagnostics. Arbitrary worker environment
+values and credentials are never shown.
 
 ## Development
 

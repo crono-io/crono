@@ -17,6 +17,7 @@ use uuid::Uuid;
 pub(super) struct PreviewFields {
     pub executor: RwSignal<ExecutorKind>,
     pub executable: RwSignal<String>,
+    pub shell_command: RwSignal<String>,
     pub arguments: RwSignal<Vec<String>>,
     pub inputs: RwSignal<String>,
 }
@@ -103,9 +104,14 @@ pub(super) fn preview_text(
             });
             match merged {
                 Ok((merged_inputs, argv)) => format!(
-                    "{}\n$ {} {}\ninputs: {}",
+                    "{}\n$ {}{} {}\ninputs: {}",
                     target.name,
                     executable,
+                    if fields.executor.get() == ExecutorKind::Shell {
+                        format!(" -c {:?} crono-job", fields.shell_command.get())
+                    } else {
+                        String::new()
+                    },
                     argv.iter()
                         .map(|item| format!("{item:?}"))
                         .collect::<Vec<_>>()

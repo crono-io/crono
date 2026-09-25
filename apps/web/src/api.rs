@@ -10,12 +10,14 @@ use crono_api::{
     CreateJobRequest, CreateNamespaceRequest, CreateQueueRequest, CreateRunRequest,
     CreateScheduleRequest, CreateTargetRequest, CreateTargetSetRequest, ErrorEnvelope,
     ExecutionTarget, JobResource, MonitorResource, NamespaceResource, OverviewResource, Page,
-    QueueResource, RunAttemptResource, RunBatchResource, RunResource, ScheduleResource,
-    TargetResource, TargetSetResource, UpdateJobRequest, UpdateQueueRequest, UpdateScheduleRequest,
-    UpdateTargetRequest, UpdateTargetSetRequest, WorkerResource,
+    QueueResource, RerunRequest, RunAttemptResource, RunBatchResource, RunEventResource,
+    RunResource, RunStatus, ScheduleResource, TargetResource, TargetSetResource, UpdateJobRequest,
+    UpdateQueueRequest, UpdateScheduleRequest, UpdateTargetRequest, UpdateTargetSetRequest,
+    WorkerResource,
 };
 use gloo_net::http::{Request, Response};
 use serde::{Serialize, de::DeserializeOwned};
+use std::fmt::Write;
 use uuid::Uuid;
 
 const API_ROOT: &str = "/api";
@@ -191,6 +193,71 @@ pub async fn list_runs() -> ApiResult<Page<RunResource>> {
     get(&format!("{API_ROOT}/runs?limit=100")).await
 }
 
+/// Query one authorized page; filters are applied by the server before pagination.
+pub async fn filtered_runs(
+    namespace_id: Option<Uuid>,
+    status: Option<RunStatus>,
+    job_id: Option<Uuid>,
+    target_id: Option<Uuid>,
+    target_set_id: Option<Uuid>,
+    before: Option<Uuid>,
+) -> ApiResult<Page<RunResource>> {
+    let mut url = format!("{API_ROOT}/runs?limit=50");
+    if let Some(id) = namespace_id {
+        let _ = write!(url, "&namespace_id={id}");
+    }
+    if let Some(status) = status {
+        let _ = write!(url, "&status={}", run_status_parameter(status));
+    }
+    if let Some(id) = job_id {
+        let _ = write!(url, "&job_id={id}");
+    }
+    if let Some(id) = target_id {
+        let _ = write!(url, "&target_id={id}");
+    }
+    if let Some(id) = target_set_id {
+        let _ = write!(url, "&target_set_id={id}");
+    }
+    if let Some(id) = before {
+        let _ = write!(url, "&before={id}");
+    }
+    get(&url).await
+}
+
+/// Read one authorized Run without embedding attempt output in the list.
+pub async fn get_run(run_id: Uuid) -> ApiResult<RunResource> {
+    get(&format!("{API_ROOT}/runs/{run_id}")).await
+}
+
+/// Repeat the server's immutable invocation snapshot; no secret-bearing snapshot reaches the browser.
+pub async fn rerun_run(run_id: Uuid, request_id: Uuid) -> ApiResult<RunResource> {
+    post(
+        &format!("{API_ROOT}/runs/{run_id}/rerun"),
+        &RerunRequest { request_id },
+    )
+    .await
+}
+
+/// Read server-observed lifecycle timestamps after `RunRead` authorization.
+pub async fn list_run_events(run_id: Uuid) -> ApiResult<Vec<RunEventResource>> {
+    get(&format!("{API_ROOT}/runs/{run_id}/events")).await
+}
+
+const fn run_status_parameter(status: RunStatus) -> &'static str {
+    match status {
+        RunStatus::PendingDispatch => "pending_dispatch",
+        RunStatus::Queued => "queued",
+        RunStatus::Running => "running",
+        RunStatus::RetryWait => "retry_wait",
+        RunStatus::Succeeded => "succeeded",
+        RunStatus::Failed => "failed",
+        RunStatus::Dead => "dead",
+        RunStatus::Skipped => "skipped",
+        RunStatus::Cancelled => "cancelled",
+        RunStatus::Unknown => "unknown",
+    }
+}
+
 /// Fetch the bounded output of every Attempt on one authorized Run.
 pub async fn list_run_attempts(run_id: Uuid) -> ApiResult<Vec<RunAttemptResource>> {
     get(&format!("{API_ROOT}/runs/{run_id}/attempts")).await
@@ -223,6 +290,11 @@ fn targets_path(namespace_id: Uuid) -> String {
 
 pub async fn list_workers() -> ApiResult<Page<WorkerResource>> {
     get(&format!("{API_ROOT}/workers?limit=100")).await
+}
+
+/// Fetch authorized, allowlisted diagnostics for a single worker.
+pub async fn get_worker(worker_id: &str) -> ApiResult<crono_api::WorkerDetailsResource> {
+    get(&format!("{API_ROOT}/workers/{worker_id}")).await
 }
 
 async fn get<T: DeserializeOwned>(url: &str) -> ApiResult<T> {

@@ -110,8 +110,8 @@ web address="0.0.0.0" port="3000":
 
 [doc("Start a worker and print its execution timeline (pretty or json).")]
 [positional-arguments]
-worker queue="default" worker-id="worker-01" concurrency="3" verbosity="-v" log-format="pretty":
-  cargo run --locked -p crono-worker -- "$4" --log-format "$5" run --queue "$1" --worker-id "$2" --concurrency "$3"
+worker queue="default" worker-id="" concurrency="3" verbosity="-v" log-format="pretty":
+  if [ -n "$2" ]; then cargo run --locked -p crono-worker -- "$4" --log-format "$5" run --queue "$1" --worker-id "$2" --concurrency "$3"; else cargo run --locked -p crono-worker -- "$4" --log-format "$5" run --queue "$1" --concurrency "$3"; fi
 
 [doc("Start the complete development stack on non-conflicting ports.")]
 [positional-arguments]

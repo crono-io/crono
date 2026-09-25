@@ -63,8 +63,11 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         ))
         .routes(routes!(control_plane::create_run, control_plane::list_runs))
         .routes(routes!(control_plane::get_run))
+        .routes(routes!(control_plane::rerun_run))
+        .routes(routes!(control_plane::list_run_events))
         .routes(routes!(control_plane::list_run_attempts))
         .routes(routes!(control_plane::list_workers))
+        .routes(routes!(control_plane::get_worker))
         .routes(routes!(control_plane::overview))
         .routes(routes!(monitor::monitor));
 

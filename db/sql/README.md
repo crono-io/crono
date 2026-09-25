@@ -73,11 +73,23 @@ after a JetStream persistence acknowledgement; failed sends remain pending
 with bounded operational error text and do not consume execution retries.
 Jobs can opt into dry-run mode; that boolean is copied into each new Run
 snapshot, while existing Jobs and older snapshots default to normal execution.
+Shell Jobs store a literal `shell_command` alongside their absolute interpreter
+path; the script and rendered positional arguments are copied into each Run
+snapshot. Process Jobs still execute a single absolute executable directly.
 A worker-confirmed dry run stores a skipped Attempt and Run with bounded
 command output and never creates an execution retry.
+Each explicit Re-run points back to its source with `runs.rerun_of_run_id` and
+uses a fresh `run_requests` UUID. It copies one source Run's stored execution
+snapshot into a new Run and inserts a new Attempt and outbox row atomically;
+the source remains immutable. A Target Set batch member repeats only its own
+Target. The self-reference prevents deleting a source while its repeats exist.
 Worker presence is refreshed through the server's NATS control handler rather
 than by granting workers database access. The reconciler bounds retained
 offline presence records to seven days.
+Optional validated diagnostics are stored with presence for the authorized
+worker-detail view. Running Attempts may receive lease-checked, sequence-ordered
+16 KiB live stdout/stderr tail snapshots; completion replaces them with the
+final bounded tails. Full typed execution events are not yet persisted.
 
 This repository is still in its draft schema phase. There is no compatibility
 or numbered schema series: reset older development databases before applying

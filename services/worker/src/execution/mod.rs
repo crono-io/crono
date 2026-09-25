@@ -6,6 +6,7 @@
 //! sinks must never receive the raw input object or executable arguments.
 
 mod event;
+mod live;
 mod output;
 mod redaction;
 pub(crate) mod runner;
@@ -13,5 +14,6 @@ pub(crate) mod runner;
 pub use event::{
     EventSink, ExecutionEvent, ExecutionEventEnvelope, ExecutionPhase, ExecutionTimeline, LogFormat,
 };
+pub use live::{FanoutSink, LiveOutput};
 pub use output::ConsoleSink;
 pub use redaction::Redactor;

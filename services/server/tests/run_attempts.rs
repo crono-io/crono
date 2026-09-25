@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use crono_api::OutputSnapshotRequest;
 use crono_server::{
     application::{
         Application, ApplicationError, AuthorizationError, Authorizer, Capability,
@@ -56,7 +57,7 @@ async fn create_run_with_attempts(
     pool: &PgPool,
 ) -> Result<(RunId, NamespaceId)> {
     let suffix = Uuid::now_v7().simple().to_string();
-    let name = NamespaceName::parse(&format!("attempt-{}", suffix.get(..12).unwrap_or("test")))?;
+    let name = NamespaceName::parse(&format!("attempt-{}", suffix.get(20..).unwrap_or("test")))?;
     let namespace = store.create_namespace(&name).await?;
     let queue = store
         .get_queue_by_name(&QueueName::parse("default")?)
@@ -69,6 +70,7 @@ async fn create_run_with_attempts(
                 executor: ExecutorKind::Noop,
                 queue_id: queue.id(),
                 executable: None,
+                shell_command: None,
                 arguments: Vec::new(),
                 inputs: serde_json::json!({}),
                 idempotent: false,
@@ -227,5 +229,66 @@ async fn attempt_output_is_ordered_and_scoped_to_authorized_runs() -> Result<()>
         ))
     ));
     remove_run_fixture(&pool, run_id, namespace_id, foreign.id()).await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires an initialized CRONO_TEST_DATABASE_URL"]
+async fn live_output_requires_lease_and_monotonic_sequence() -> Result<()> {
+    let database_url = env::var("CRONO_TEST_DATABASE_URL")?;
+    let store = PostgresStore::connect(&database_url).await?;
+    let pool = PgPool::connect(&database_url).await?;
+    let (run_id, namespace_id) = create_run_with_attempts(&store, &pool).await?;
+    let attempt_id: Uuid = sqlx::query_scalar(
+        "UPDATE crono.run_attempts
+            SET status = 'running', worker_id = 'live-test-worker',
+                lease_expires_at = statement_timestamp() + interval '1 minute'
+          WHERE run_id = $1 AND attempt = 1 RETURNING id",
+    )
+    .bind(run_id.get())
+    .fetch_one(&pool)
+    .await?;
+    let request = OutputSnapshotRequest {
+        attempt_id,
+        worker_id: "live-test-worker".to_string(),
+        sequence: 1,
+        stdout_tail: "started\n".to_string(),
+        stderr_tail: "warning\n".to_string(),
+    };
+    assert!(store.record_attempt_output(&request).await?);
+    let visible = VisibilityScope::Namespaces(BTreeSet::from([namespace_id]));
+    let attempts = store.list_run_attempts(run_id, &visible).await?;
+    assert!(
+        attempts
+            .iter()
+            .any(|item| item.stdout_tail.as_deref() == Some("started\n"))
+    );
+    let stale = OutputSnapshotRequest {
+        stdout_tail: "older\n".to_string(),
+        ..request.clone()
+    };
+    assert!(!store.record_attempt_output(&stale).await?);
+    let wrong_worker = OutputSnapshotRequest {
+        worker_id: "other-worker".to_string(),
+        sequence: 2,
+        ..request.clone()
+    };
+    assert!(!store.record_attempt_output(&wrong_worker).await?);
+    let current: Option<String> =
+        sqlx::query_scalar("SELECT stdout_tail FROM crono.run_attempts WHERE id = $1")
+            .bind(attempt_id)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(current.as_deref(), Some("started\n"));
+    sqlx::query("UPDATE crono.run_attempts SET status = 'succeeded' WHERE id = $1")
+        .bind(attempt_id)
+        .execute(&pool)
+        .await?;
+    let late = OutputSnapshotRequest {
+        sequence: 2,
+        ..request
+    };
+    assert!(!store.record_attempt_output(&late).await?);
+    remove_run_fixture(&pool, run_id, namespace_id, namespace_id).await?;
     Ok(())
 }

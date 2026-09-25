@@ -5,17 +5,18 @@
 //! process-local coordination.
 
 use super::{
-    JobRecord, Overview, Page, RunAttemptRecord, RunRecord, ScheduleRecord, TargetRecord,
-    TargetSetRecord, VisibilityScope, WorkerRecord,
+    JobRecord, Overview, Page, RunAttemptRecord, RunEventRecord, RunRecord, ScheduleRecord,
+    TargetRecord, TargetSetRecord, VisibilityScope, WorkerRecord,
 };
 use crate::domain::{
     AttemptId, CatchupPolicy, DispatchId, ExecutorKind, JobId, MisfirePolicy, Namespace,
-    NamespaceId, NamespaceName, Queue, QueueId, QueueName, ResourceName, RunId, Schedule,
-    ScheduleId, TargetId, TargetSelection, TargetSetId,
+    NamespaceId, NamespaceName, Queue, QueueId, QueueName, ResourceName, RunId, RunStatus,
+    Schedule, ScheduleId, TargetId, TargetSelection, TargetSetId,
 };
 use async_trait::async_trait;
 use crono_api::{
-    ClaimRequest, ClaimResponse, CompletionRequest, LeaseRequest, WorkerHeartbeatRequest,
+    ClaimRequest, ClaimResponse, CompletionRequest, LeaseRequest, OutputSnapshotRequest,
+    WorkerHeartbeatRequest,
 };
 use std::{error::Error, fmt, time::Duration};
 use time::OffsetDateTime;
@@ -26,6 +27,7 @@ pub struct JobDefinition {
     pub executor: ExecutorKind,
     pub queue_id: QueueId,
     pub executable: Option<String>,
+    pub shell_command: Option<String>,
     pub arguments: Vec<String>,
     pub inputs: serde_json::Value,
     pub idempotent: bool,
@@ -35,6 +37,16 @@ pub struct JobDefinition {
     pub retry_max_seconds: u32,
     pub retry_multiplier: f64,
     pub retry_jitter: f64,
+}
+
+/// Server-side history filters applied after Run visibility and before pagination.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RunListFilter {
+    pub namespace_id: Option<NamespaceId>,
+    pub status: Option<RunStatus>,
+    pub job_id: Option<JobId>,
+    pub target_id: Option<TargetId>,
+    pub target_set_id: Option<TargetSetId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,6 +133,7 @@ pub enum StoreError {
     InUse,
     IdempotencyConflict,
     StaleRevision,
+    QueueDisabled,
     Unavailable,
     Internal,
 }
@@ -133,6 +146,7 @@ impl fmt::Display for StoreError {
             Self::InUse => "resource is still in use",
             Self::IdempotencyConflict => "idempotency key conflicts with an existing request",
             Self::StaleRevision => "resource revision is stale",
+            Self::QueueDisabled => "the original Run's Queue is disabled",
             Self::Unavailable => "persistence is unavailable",
             Self::Internal => "persistence failed",
         })
@@ -277,9 +291,16 @@ pub trait ControlPlaneStore: Send + Sync {
     async fn list_runs(
         &self,
         visibility: &VisibilityScope,
+        filter: RunListFilter,
         limit: u16,
         before: Option<Uuid>,
     ) -> Result<Page<RunRecord>, StoreError>;
+    /// Copy one immutable Run snapshot into a new single-Target invocation.
+    async fn rerun_run(
+        &self,
+        source_id: RunId,
+        request_id: Uuid,
+    ) -> Result<(RunRecord, bool), StoreError>;
     async fn get_run(
         &self,
         id: RunId,
@@ -290,15 +311,25 @@ pub trait ControlPlaneStore: Send + Sync {
         id: RunId,
         visibility: &VisibilityScope,
     ) -> Result<Vec<RunAttemptRecord>, StoreError>;
+    async fn list_run_events(
+        &self,
+        id: RunId,
+        visibility: &VisibilityScope,
+    ) -> Result<Vec<RunEventRecord>, StoreError>;
     async fn record_worker_heartbeat(
         &self,
         request: &WorkerHeartbeatRequest,
     ) -> Result<(), StoreError>;
+    async fn record_attempt_output(
+        &self,
+        request: &OutputSnapshotRequest,
+    ) -> Result<bool, StoreError>;
     async fn list_workers(
         &self,
         limit: u16,
         after: Option<&str>,
     ) -> Result<Page<WorkerRecord>, StoreError>;
+    async fn get_worker(&self, worker_id: &str) -> Result<WorkerRecord, StoreError>;
     async fn overview(&self, visibility: &VisibilityScope) -> Result<Overview, StoreError>;
 
     async fn claim_due_schedules(

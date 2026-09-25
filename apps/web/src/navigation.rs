@@ -16,6 +16,7 @@ pub enum AppRoute {
     TargetSets,
     Schedules,
     Runs,
+    RunsNew,
     Workers,
     Monitor,
     Settings,
@@ -35,6 +36,7 @@ impl AppRoute {
             Self::TargetSets => "/target-sets",
             Self::Schedules => "/schedules",
             Self::Runs => "/runs",
+            Self::RunsNew => "/runs/new",
             Self::Workers => "/workers",
             Self::Monitor => "/monitor",
             Self::Settings => "/settings",
@@ -54,6 +56,7 @@ impl AppRoute {
             Self::TargetSets => "Target Sets",
             Self::Schedules => "Schedules",
             Self::Runs => "Runs",
+            Self::RunsNew => "Run a Job",
             Self::Workers => "Workers",
             Self::Monitor => "Monitor",
             Self::Settings => "Settings",
@@ -71,7 +74,7 @@ impl AppRoute {
             Self::Targets => MaterialSymbol::Dns,
             Self::TargetSets => MaterialSymbol::Lan,
             Self::Schedules => MaterialSymbol::CalendarMonth,
-            Self::Runs => MaterialSymbol::PlayCircle,
+            Self::Runs | Self::RunsNew => MaterialSymbol::PlayCircle,
             Self::Workers => MaterialSymbol::Memory,
             Self::Monitor => MaterialSymbol::Monitoring,
             Self::Settings => MaterialSymbol::Settings,
@@ -92,6 +95,7 @@ impl AppRoute {
     pub const fn children(self) -> &'static [NavigationChild] {
         match self {
             Self::Jobs => JOB_CHILDREN,
+            Self::Runs => RUN_CHILDREN,
             _ => &[],
         }
     }
@@ -101,6 +105,7 @@ impl AppRoute {
     pub const fn submenu_id(self) -> &'static str {
         match self {
             Self::Jobs => "jobs-submenu",
+            Self::Runs => "runs-submenu",
             _ => "",
         }
     }
@@ -124,6 +129,17 @@ const JOB_CHILDREN: &[NavigationChild] = &[
     },
 ];
 
+const RUN_CHILDREN: &[NavigationChild] = &[
+    NavigationChild {
+        route: AppRoute::Runs,
+        label: "All Runs",
+    },
+    NavigationChild {
+        route: AppRoute::RunsNew,
+        label: "Run a Job",
+    },
+];
+
 /// Known symbols used by the Crono shell and empty states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaterialSymbol {
@@ -133,14 +149,18 @@ pub enum MaterialSymbol {
     Dashboard,
     Dns,
     ExpandMore,
+    Info,
     Lan,
     LightMode,
     Memory,
     Monitoring,
     PlayCircle,
     Queue,
+    Replay,
     SearchOff,
     Settings,
+    Terminal,
+    Timer,
     Work,
 }
 
@@ -155,14 +175,18 @@ impl MaterialSymbol {
             Self::Dashboard => "dashboard",
             Self::Dns => "dns",
             Self::ExpandMore => "expand_more",
+            Self::Info => "info",
             Self::Lan => "lan",
             Self::LightMode => "light_mode",
             Self::Memory => "memory",
             Self::Monitoring => "monitoring",
             Self::PlayCircle => "play_circle",
             Self::Queue => "queue",
+            Self::Replay => "replay",
             Self::SearchOff => "search_off",
             Self::Settings => "settings",
+            Self::Terminal => "terminal",
+            Self::Timer => "timer",
             Self::Work => "work",
         }
     }
@@ -187,7 +211,7 @@ const EXECUTION_ROUTES: &[AppRoute] = &[AppRoute::Schedules, AppRoute::Runs, App
 const SYSTEM_ROUTES: &[AppRoute] = &[AppRoute::Monitor, AppRoute::Settings];
 
 /// Complete route inventory used for exact matching and verification.
-pub const ALL_ROUTES: [AppRoute; 12] = [
+pub const ALL_ROUTES: [AppRoute; 13] = [
     AppRoute::Overview,
     AppRoute::Namespaces,
     AppRoute::Queues,
@@ -197,6 +221,7 @@ pub const ALL_ROUTES: [AppRoute; 12] = [
     AppRoute::TargetSets,
     AppRoute::Schedules,
     AppRoute::Runs,
+    AppRoute::RunsNew,
     AppRoute::Workers,
     AppRoute::Monitor,
     AppRoute::Settings,
@@ -244,11 +269,23 @@ pub fn job_edit_path(id: impl std::fmt::Display) -> String {
     format!("/jobs/{id}/edit")
 }
 
+/// Canonical details URL for one Run.
+#[must_use]
+pub fn run_details_path(id: impl std::fmt::Display) -> String {
+    format!("/runs/{id}")
+}
+
+/// Canonical deep link to one worker's safe diagnostics.
+#[must_use]
+pub fn worker_details_path(id: impl std::fmt::Display) -> String {
+    format!("/workers/{id}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         ALL_ROUTES, AppRoute, MaterialSymbol, NAVIGATION_GROUPS, is_active_path,
-        is_section_active_path, job_edit_path,
+        is_section_active_path, job_edit_path, run_details_path, worker_details_path,
     };
 
     #[test]
@@ -262,6 +299,7 @@ mod tests {
             "/targets",
             "/target-sets",
             "/runs",
+            "/runs/new",
             "/workers",
             "/monitor",
             "/settings",
@@ -298,13 +336,16 @@ mod tests {
                 .count();
             assert_eq!(
                 top_level,
-                usize::from(route != AppRoute::JobsNew),
+                usize::from(!matches!(route, AppRoute::JobsNew | AppRoute::RunsNew)),
                 "{}",
                 route.path()
             );
             assert_eq!(
                 child,
-                usize::from(matches!(route, AppRoute::Jobs | AppRoute::JobsNew)),
+                usize::from(matches!(
+                    route,
+                    AppRoute::Jobs | AppRoute::JobsNew | AppRoute::Runs | AppRoute::RunsNew
+                )),
                 "{}",
                 route.path()
             );
@@ -324,6 +365,9 @@ mod tests {
         assert!(is_section_active_path("/jobs/new", AppRoute::Jobs));
         assert!(is_section_active_path("/jobs/123/edit", AppRoute::Jobs));
         assert!(!is_section_active_path("/jobs-other", AppRoute::Jobs));
+        assert!(is_section_active_path("/runs/new", AppRoute::Runs));
+        assert!(is_section_active_path("/runs/123", AppRoute::Runs));
+        assert_eq!(worker_details_path("worker-01"), "/workers/worker-01");
     }
 
     #[test]
@@ -343,6 +387,21 @@ mod tests {
     }
 
     #[test]
+    fn runs_submenu_contains_history_and_explicit_run_action() {
+        assert_eq!(AppRoute::Runs.children().len(), 2);
+        assert_eq!(
+            AppRoute::Runs.children().first().map(|child| child.label),
+            Some("All Runs")
+        );
+        assert_eq!(
+            AppRoute::Runs.children().get(1).map(|child| child.label),
+            Some("Run a Job")
+        );
+        assert_eq!(AppRoute::Runs.submenu_id(), "runs-submenu");
+        assert_eq!(run_details_path("123"), "/runs/123");
+    }
+
+    #[test]
     fn shell_symbols_are_explicit() {
         let shell_symbols = [
             MaterialSymbol::Check,
@@ -356,5 +415,13 @@ mod tests {
                 .into_iter()
                 .all(|symbol| !symbol.as_str().is_empty())
         );
+    }
+
+    #[test]
+    fn run_action_symbols_have_intentional_ligatures() {
+        assert_eq!(MaterialSymbol::Info.as_str(), "info");
+        assert_eq!(MaterialSymbol::Terminal.as_str(), "terminal");
+        assert_eq!(MaterialSymbol::Replay.as_str(), "replay");
+        assert_eq!(MaterialSymbol::Timer.as_str(), "timer");
     }
 }

@@ -20,7 +20,8 @@
 //! switches; unknown literal credentials remain outside this fallback's scope.
 
 use crate::execution::{
-    ConsoleSink, EventSink, ExecutionEvent, ExecutionPhase, ExecutionTimeline, LogFormat, Redactor,
+    ConsoleSink, EventSink, ExecutionEvent, ExecutionPhase, ExecutionTimeline, FanoutSink,
+    LiveOutput, LogFormat, Redactor,
     runner::{ExecutionResult, elapsed_ms, execute_snapshot},
 };
 use anyhow::{Context, Result, bail};
@@ -31,8 +32,8 @@ use async_nats::jetstream::{
 };
 use crono_api::{
     ClaimRequest, ClaimResponse, CompletionRequest, DispatchEnvelope, ExecutionSnapshot,
-    LeaseRequest, QueueReference, QueueResolutionRequest, QueueResolutionResponse,
-    QueueResolutionStatus, WorkerHeartbeatRequest,
+    LeaseRequest, OutputSnapshotRequest, QueueReference, QueueResolutionRequest,
+    QueueResolutionResponse, QueueResolutionStatus, WorkerDiagnostics, WorkerHeartbeatRequest,
 };
 use futures_util::StreamExt;
 use std::{
@@ -180,6 +181,7 @@ async fn run_presence_heartbeat(
         queue_id,
         concurrency: args.concurrency,
         version: env!("CARGO_PKG_VERSION").to_string(),
+        diagnostics: Some(worker_diagnostics(args.dry_run)),
     };
     let mut interval = time::interval(HEARTBEAT_INTERVAL);
     interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
@@ -201,6 +203,26 @@ async fn run_presence_heartbeat(
             Ok(false) => warn!(worker_id = args.worker_id, "worker heartbeat was rejected"),
             Err(error) => warn!(%error, worker_id = args.worker_id, "worker heartbeat failed"),
         }
+    }
+}
+
+/// Report only the child environment values the executor intentionally copies.
+fn worker_diagnostics(dry_run: bool) -> WorkerDiagnostics {
+    fn safe_variable(name: &str) -> Option<String> {
+        std::env::var(name)
+            .ok()
+            .filter(|value| value.len() <= 128 && !value.chars().any(char::is_control))
+    }
+    WorkerDiagnostics {
+        hostname: whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string()),
+        os: std::env::consts::OS.to_string(),
+        architecture: std::env::consts::ARCH.to_string(),
+        default_shell_path: "/bin/sh".to_string(),
+        default_shell_present: std::path::Path::new("/bin/sh").is_file(),
+        dry_run,
+        lang: safe_variable("LANG"),
+        lc_all: safe_variable("LC_ALL"),
+        tz: safe_variable("TZ"),
     }
 }
 
@@ -322,13 +344,26 @@ async fn execute_claimed(
     execution: ExecutionSnapshot,
     event_sink: Arc<dyn EventSink>,
 ) {
+    let live = Arc::new(LiveOutput::default());
+    let combined: Arc<dyn EventSink> = Arc::new(FanoutSink {
+        console: event_sink,
+        live: Arc::clone(&live),
+    });
     let timeline = Arc::new(ExecutionTimeline::new(
         envelope.run_id,
         envelope.attempt_id,
         execution.job_id,
         args.worker_id.clone(),
         execution.queue.clone(),
-        event_sink,
+        combined,
+    ));
+    let upload_cancel = CancellationToken::new();
+    let uploader = tokio::spawn(upload_live_output(
+        client.clone(),
+        Arc::clone(&live),
+        envelope.attempt_id,
+        args.worker_id.clone(),
+        upload_cancel.clone(),
     ));
     let started = Instant::now();
     timeline.emit(ExecutionEvent::RunReceived {
@@ -353,6 +388,10 @@ async fn execute_claimed(
         message,
     )
     .await;
+    upload_cancel.cancel();
+    if let Err(error) = uploader.await {
+        warn!(%error, "live output task failed");
+    }
     let result = match result {
         Ok(result) => result,
         Err(error) => ExecutionResult {
@@ -401,6 +440,59 @@ async fn execute_claimed(
             let _ = message
                 .ack_with(AckKind::Nak(Some(Duration::from_secs(5))))
                 .await;
+        }
+    }
+}
+
+/// Send only changed, bounded tails; network stalls cannot block pipe readers.
+async fn upload_live_output(
+    client: async_nats::Client,
+    live: Arc<LiveOutput>,
+    attempt_id: uuid::Uuid,
+    worker_id: String,
+    cancellation: CancellationToken,
+) {
+    let mut interval = time::interval(Duration::from_secs(1));
+    interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+    let mut acknowledged_revision = 0;
+    let mut sequence = 0_u64;
+    loop {
+        tokio::select! {
+            () = cancellation.cancelled() => return,
+            _ = interval.tick() => {}
+        }
+        let (revision, stdout_tail, stderr_tail) = live.snapshot();
+        if revision == acknowledged_revision {
+            continue;
+        }
+        sequence = sequence.saturating_add(1);
+        let request = OutputSnapshotRequest {
+            attempt_id,
+            worker_id: worker_id.clone(),
+            sequence,
+            stdout_tail,
+            stderr_tail,
+        };
+        let subject = format!("crono.worker.output.{worker_id}");
+        let sent = tokio::select! {
+            () = cancellation.cancelled() => return,
+            result = time::timeout(Duration::from_secs(2), client.request(subject, match serde_json::to_vec(&request) {
+                Ok(payload) => payload.into(),
+                Err(error) => {
+                    warn!(%error, "failed to encode live output");
+                    continue;
+                }
+            })) => result,
+        };
+        match sent {
+            Ok(Ok(response))
+                if matches!(serde_json::from_slice::<bool>(&response.payload), Ok(true)) =>
+            {
+                acknowledged_revision = revision;
+            }
+            Ok(Ok(_)) => warn!(attempt_id = %attempt_id, "live output update was rejected"),
+            Ok(Err(error)) => warn!(%error, attempt_id = %attempt_id, "live output request failed"),
+            Err(_) => warn!(attempt_id = %attempt_id, "live output request timed out"),
         }
     }
 }

@@ -6,7 +6,8 @@
 
 use crate::pages::{
     CreateJobPage, EditJobPage, JobsPage, MonitorPage, NamespacesPage, NotFoundPage, OverviewPage,
-    QueuesPage, RunsPage, SchedulesPage, SettingsPage, TargetSetsPage, TargetsPage, WorkersPage,
+    QueuesPage, RunDetailsPage, RunJobPage, RunsPage, SchedulesPage, SettingsPage, TargetSetsPage,
+    TargetsPage, WorkerDetailsPage, WorkersPage,
 };
 use leptos::prelude::*;
 use leptos_router::{
@@ -29,7 +30,10 @@ pub fn RouterContent() -> impl IntoView {
             <Route path=path!("/target-sets") view=TargetSetsPage />
             <Route path=path!("/schedules") view=SchedulesPage />
             <Route path=path!("/runs") view=RunsPage />
+            <Route path=path!("/runs/new") view=RunJobPage />
+            <Route path=path!("/runs/:run_id") view=RunDetailsPage />
             <Route path=path!("/workers") view=WorkersPage />
+            <Route path=path!("/workers/:worker_id") view=WorkerDetailsPage />
             <Route path=path!("/monitor") view=MonitorPage />
             <Route path=path!("/settings") view=SettingsPage />
         </Routes>

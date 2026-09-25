@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS crono.jobs (
     executor text NOT NULL DEFAULT 'noop',
     queue_id uuid NOT NULL REFERENCES crono.queues(id) ON DELETE RESTRICT,
     executable text,
+    shell_command text,
     arguments jsonb NOT NULL DEFAULT '[]'::jsonb,
     inputs jsonb NOT NULL DEFAULT '{}'::jsonb,
     idempotent boolean NOT NULL DEFAULT false,
@@ -62,10 +63,12 @@ CREATE TABLE IF NOT EXISTS crono.jobs (
     CONSTRAINT jobs_name_canonical CHECK (
         name ~ '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
     ),
-    CONSTRAINT jobs_executor_supported CHECK (executor IN ('noop', 'process')),
+    CONSTRAINT jobs_executor_supported CHECK (executor IN ('noop', 'process', 'shell')),
     CONSTRAINT jobs_process_configuration CHECK (
-        (executor = 'noop' AND executable IS NULL)
-        OR (executor = 'process' AND executable LIKE '/%')
+        (executor = 'noop' AND executable IS NULL AND shell_command IS NULL)
+        OR (executor = 'process' AND executable LIKE '/%' AND shell_command IS NULL)
+        OR (executor = 'shell' AND executable LIKE '/%' AND shell_command IS NOT NULL
+            AND octet_length(shell_command) BETWEEN 1 AND 65536)
     ),
     CONSTRAINT jobs_arguments_array CHECK (jsonb_typeof(arguments) = 'array'),
     CONSTRAINT jobs_inputs_object CHECK (jsonb_typeof(inputs) = 'object'),
@@ -186,6 +189,7 @@ CREATE TABLE IF NOT EXISTS crono.run_requests (
 CREATE TABLE IF NOT EXISTS crono.runs (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     request_id uuid REFERENCES crono.run_requests(request_id) ON DELETE RESTRICT,
+    rerun_of_run_id uuid REFERENCES crono.runs(id) ON DELETE RESTRICT,
     schedule_id uuid REFERENCES crono.schedules(id) ON DELETE RESTRICT,
     job_id uuid NOT NULL REFERENCES crono.jobs(id) ON DELETE RESTRICT,
     target_id uuid NOT NULL REFERENCES crono.targets(id) ON DELETE RESTRICT,
@@ -225,6 +229,21 @@ ALTER TABLE crono.jobs
     ADD COLUMN IF NOT EXISTS inputs jsonb NOT NULL DEFAULT '{}'::jsonb;
 ALTER TABLE crono.jobs
     ADD COLUMN IF NOT EXISTS dry_run boolean NOT NULL DEFAULT false;
+ALTER TABLE crono.jobs
+    ADD COLUMN IF NOT EXISTS shell_command text;
+ALTER TABLE crono.jobs DROP CONSTRAINT IF EXISTS jobs_executor_supported;
+ALTER TABLE crono.jobs
+    ADD CONSTRAINT jobs_executor_supported CHECK (executor IN ('noop', 'process', 'shell'));
+ALTER TABLE crono.jobs DROP CONSTRAINT IF EXISTS jobs_process_configuration;
+ALTER TABLE crono.jobs
+    ADD CONSTRAINT jobs_process_configuration CHECK (
+        (executor = 'noop' AND executable IS NULL AND shell_command IS NULL)
+        OR (executor = 'process' AND executable LIKE '/%' AND shell_command IS NULL)
+        OR (executor = 'shell' AND executable LIKE '/%' AND shell_command IS NOT NULL
+            AND octet_length(shell_command) BETWEEN 1 AND 65536)
+    );
+ALTER TABLE crono.runs
+    ADD COLUMN IF NOT EXISTS rerun_of_run_id uuid REFERENCES crono.runs(id) ON DELETE RESTRICT;
 ALTER TABLE crono.jobs DROP CONSTRAINT IF EXISTS jobs_inputs_object;
 ALTER TABLE crono.jobs
     ADD CONSTRAINT jobs_inputs_object CHECK (jsonb_typeof(inputs) = 'object');
@@ -281,10 +300,12 @@ CREATE TABLE IF NOT EXISTS crono.run_attempts (
     exit_code integer,
     stdout_tail text,
     stderr_tail text,
+    output_sequence bigint NOT NULL DEFAULT 0,
     error text,
     created_at timestamptz NOT NULL DEFAULT statement_timestamp(),
     CONSTRAINT run_attempts_run_attempt_unique UNIQUE (run_id, attempt),
     CONSTRAINT run_attempts_attempt_positive CHECK (attempt > 0),
+    CONSTRAINT run_attempts_output_sequence_positive CHECK (output_sequence >= 0),
     CONSTRAINT run_attempts_status_supported CHECK (
         status IN ('pending_dispatch', 'queued', 'running', 'succeeded', 'skipped', 'failed', 'dead', 'unknown')
     ),
@@ -297,6 +318,11 @@ CREATE TABLE IF NOT EXISTS crono.run_attempts (
 
 ALTER TABLE crono.run_attempts DROP CONSTRAINT IF EXISTS run_attempts_status_supported;
 ALTER TABLE crono.run_attempts
+    ADD COLUMN IF NOT EXISTS output_sequence bigint NOT NULL DEFAULT 0;
+ALTER TABLE crono.run_attempts DROP CONSTRAINT IF EXISTS run_attempts_output_sequence_positive;
+ALTER TABLE crono.run_attempts
+    ADD CONSTRAINT run_attempts_output_sequence_positive CHECK (output_sequence >= 0);
+ALTER TABLE crono.run_attempts
     ADD CONSTRAINT run_attempts_status_supported CHECK (
         status IN ('pending_dispatch', 'queued', 'running', 'succeeded', 'skipped', 'failed', 'dead', 'unknown')
     );
@@ -307,6 +333,7 @@ CREATE TABLE IF NOT EXISTS crono.worker_presence (
     queue_id uuid NOT NULL REFERENCES crono.queues(id) ON DELETE RESTRICT,
     concurrency integer NOT NULL,
     version text NOT NULL,
+    diagnostics jsonb,
     started_at timestamptz NOT NULL DEFAULT statement_timestamp(),
     last_seen_at timestamptz NOT NULL DEFAULT statement_timestamp(),
     CONSTRAINT worker_presence_id_canonical CHECK (
@@ -314,8 +341,15 @@ CREATE TABLE IF NOT EXISTS crono.worker_presence (
     ),
     CONSTRAINT worker_presence_concurrency_bounded CHECK (concurrency BETWEEN 1 AND 256),
     CONSTRAINT worker_presence_version_bounded CHECK (char_length(version) BETWEEN 1 AND 128),
+    CONSTRAINT worker_presence_diagnostics_object CHECK (diagnostics IS NULL OR jsonb_typeof(diagnostics) = 'object'),
     CONSTRAINT worker_presence_timestamps_ordered CHECK (last_seen_at >= started_at)
 );
+
+ALTER TABLE crono.worker_presence
+    ADD COLUMN IF NOT EXISTS diagnostics jsonb;
+ALTER TABLE crono.worker_presence DROP CONSTRAINT IF EXISTS worker_presence_diagnostics_object;
+ALTER TABLE crono.worker_presence
+    ADD CONSTRAINT worker_presence_diagnostics_object CHECK (diagnostics IS NULL OR jsonb_typeof(diagnostics) = 'object');
 
 CREATE TABLE IF NOT EXISTS crono.outbox (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
@@ -367,6 +401,11 @@ CREATE INDEX IF NOT EXISTS schedules_due_idx
 CREATE INDEX IF NOT EXISTS schedules_expired_claim_idx
     ON crono.schedules (claim_expires_at) WHERE claim_owner IS NOT NULL;
 CREATE INDEX IF NOT EXISTS runs_created_idx ON crono.runs (id DESC);
+CREATE INDEX IF NOT EXISTS runs_job_history_idx ON crono.runs (job_id, id DESC);
+CREATE INDEX IF NOT EXISTS runs_target_history_idx ON crono.runs (target_id, id DESC);
+CREATE INDEX IF NOT EXISTS runs_status_history_idx ON crono.runs (status, id DESC);
+CREATE INDEX IF NOT EXISTS runs_rerun_origin_idx ON crono.runs (rerun_of_run_id)
+    WHERE rerun_of_run_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS runs_active_status_idx
     ON crono.runs (status)
     WHERE status IN ('pending_dispatch', 'queued', 'running');

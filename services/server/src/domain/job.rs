@@ -11,6 +11,7 @@ use time::OffsetDateTime;
 pub enum ExecutorKind {
     Noop,
     Process,
+    Shell,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,6 +22,7 @@ pub struct Job {
     executor: ExecutorKind,
     queue_id: QueueId,
     executable: Option<String>,
+    shell_command: Option<String>,
     arguments: Vec<String>,
     inputs: serde_json::Value,
     idempotent: bool,
@@ -42,6 +44,7 @@ pub struct JobData {
     pub executor: ExecutorKind,
     pub queue_id: QueueId,
     pub executable: Option<String>,
+    pub shell_command: Option<String>,
     pub arguments: Vec<String>,
     pub inputs: serde_json::Value,
     pub idempotent: bool,
@@ -65,6 +68,7 @@ impl Job {
             executor,
             queue_id,
             executable,
+            shell_command,
             arguments,
             inputs,
             idempotent,
@@ -84,6 +88,7 @@ impl Job {
             executor,
             queue_id,
             executable,
+            shell_command,
             arguments,
             inputs,
             idempotent,
@@ -121,6 +126,11 @@ impl Job {
     #[must_use]
     pub fn executable(&self) -> Option<&str> {
         self.executable.as_deref()
+    }
+    /// Literal shell source, present only for Shell Jobs.
+    #[must_use]
+    pub fn shell_command(&self) -> Option<&str> {
+        self.shell_command.as_deref()
     }
     #[must_use]
     pub fn arguments(&self) -> &[String] {

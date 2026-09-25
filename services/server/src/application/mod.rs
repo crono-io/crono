@@ -18,11 +18,11 @@ pub use auth::{
 pub use error::ApplicationError;
 pub use model::{
     CreateJobInput, CreateQueueInput, CreateScheduleInput, JobRecord, Overview, Page,
-    RunAttemptRecord, RunRecord, ScheduleRecord, TargetRecord, TargetSetRecord, UpdateQueueInput,
-    WorkerRecord,
+    RunAttemptRecord, RunEventRecord, RunRecord, ScheduleRecord, TargetRecord, TargetSetRecord,
+    UpdateQueueInput, WorkerRecord,
 };
 pub use service::{Application, CreateRunOutcome};
 pub use store::{
     ControlPlaneStore, JobDefinition, MetricsSnapshot, MonitorSnapshot, NewSchedule, OutboxRecord,
-    PlannedOccurrence, SchedulePlan, StoreError, TargetDefinition,
+    PlannedOccurrence, RunListFilter, SchedulePlan, StoreError, TargetDefinition,
 };

@@ -37,6 +37,7 @@ pub(super) fn JobForm(#[prop(optional)] initial_job: Option<JobResource>) -> imp
         namespace: namespace_error,
         queue: queue_error,
         executable: executable_error,
+        shell_command: shell_command_error,
     } = errors;
     let JobState {
         namespace_id,
@@ -44,6 +45,7 @@ pub(super) fn JobForm(#[prop(optional)] initial_job: Option<JobResource>) -> imp
         queue_id,
         executor,
         executable,
+        shell_command,
         arguments,
         inputs,
         idempotent,
@@ -66,14 +68,7 @@ pub(super) fn JobForm(#[prop(optional)] initial_job: Option<JobResource>) -> imp
     let navigate = use_navigate();
     let cancel = Callback::new(move |()| navigate("/jobs", NavigateOptions::default()));
     let preview_options = job_preview_options(targets, target_sets);
-    let preview = Signal::derive(move || {
-        preview_text(
-            fields.preview_fields(),
-            preview_target.get(),
-            targets.get(),
-            target_sets.get(),
-        )
-    });
+    let preview = state.preview(fields);
 
     view! {
         <div class="space-y-8">
@@ -102,14 +97,20 @@ pub(super) fn JobForm(#[prop(optional)] initial_job: Option<JobResource>) -> imp
                         <ResourceSelect id="job-queue" label="Worker Queue" placeholder="Search/select Queue…" options=queue_choices.options selected=queue_id loading=queue_choices.loading load_error=queue_choices.load_error field_error=queue_error />
                     </div>
                     <div class="grid gap-4 md:grid-cols-2">
-                        <label class="block text-sm font-medium text-crono-text">"Executor"<select class=FIELD_CLASS prop:value=move || match executor.get() { ExecutorKind::Noop => "noop", ExecutorKind::Process => "process" } on:change=move |event| executor.set(if event_target_value(&event) == "process" { ExecutorKind::Process } else { ExecutorKind::Noop })><option value="noop">"No-op"</option><option value="process">"Process"</option></select></label>
-                        <label class="block text-sm font-medium text-crono-text">"Executable"<input class=FIELD_CLASS type="text" placeholder="/usr/bin/echo" disabled=move || executor.get() == ExecutorKind::Noop prop:value=move || executable.get() on:input=move |event| executable.set(event_target_value(&event))/><p class="mt-1 text-sm text-crono-failed">{move || executable_error.get().unwrap_or_default()}</p></label>
+                        <label class="block text-sm font-medium text-crono-text">"Executor"<select class=FIELD_CLASS prop:value=move || match executor.get() { ExecutorKind::Noop => "noop", ExecutorKind::Process => "process", ExecutorKind::Shell => "shell" } on:change=move |event| { let selected = match event_target_value(&event).as_str() { "process" => ExecutorKind::Process, "shell" => ExecutorKind::Shell, _ => ExecutorKind::Noop }; if selected == ExecutorKind::Shell && executor.get_untracked() != ExecutorKind::Shell { executable.set("/bin/sh".to_string()); } executor.set(selected); }><option value="noop">"No-op"</option><option value="process">"Process · direct executable"</option><option value="shell">"Shell · script"</option></select></label>
+                        <label class="block text-sm font-medium text-crono-text">{move || if executor.get() == ExecutorKind::Shell { "Shell interpreter" } else { "Executable" }}<input class=FIELD_CLASS type="text" placeholder=move || if executor.get() == ExecutorKind::Shell { "/bin/sh" } else { "/usr/bin/echo" } disabled=move || executor.get() == ExecutorKind::Noop prop:value=move || executable.get() on:input=move |event| executable.set(event_target_value(&event))/><p class="mt-1 text-sm text-crono-failed">{move || executable_error.get().unwrap_or_default()}</p></label>
                     </div>
+                    <Show when=move || executor.get() == ExecutorKind::Shell>
+                        <label class="block text-sm font-medium text-crono-text">"Shell script"<textarea class=FIELD_CLASS rows="4" placeholder="printf 'started\n'; /usr/bin/sleep 10; printf 'Hello, %s\n' \"$1\"" prop:value=move || shell_command.get() on:input=move |event| shell_command.set(event_target_value(&event))></textarea><p class="mt-1 text-xs text-crono-muted">"The script is literal. Put {{ name }} in Arguments and read it as $1; Crono will not inject input into shell source."</p><p class="mt-1 text-sm text-crono-failed">{move || shell_command_error.get().unwrap_or_default()}</p></label>
+                    </Show>
                     <label class="flex items-start gap-3 rounded-lg border border-crono-border bg-zinc-50 p-4 text-sm text-crono-text"><input class="mt-0.5" type="checkbox" prop:checked=move || dry_run.get() on:change=move |event| dry_run.set(event_target_checked(&event))/><span><span class="font-medium">"Dry run"</span><span class="mt-1 block text-xs text-crono-muted">"Print the resolved command in Run output without executing it. Future Runs will be marked skipped, even when the worker was not started with --dry-run."</span></span></label>
                     <ArgumentListInput id="job-arguments" label="Arguments" values=arguments error=argument_error />
-                    <p class="-mt-3 text-xs text-crono-muted">
-                        "Process example: set executable to "<code>"/usr/bin/echo"</code>", add one argument "<code>"Hello, {{ name }}"</code>", and set default inputs to "<code>r#"{"name":"world"}"#</code>"."
-                    </p>
+                    <Show when=move || executor.get() == ExecutorKind::Shell>
+                        <p class="-mt-3 text-xs text-crono-muted">"Shell example: interpreter "<code>"/bin/sh"</code>", script "<code>"printf 'started\\n'; /usr/bin/sleep 10; printf 'Hello, %s\\n' \"$1\""</code>", one argument "<code>"{{ name }}"</code>", and default inputs "<code>r#"{"name":"world"}"#</code>". The first line appears before the sleep when you refresh output."</p>
+                    </Show>
+                    <Show when=move || executor.get() != ExecutorKind::Shell>
+                        <p class="-mt-3 text-xs text-crono-muted">"Process example: executable "<code>"/usr/bin/echo"</code>", one argument "<code>"Hello, {{ name }}"</code>", and default inputs "<code>r#"{"name":"world"}"#</code>". Process does not parse shell syntax such as &&."</p>
+                    </Show>
                     <JsonObjectInput id="job-inputs" label="Default inputs" value=inputs error=input_error />
                     <details class="rounded-lg border border-crono-border p-4"><summary class="cursor-pointer text-sm font-medium text-crono-text">"Retry and safety policy"</summary><div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5"><NumberField label="Max attempts" value=max_attempts /><NumberField label="Initial seconds" value=retry_initial /><NumberField label="Maximum seconds" value=retry_max /><NumberField label="Multiplier" value=retry_multiplier /><NumberField label="Jitter" value=retry_jitter /></div><label class="mt-4 flex items-center gap-2 text-sm text-crono-text"><input type="checkbox" prop:checked=move || idempotent.get() on:change=move |event| idempotent.set(event_target_checked(&event))/><span>"Safe to retry after an ambiguous worker failure"</span></label></details>
                     <div class="rounded-lg border border-crono-border bg-zinc-50 p-4">
@@ -136,6 +137,7 @@ fn job_form_disabled(state: &JobState, fields: JobFields, errors: JobErrors) -> 
             || errors.inputs.get().is_some()
             || errors.arguments.get().is_some()
             || errors.executable.get().is_some()
+            || errors.shell_command.get().is_some()
             || job_request(fields).is_err()
     })
 }
@@ -147,6 +149,7 @@ struct JobState {
     queue_id: RwSignal<Option<uuid::Uuid>>,
     executor: RwSignal<ExecutorKind>,
     executable: RwSignal<String>,
+    shell_command: RwSignal<String>,
     arguments: RwSignal<Vec<String>>,
     inputs: RwSignal<String>,
     idempotent: RwSignal<bool>,
@@ -168,6 +171,21 @@ struct JobState {
 }
 
 impl JobState {
+    /// Keep transient preview computation outside the form layout.
+    fn preview(&self, fields: JobFields) -> Signal<String> {
+        let preview_target = self.preview_target;
+        let targets = self.targets;
+        let target_sets = self.target_sets;
+        Signal::derive(move || {
+            preview_text(
+                fields.preview_fields(),
+                preview_target.get(),
+                targets.get(),
+                target_sets.get(),
+            )
+        })
+    }
+
     /// Seed edit fields from the authorized API resource; create starts blank.
     fn new(initial: Option<&JobResource>) -> Self {
         let namespace_id = RwSignal::new(initial.map(|job| job.namespace_id));
@@ -182,6 +200,11 @@ impl JobState {
             executable: RwSignal::new(
                 initial
                     .and_then(|job| job.executable.clone())
+                    .unwrap_or_default(),
+            ),
+            shell_command: RwSignal::new(
+                initial
+                    .and_then(|job| job.shell_command.clone())
                     .unwrap_or_default(),
             ),
             arguments: RwSignal::new(initial.map_or_else(Vec::new, |job| job.arguments.clone())),
@@ -229,6 +252,7 @@ impl JobState {
             queue_id: self.queue_id,
             executor: self.executor,
             executable: self.executable,
+            shell_command: self.shell_command,
             arguments: self.arguments,
             inputs: self.inputs,
             idempotent: self.idempotent,
@@ -284,6 +308,7 @@ struct JobErrors {
     namespace: Signal<Option<String>>,
     queue: Signal<Option<String>>,
     executable: Signal<Option<String>>,
+    shell_command: Signal<Option<String>>,
 }
 
 fn job_errors(state: &JobState) -> JobErrors {
@@ -329,9 +354,20 @@ fn job_errors(state: &JobState) -> JobErrors {
         }),
         executable: Signal::derive(move || {
             server_error("executable").get().or_else(|| {
-                (state.executor.get() == ExecutorKind::Process
+                (state.executor.get() != ExecutorKind::Noop
                     && state.executable.get().trim().is_empty())
-                .then(|| "An absolute executable path is required for process Jobs.".to_string())
+                .then(|| "An absolute executable or interpreter path is required.".to_string())
+            })
+        }),
+        shell_command: Signal::derive(move || {
+            server_error("shell_command").get().or_else(|| {
+                (state.executor.get() == ExecutorKind::Shell
+                    && (state.shell_command.get().trim().is_empty()
+                        || state.shell_command.get().contains("{{")))
+                .then(|| {
+                    "Enter a literal script; put input templates in Arguments and use $1, $2, etc."
+                        .to_string()
+                })
             })
         }),
     }
@@ -343,6 +379,7 @@ fn job_reset(state: &JobState) -> Callback<()> {
         state.name.set(String::new());
         state.executor.set(ExecutorKind::Noop);
         state.executable.set(String::new());
+        state.shell_command.set(String::new());
         state.arguments.set(Vec::new());
         state.inputs.set("{}".to_string());
         state.idempotent.set(false);
@@ -406,6 +443,7 @@ struct JobFields {
     queue_id: RwSignal<Option<uuid::Uuid>>,
     executor: RwSignal<ExecutorKind>,
     executable: RwSignal<String>,
+    shell_command: RwSignal<String>,
     arguments: RwSignal<Vec<String>>,
     inputs: RwSignal<String>,
     idempotent: RwSignal<bool>,
@@ -423,6 +461,7 @@ impl JobFields {
         PreviewFields {
             executor: self.executor,
             executable: self.executable,
+            shell_command: self.shell_command,
             arguments: self.arguments,
             inputs: self.inputs,
         }
@@ -434,8 +473,9 @@ fn job_request(fields: JobFields) -> Result<CreateJobRequest, ()> {
         name: fields.name.get(),
         queue_id: fields.queue_id.get().ok_or(())?,
         executor: fields.executor.get(),
-        executable: (fields.executor.get() == ExecutorKind::Process)
-            .then(|| fields.executable.get()),
+        executable: (fields.executor.get() != ExecutorKind::Noop).then(|| fields.executable.get()),
+        shell_command: (fields.executor.get() == ExecutorKind::Shell)
+            .then(|| fields.shell_command.get()),
         arguments: fields.arguments.get(),
         inputs: parse_input_object(&fields.inputs.get()).map_err(|_| ())?,
         idempotent: fields.idempotent.get(),
@@ -454,6 +494,7 @@ fn update_job_request(value: CreateJobRequest) -> UpdateJobRequest {
         queue_id: value.queue_id,
         executor: value.executor,
         executable: value.executable,
+        shell_command: value.shell_command,
         arguments: value.arguments,
         inputs: value.inputs,
         idempotent: value.idempotent,

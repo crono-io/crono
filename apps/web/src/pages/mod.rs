@@ -22,12 +22,12 @@ pub use monitor::MonitorPage;
 pub use namespaces::NamespacesPage;
 pub use overview::OverviewPage;
 pub use queues::QueuesPage;
-pub use runs::RunsPage;
+pub use runs::{RunDetailsPage, RunJobPage, RunsPage};
 pub use schedules::SchedulesPage;
 pub use settings::SettingsPage;
 pub use target_sets::TargetSetsPage;
 pub use targets::TargetsPage;
-pub use workers::WorkersPage;
+pub use workers::{WorkerDetailsPage, WorkersPage};
 
 use crate::{
     components::{Card, EmptyState},

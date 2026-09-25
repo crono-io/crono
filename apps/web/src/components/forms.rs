@@ -133,7 +133,7 @@ pub fn ArgumentListInput(
                 "+ Add argument"
             </button>
             <p class="mt-1.5 text-xs text-crono-muted">
-                "Use {{ path.to.value }} for scalar inputs. Each row is one argv item; no shell is used."
+                "Use {{ path.to.value }} for scalar inputs. Each row remains one argument."
             </p>
             <p class="mt-1 text-sm text-crono-failed" role="alert">
                 {move || error.get().unwrap_or_default()}

@@ -38,6 +38,9 @@ pub enum ExecutionEvent {
     },
     CommandResolved {
         executable: String,
+        /// Literal shell source when the executor invokes an interpreter.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shell_command: Option<String>,
         template: Vec<String>,
         arguments: Vec<String>,
     },

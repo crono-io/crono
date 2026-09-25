@@ -33,6 +33,7 @@ async fn job_dry_run_is_immutable_per_run_and_completes_as_skipped() -> Result<(
         executor: ExecutorKind::Process,
         queue_id: queue.id(),
         executable: Some("/bin/echo".to_string()),
+        shell_command: None,
         arguments: vec!["hello {{ name }}".to_string()],
         inputs: serde_json::json!({"name": "world"}),
         idempotent: true,

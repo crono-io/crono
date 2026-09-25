@@ -1,12 +1,13 @@
 //! Server-mediated worker claims over NATS request/reply.
 //!
 //! Workers never receive PostgreSQL credentials. A queue subscription lets any
-//! server instance conditionally changes an Attempt against authoritative state.
-//! Presence uses a separate subject so an older control subscriber cannot steal
-//! and reject new heartbeat operations during a rolling deployment. The worker
-//! identity is repeated in each subject and payload to prevent accidental
-//! cross-worker operations; production deployments must additionally enforce
-//! these subjects with NATS credentials.
+//! server instance conditionally change an Attempt against authoritative state.
+//! Presence and bounded live output use separate subjects so older control
+//! subscribers cannot steal new operations during a rolling deployment. Output
+//! writes require the current worker lease and an increasing per-Attempt sequence.
+//! The worker identity is repeated in each subject and payload to prevent
+//! accidental cross-worker operations; production deployments must additionally
+//! enforce these subjects with NATS credentials.
 
 use super::NatsPublisher;
 use crate::{
@@ -14,18 +15,25 @@ use crate::{
     domain::{QueueId, QueueName},
 };
 use crono_api::{
-    ClaimRequest, CompletionRequest, LeaseRequest, QueueReference, QueueResolutionRequest,
-    QueueResolutionResponse, QueueResolutionStatus, WorkerHeartbeatRequest, validate_resource_name,
+    ClaimRequest, CompletionRequest, LeaseRequest, OutputSnapshotRequest, QueueReference,
+    QueueResolutionRequest, QueueResolutionResponse, QueueResolutionStatus, WorkerHeartbeatRequest,
+    validate_resource_name,
 };
 use futures_util::StreamExt;
 use serde::Serialize;
 use std::{sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 const CONTROL_SUBJECT: &str = "crono.worker.control.*.*";
 const CONTROL_QUEUE: &str = "crono-server-control";
+const OUTPUT_SUBJECT: &str = "crono.worker.output.*";
+const OUTPUT_QUEUE: &str = "crono-server-output";
+const MAX_OUTPUT_WRITES: usize = 32;
+const MAX_LIVE_TAIL_BYTES: usize = 16_384;
+const MAX_OUTPUT_REQUEST_BYTES: usize = 262_144;
 const PRESENCE_SUBJECT: &str = "crono.worker.presence.*";
 const PRESENCE_QUEUE: &str = "crono-server-presence";
 const QUEUE_RESOLUTION_SUBJECT: &str = "crono.worker.queue.resolve.*";
@@ -70,6 +78,18 @@ pub async fn run_worker_control(
                 continue;
             }
         };
+        let mut output = match client
+            .queue_subscribe(OUTPUT_SUBJECT, OUTPUT_QUEUE.to_string())
+            .await
+        {
+            Ok(messages) => messages,
+            Err(error) => {
+                warn!(%error, "failed to subscribe to worker output subjects");
+                time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+        };
+        let output_limit = Arc::new(Semaphore::new(MAX_OUTPUT_WRITES));
         let mut queue_resolution = match client
             .queue_subscribe(QUEUE_RESOLUTION_SUBJECT, QUEUE_RESOLUTION_QUEUE.to_string())
             .await
@@ -100,6 +120,12 @@ pub async fn run_worker_control(
                         warn!(%error, "worker presence request failed");
                     }
                 }
+                message = output.next() => {
+                    let Some(message) = message else {
+                        break;
+                    };
+                    dispatch_output(&store, &client, &output_limit, message).await;
+                }
                 message = queue_resolution.next() => {
                     let Some(message) = message else {
                         break;
@@ -111,6 +137,63 @@ pub async fn run_worker_control(
             }
         }
     }
+}
+
+/// Isolate bounded output writes from claim, lease, and completion handling.
+async fn dispatch_output(
+    store: &Arc<dyn ControlPlaneStore>,
+    client: &async_nats::Client,
+    limit: &Arc<Semaphore>,
+    message: async_nats::Message,
+) {
+    if let Ok(permit) = Arc::clone(limit).try_acquire_owned() {
+        let store = Arc::clone(store);
+        let client = client.clone();
+        tokio::spawn(async move {
+            let _permit = permit;
+            if let Err(error) = handle_output(&store, &client, message).await {
+                warn!(%error, "worker output update failed");
+            }
+        });
+    } else if let Some(reply) = message.reply {
+        let _ = respond(client, reply, &false).await;
+    }
+}
+
+/// Accept only bounded output from the worker that still holds the Attempt lease.
+async fn handle_output(
+    store: &Arc<dyn ControlPlaneStore>,
+    client: &async_nats::Client,
+    message: async_nats::Message,
+) -> anyhow::Result<()> {
+    let Some(reply) = message.reply else {
+        return Ok(());
+    };
+    if message.payload.len() > MAX_OUTPUT_REQUEST_BYTES {
+        anyhow::bail!("live output request is too large");
+    }
+    let subject_worker = message
+        .subject
+        .as_str()
+        .split('.')
+        .nth(3)
+        .unwrap_or_default();
+    let request: OutputSnapshotRequest = serde_json::from_slice(&message.payload)?;
+    validate_output(&request, subject_worker)?;
+    respond(client, reply, &store.record_attempt_output(&request).await?).await
+}
+
+/// Keep worker identity and per-stream bounds at the NATS trust boundary.
+fn validate_output(request: &OutputSnapshotRequest, subject_worker: &str) -> anyhow::Result<()> {
+    if request.worker_id != subject_worker
+        || validate_resource_name(&request.worker_id).is_err()
+        || request.sequence == 0
+        || request.stdout_tail.len() > MAX_LIVE_TAIL_BYTES
+        || request.stderr_tail.len() > MAX_LIVE_TAIL_BYTES
+    {
+        anyhow::bail!("invalid live output request");
+    }
+    Ok(())
 }
 
 async fn handle_control(
@@ -231,6 +314,33 @@ fn validate_heartbeat(
     if request.version.is_empty() || request.version.len() > 128 || request.version.contains('\0') {
         anyhow::bail!("worker version must be a bounded, NUL-free value");
     }
+    if let Some(details) = &request.diagnostics {
+        for value in [
+            &details.hostname,
+            &details.os,
+            &details.architecture,
+            &details.default_shell_path,
+        ] {
+            if value.is_empty() || value.len() > 255 || value.chars().any(char::is_control) {
+                anyhow::bail!("worker diagnostics contain an invalid identity or shell path");
+            }
+        }
+        if !details.default_shell_path.starts_with('/') {
+            anyhow::bail!("worker default shell path must be absolute");
+        }
+        for value in [
+            details.lang.as_deref(),
+            details.lc_all.as_deref(),
+            details.tz.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if value.len() > 128 || value.chars().any(char::is_control) {
+                anyhow::bail!("worker environment diagnostics are not bounded");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -247,8 +357,8 @@ async fn respond<T: Serialize>(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_heartbeat;
-    use crono_api::WorkerHeartbeatRequest;
+    use super::{validate_heartbeat, validate_output};
+    use crono_api::{OutputSnapshotRequest, WorkerHeartbeatRequest};
     use uuid::Uuid;
 
     fn request() -> WorkerHeartbeatRequest {
@@ -258,6 +368,7 @@ mod tests {
             queue_id: Uuid::now_v7(),
             concurrency: 8,
             version: "0.1.0".to_string(),
+            diagnostics: None,
         }
     }
 
@@ -277,5 +388,28 @@ mod tests {
         let mut invalid_concurrency = request();
         invalid_concurrency.concurrency = 0;
         assert!(validate_heartbeat(&invalid_concurrency, "worker-01").is_err());
+    }
+
+    #[test]
+    fn live_output_requires_identity_sequence_and_bounded_streams() {
+        let request = OutputSnapshotRequest {
+            attempt_id: Uuid::now_v7(),
+            worker_id: "worker-01".to_string(),
+            sequence: 1,
+            stdout_tail: "started\n".to_string(),
+            stderr_tail: String::new(),
+        };
+        assert!(validate_output(&request, "worker-01").is_ok());
+        assert!(validate_output(&request, "worker-02").is_err());
+        let invalid_sequence = OutputSnapshotRequest {
+            sequence: 0,
+            ..request.clone()
+        };
+        assert!(validate_output(&invalid_sequence, "worker-01").is_err());
+        let oversized = OutputSnapshotRequest {
+            stdout_tail: "x".repeat(16_385),
+            ..request
+        };
+        assert!(validate_output(&oversized, "worker-01").is_err());
     }
 }

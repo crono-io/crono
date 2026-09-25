@@ -41,6 +41,7 @@ fn snapshot(
     ExecutionSnapshot {
         executor,
         executable: executable.map(str::to_string),
+        shell_command: None,
         argument_templates: arguments.iter().map(ToString::to_string).collect(),
         arguments: arguments.iter().map(ToString::to_string).collect(),
         inputs: serde_json::json!({}),
@@ -186,6 +187,42 @@ async fn normal_process_execution_still_spawns() -> Result<()> {
     assert!(!result.skipped);
     assert_eq!(result.exit_code, Some(0));
     assert_eq!(result.stdout_tail, "normal");
+    Ok(())
+}
+
+#[tokio::test]
+async fn shell_uses_templated_argument_as_data_not_shell_source() -> Result<()> {
+    let mut execution = snapshot(ExecutorKind::Shell, Some("/bin/sh"), &["{{ name }}"]);
+    execution.shell_command = Some("printf 'Hello, %s\\n' \"$1\"".to_string());
+    execution.inputs = serde_json::json!({"name": "$(printf injected >&2)"});
+    execution.arguments =
+        crono_execution::render_arguments(&execution.argument_templates, &execution.inputs)?;
+    let (result, events) = observed(execution, false).await?;
+    assert!(result.succeeded);
+    assert_eq!(result.stdout_tail, "Hello, $(printf injected >&2)\n");
+    assert!(result.stderr_tail.is_empty());
+    assert!(events.iter().any(|entry| matches!(&entry.event,
+        ExecutionEvent::CommandResolved { shell_command: Some(script), .. }
+            if script.contains("printf 'Hello"))));
+    Ok(())
+}
+
+#[tokio::test]
+async fn shell_dry_run_does_not_start_the_interpreter() -> Result<()> {
+    let mut execution = snapshot(
+        ExecutorKind::Shell,
+        Some("/definitely/missing/shell"),
+        &["world"],
+    );
+    execution.shell_command = Some("printf 'Hello, %s\\n' \"$1\"".to_string());
+    let (result, events) = observed(execution, true).await?;
+    assert!(result.skipped);
+    assert!(result.stdout_tail.contains("-c"));
+    assert!(
+        !events
+            .iter()
+            .any(|entry| matches!(entry.event, ExecutionEvent::ProcessStarted { .. }))
+    );
     Ok(())
 }
 

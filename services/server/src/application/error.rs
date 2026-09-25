@@ -70,6 +70,9 @@ impl From<StoreError> for ApplicationError {
             StoreError::Conflict | StoreError::StaleRevision => Self::Conflict,
             StoreError::InUse => Self::InUse,
             StoreError::IdempotencyConflict => Self::IdempotencyConflict,
+            StoreError::QueueDisabled => Self::invalid_request(
+                "The original Run's Queue is disabled; enable it before re-running.",
+            ),
             StoreError::Unavailable => Self::Unavailable,
             StoreError::Internal => Self::Internal,
         }

@@ -9,13 +9,13 @@ use crate::{
     api::{error::ApiError, state::AppState},
     application::{
         CreateJobInput, CreateQueueInput, CreateScheduleInput, JobRecord, Page as ApplicationPage,
-        RequestContext, RunAttemptRecord, RunRecord, ScheduleRecord, TargetRecord, TargetSetRecord,
-        UpdateQueueInput, WorkerRecord,
+        RequestContext, RunAttemptRecord, RunEventRecord, RunListFilter, RunRecord, ScheduleRecord,
+        TargetRecord, TargetSetRecord, UpdateQueueInput, WorkerRecord,
     },
     domain::{
-        CatchupPolicy as DomainCatchup, ExecutorKind as DomainExecutor,
-        MisfirePolicy as DomainMisfire, Namespace, Queue, RunStatus as DomainRunStatus,
-        ScheduleTiming, TargetSelection,
+        CatchupPolicy as DomainCatchup, ExecutorKind as DomainExecutor, JobId,
+        MisfirePolicy as DomainMisfire, Namespace, NamespaceId, Queue,
+        RunStatus as DomainRunStatus, ScheduleTiming, TargetId, TargetSelection, TargetSetId,
     },
 };
 use axum::{
@@ -27,10 +27,11 @@ use crono_api::{
     AttemptStatus, CatchupPolicy, CreateJobRequest, CreateNamespaceRequest, CreateQueueRequest,
     CreateRunRequest, CreateScheduleRequest, CreateTargetRequest, CreateTargetSetRequest,
     ExecutionTarget, ExecutionTargetResource, ExecutorKind, JobResource, MisfirePolicy,
-    NamespaceResource, OverviewResource, Page, QueueResource, RunAttemptResource, RunBatchResource,
-    RunResource, RunStatus, ScheduleResource, TargetReference, TargetResource, TargetSetResource,
-    UpdateJobRequest, UpdateQueueRequest, UpdateScheduleRequest, UpdateTargetRequest,
-    UpdateTargetSetRequest, WorkerResource, WorkerStatus,
+    NamespaceResource, OverviewResource, Page, QueueResource, RerunRequest, RunAttemptResource,
+    RunBatchResource, RunEventResource, RunResource, RunStatus, RunTriggerSource, ScheduleResource,
+    TargetReference, TargetResource, TargetSetResource, UpdateJobRequest, UpdateQueueRequest,
+    UpdateScheduleRequest, UpdateTargetRequest, UpdateTargetSetRequest, WorkerDetailsResource,
+    WorkerResource, WorkerStatus,
 };
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
@@ -51,6 +52,11 @@ pub struct RunPageQuery {
     limit: Option<u16>,
     /// UUID cursor returned by a previous Run request.
     before: Option<Uuid>,
+    namespace_id: Option<Uuid>,
+    status: Option<RunStatus>,
+    job_id: Option<Uuid>,
+    target_id: Option<Uuid>,
+    target_set_id: Option<Uuid>,
 }
 
 #[utoipa::path(
@@ -240,8 +246,10 @@ pub async fn create_job(
                 executor: match request.executor {
                     ExecutorKind::Noop => DomainExecutor::Noop,
                     ExecutorKind::Process => DomainExecutor::Process,
+                    ExecutorKind::Shell => DomainExecutor::Shell,
                 },
                 executable: request.executable,
+                shell_command: request.shell_command,
                 arguments: request.arguments,
                 inputs: request.inputs,
                 idempotent: request.idempotent,
@@ -317,6 +325,7 @@ pub async fn update_job(
                 queue_id: request.queue_id,
                 executor: domain_executor(request.executor),
                 executable: request.executable,
+                shell_command: request.shell_command,
                 arguments: request.arguments,
                 inputs: request.inputs,
                 idempotent: request.idempotent,
@@ -687,7 +696,18 @@ pub async fn list_runs(
 ) -> Result<Json<Page<RunResource>>, ApiError> {
     let page = state
         .application()
-        .list_runs(&context, query.limit, query.before)
+        .list_runs(
+            &context,
+            RunListFilter {
+                namespace_id: query.namespace_id.map(NamespaceId::new),
+                status: query.status.map(domain_run_status),
+                job_id: query.job_id.map(JobId::new),
+                target_id: query.target_id.map(TargetId::new),
+                target_set_id: query.target_set_id.map(TargetSetId::new),
+            },
+            query.limit,
+            query.before,
+        )
         .await?;
     Ok(Json(map_page(page, |item| run_resource(&item))?))
 }
@@ -706,6 +726,62 @@ pub async fn get_run(
 ) -> Result<Json<RunResource>, ApiError> {
     let run = state.application().get_run(&context, run_id).await?;
     Ok(Json(run_resource(&run)?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/runs/{run_id}/rerun",
+    params(("run_id" = Uuid, Path)),
+    request_body = RerunRequest,
+    responses((status = 201, body = RunResource), (status = 200, body = RunResource), (status = 409, body = crono_api::ErrorEnvelope)),
+    tag = "control-plane"
+)]
+/// Repeat one terminal Run's stored execution snapshot after authorization checks.
+pub async fn rerun_run(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(run_id): Path<Uuid>,
+    Json(request): Json<RerunRequest>,
+) -> Result<(StatusCode, Json<RunResource>), ApiError> {
+    let outcome = state
+        .application()
+        .rerun_run(&context, run_id, request.request_id)
+        .await?;
+    let run = outcome
+        .runs
+        .first()
+        .ok_or(crate::application::ApplicationError::Internal)?;
+    let status = if outcome.created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((status, Json(run_resource(run)?)))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/runs/{run_id}/events",
+    params(("run_id" = Uuid, Path)),
+    responses((status = 200, body = Vec<RunEventResource>)),
+    tag = "control-plane"
+)]
+/// Return server-observed lifecycle timestamps after the same `RunRead` decision.
+pub async fn list_run_events(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(run_id): Path<Uuid>,
+) -> Result<Json<Vec<RunEventResource>>, ApiError> {
+    let events = state
+        .application()
+        .list_run_events(&context, run_id)
+        .await?;
+    Ok(Json(
+        events
+            .iter()
+            .map(run_event_resource)
+            .collect::<Result<Vec<_>, _>>()?,
+    ))
 }
 
 #[utoipa::path(
@@ -757,6 +833,26 @@ pub async fn list_workers(
 
 #[utoipa::path(
     get,
+    path = "/api/workers/{worker_id}",
+    params(("worker_id" = String, Path)),
+    responses((status = 200, body = WorkerDetailsResource), (status = 404, body = crono_api::ErrorEnvelope)),
+    tag = "control-plane"
+)]
+/// Read a single worker's safe heartbeat diagnostics under `WorkerRead`.
+pub async fn get_worker(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(worker_id): Path<String>,
+) -> Result<Json<WorkerDetailsResource>, ApiError> {
+    let record = state.application().get_worker(&context, &worker_id).await?;
+    Ok(Json(WorkerDetailsResource {
+        worker: worker_resource(&record, time::OffsetDateTime::now_utc())?,
+        diagnostics: record.diagnostics,
+    }))
+}
+
+#[utoipa::path(
+    get,
     path = "/api/overview",
     responses((status = 200, body = OverviewResource)),
     tag = "control-plane"
@@ -800,6 +896,7 @@ fn job_resource(record: &JobRecord) -> Result<JobResource, ApiError> {
     let executor = match record.job.executor() {
         DomainExecutor::Noop => ExecutorKind::Noop,
         DomainExecutor::Process => ExecutorKind::Process,
+        DomainExecutor::Shell => ExecutorKind::Shell,
     };
     Ok(JobResource {
         id: record.job.id().get(),
@@ -811,6 +908,7 @@ fn job_resource(record: &JobRecord) -> Result<JobResource, ApiError> {
         queue_id: record.job.queue_id().get(),
         queue: record.queue_name.to_string(),
         executable: record.job.executable().map(str::to_string),
+        shell_command: record.job.shell_command().map(str::to_string),
         arguments: record.job.arguments().to_vec(),
         inputs: record.job.inputs().clone(),
         idempotent: record.job.idempotent(),
@@ -918,6 +1016,7 @@ const fn domain_executor(value: ExecutorKind) -> DomainExecutor {
     match value {
         ExecutorKind::Noop => DomainExecutor::Noop,
         ExecutorKind::Process => DomainExecutor::Process,
+        ExecutorKind::Shell => DomainExecutor::Shell,
     }
 }
 
@@ -973,19 +1072,62 @@ fn run_resource(record: &RunRecord) -> Result<RunResource, ApiError> {
         schedule_id: record.run.schedule_id().map(crate::domain::ScheduleId::get),
         job_id: record.run.job_id().get(),
         job: format!("{}/{}", record.job_namespace, record.job_name),
+        namespace: record.job_namespace.to_string(),
+        job_name: record.job_name.to_string(),
         target_id: record.run.target_id().get(),
         target: format!("{}/{}", record.target_namespace, record.target_name),
+        target_name: record.target_name.to_string(),
+        target_set: record.target_set_name.as_ref().map(ToString::to_string),
+        queue: record.queue_name.to_string(),
+        trigger_source: if record.run.rerun_of_run_id().is_some() {
+            RunTriggerSource::Rerun
+        } else if record.run.schedule_id().is_some() {
+            RunTriggerSource::Scheduler
+        } else {
+            RunTriggerSource::Api
+        },
+        trigger_actor: None,
+        rerun_of_run_id: record.run.rerun_of_run_id().map(crate::domain::RunId::get),
+        rerunnable: record.run.status().is_repeatable() && record.has_execution_snapshot,
         status,
         scheduled_at: timestamp(record.run.scheduled_at())?,
         created_at: timestamp(record.run.created_at())?,
+        triggered_at: timestamp(record.run.created_at())?,
         queued_at: record.run.queued_at().map(timestamp).transpose()?,
         started_at: record.run.started_at().map(timestamp).transpose()?,
         completed_at: record.run.completed_at().map(timestamp).transpose()?,
+        duration_ms: record
+            .run
+            .started_at()
+            .zip(record.run.completed_at())
+            .and_then(|(start, finish)| u64::try_from((finish - start).whole_milliseconds()).ok()),
         attempt_count: record.run.attempt_count(),
         max_attempts: record.run.max_attempts(),
         lateness_seconds: record.run.lateness_seconds(),
         terminal_reason: record.run.terminal_reason().map(str::to_string),
     })
+}
+
+fn run_event_resource(record: &RunEventRecord) -> Result<RunEventResource, ApiError> {
+    Ok(RunEventResource {
+        event_type: record.event_type.clone(),
+        created_at: timestamp(record.created_at)?,
+    })
+}
+
+const fn domain_run_status(status: RunStatus) -> DomainRunStatus {
+    match status {
+        RunStatus::PendingDispatch => DomainRunStatus::PendingDispatch,
+        RunStatus::Queued => DomainRunStatus::Queued,
+        RunStatus::Running => DomainRunStatus::Running,
+        RunStatus::RetryWait => DomainRunStatus::RetryWait,
+        RunStatus::Succeeded => DomainRunStatus::Succeeded,
+        RunStatus::Failed => DomainRunStatus::Failed,
+        RunStatus::Dead => DomainRunStatus::Dead,
+        RunStatus::Skipped => DomainRunStatus::Skipped,
+        RunStatus::Cancelled => DomainRunStatus::Cancelled,
+        RunStatus::Unknown => DomainRunStatus::Unknown,
+    }
 }
 
 fn run_attempt_resource(record: &RunAttemptRecord) -> Result<RunAttemptResource, ApiError> {
@@ -1005,6 +1147,7 @@ fn run_attempt_resource(record: &RunAttemptRecord) -> Result<RunAttemptResource,
     };
     Ok(RunAttemptResource {
         id: record.id,
+        worker_id: record.worker_id.clone(),
         attempt: record.attempt,
         status,
         started_at: record.started_at.map(timestamp).transpose()?,
@@ -1068,9 +1211,17 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::worker_status;
-    use crono_api::WorkerStatus;
+    use super::{run_resource, worker_status};
+    use crate::{
+        application::RunRecord,
+        domain::{
+            JobId, NamespaceName, QueueId, QueueName, ResourceName, Run, RunData, RunId, RunStatus,
+            TargetId,
+        },
+    };
+    use crono_api::{RunTriggerSource, WorkerStatus};
     use time::{Duration, OffsetDateTime};
+    use uuid::Uuid;
 
     #[test]
     fn worker_status_uses_server_owned_heartbeat_windows() {
@@ -1093,5 +1244,46 @@ mod tests {
             worker_status(now - Duration::seconds(121), now),
             WorkerStatus::Offline
         );
+    }
+
+    #[test]
+    fn run_resource_reports_server_trigger_and_nonnegative_duration() -> anyhow::Result<()> {
+        let start = OffsetDateTime::UNIX_EPOCH + Duration::minutes(1);
+        let id = RunId::new(Uuid::now_v7());
+        let record = RunRecord {
+            has_execution_snapshot: true,
+            run: Run::new(RunData {
+                id,
+                request_id: Some(Uuid::now_v7()),
+                rerun_of_run_id: None,
+                schedule_id: None,
+                job_id: JobId::new(Uuid::now_v7()),
+                target_id: TargetId::new(Uuid::now_v7()),
+                queue_id: QueueId::new(Uuid::now_v7()),
+                status: RunStatus::Succeeded,
+                scheduled_at: start,
+                created_at: start,
+                queued_at: Some(start),
+                started_at: Some(start),
+                completed_at: Some(start + Duration::milliseconds(8400)),
+                attempt_count: 1,
+                max_attempts: 2,
+                lateness_seconds: 0,
+                terminal_reason: None,
+            }),
+            job_namespace: NamespaceName::parse("production")?,
+            job_name: ResourceName::parse("backup")?,
+            target_namespace: NamespaceName::parse("production")?,
+            target_name: ResourceName::parse("db")?,
+            target_set_name: None,
+            queue_name: QueueName::parse("default")?,
+        };
+        let resource = run_resource(&record).map_err(|_| anyhow::anyhow!("Run mapping failed"))?;
+        assert_eq!(resource.trigger_source, RunTriggerSource::Api);
+        assert_eq!(resource.trigger_actor, None);
+        assert_eq!(resource.duration_ms, Some(8400));
+        assert_eq!(resource.triggered_at, resource.created_at);
+        assert_eq!(resource.job_name, "backup");
+        Ok(())
     }
 }

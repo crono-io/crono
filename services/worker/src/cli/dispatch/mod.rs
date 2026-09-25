@@ -24,7 +24,7 @@ pub fn handler(matches: &ArgMatches) -> Result<Action> {
             worker_id: values
                 .get_one::<String>("worker-id")
                 .cloned()
-                .unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
+                .unwrap_or_else(default_worker_id),
             concurrency: values
                 .get_one::<u16>("concurrency")
                 .copied()
@@ -36,5 +36,42 @@ pub fn handler(matches: &ArgMatches) -> Result<Action> {
             },
         })),
         _ => bail!("a supported subcommand is required"),
+    }
+}
+
+/// Give each process an identifiable host prefix without persisting hardware IDs.
+fn default_worker_id() -> String {
+    let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "worker".to_string());
+    let mut prefix = hostname
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    prefix.truncate(46);
+    let prefix = prefix.trim_matches('-');
+    let prefix = if prefix.is_empty() { "worker" } else { prefix };
+    let random = uuid::Uuid::now_v7().simple().to_string();
+    let suffix = random.get(16..).unwrap_or(random.as_str());
+    format!("{prefix}-{suffix}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_worker_id;
+
+    #[test]
+    fn default_identity_is_bounded_and_unique_per_process() {
+        let first = default_worker_id();
+        let second = default_worker_id();
+        assert_ne!(first, second);
+        assert!(first.len() <= 63);
+        assert!(first.chars().all(|character| character.is_ascii_lowercase()
+            || character.is_ascii_digit()
+            || character == '-'));
     }
 }

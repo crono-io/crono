@@ -25,6 +25,7 @@ pub struct CreateJobInput {
     pub queue_id: Uuid,
     pub executor: ExecutorKind,
     pub executable: Option<String>,
+    pub shell_command: Option<String>,
     pub arguments: Vec<String>,
     pub inputs: serde_json::Value,
     pub idempotent: bool,
@@ -79,16 +80,27 @@ pub struct TargetSetRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunRecord {
     pub run: Run,
+    pub has_execution_snapshot: bool,
     pub job_namespace: NamespaceName,
     pub job_name: crate::domain::ResourceName,
     pub target_namespace: NamespaceName,
     pub target_name: crate::domain::ResourceName,
+    pub target_set_name: Option<crate::domain::ResourceName>,
+    pub queue_name: crate::domain::QueueName,
+}
+
+/// A durable server-side milestone safe for authorized Run readers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunEventRecord {
+    pub event_type: String,
+    pub created_at: time::OffsetDateTime,
 }
 
 /// One Attempt's bounded output, returned only through a `RunRead` decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunAttemptRecord {
     pub id: Uuid,
+    pub worker_id: Option<String>,
     pub attempt: u16,
     pub status: String,
     pub started_at: Option<time::OffsetDateTime>,
@@ -110,6 +122,7 @@ pub struct WorkerRecord {
     pub started_at: time::OffsetDateTime,
     pub last_seen_at: time::OffsetDateTime,
     pub active_executions: u64,
+    pub diagnostics: Option<crono_api::WorkerDiagnostics>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

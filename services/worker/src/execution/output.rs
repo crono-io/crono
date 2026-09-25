@@ -43,14 +43,7 @@ impl EventSink for ConsoleSink {
                         scheduled_at,
                     } => (
                         "run received",
-                        format!(
-                            "dispatch={dispatch_id} job={} queue={} worker={} trigger={} scheduled_at={}",
-                            option_display(envelope.job_id),
-                            envelope.queue,
-                            envelope.worker_id,
-                            trigger.map_or("unknown", trigger_label),
-                            option_display(*scheduled_at),
-                        ),
+                        received_detail(envelope, *dispatch_id, *trigger, *scheduled_at),
                     ),
                     ExecutionEvent::RunStarted { dry_run } => {
                         ("run started", format!("dry_run={dry_run}"))
@@ -60,12 +53,13 @@ impl EventSink for ConsoleSink {
                     }
                     ExecutionEvent::CommandResolved {
                         executable,
+                        shell_command,
                         template,
                         arguments,
                     } => (
                         "command resolved",
                         format!(
-                            "executable={executable:?} template={template:?} argv={arguments:?}"
+                            "executable={executable:?} shell_command={shell_command:?} template={template:?} argv={arguments:?}"
                         ),
                     ),
                     ExecutionEvent::ProcessStarted { pid } => {
@@ -128,6 +122,22 @@ impl EventSink for ConsoleSink {
     }
 }
 
+fn received_detail(
+    envelope: &ExecutionEventEnvelope,
+    dispatch_id: uuid::Uuid,
+    trigger: Option<ExecutionTrigger>,
+    scheduled_at: Option<impl Display>,
+) -> String {
+    format!(
+        "dispatch={dispatch_id} job={} queue={} worker={} trigger={} scheduled_at={}",
+        option_display(envelope.job_id),
+        envelope.queue,
+        envelope.worker_id,
+        trigger.map_or("unknown", trigger_label),
+        option_display(scheduled_at),
+    )
+}
+
 fn option_display<T: Display>(value: Option<T>) -> String {
     value.map_or_else(|| "-".to_string(), |item| item.to_string())
 }
@@ -136,6 +146,7 @@ const fn trigger_label(trigger: ExecutionTrigger) -> &'static str {
     match trigger {
         ExecutionTrigger::Manual => "manual",
         ExecutionTrigger::Schedule => "schedule",
+        ExecutionTrigger::Rerun => "rerun",
     }
 }
 

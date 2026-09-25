@@ -3,7 +3,7 @@
 //! Run state is authoritative in PostgreSQL. `JetStream` may redeliver any
 //! attempt, so transitions are conditional and terminal Runs are immutable.
 
-use super::{JobId, RunId, ScheduleId, TargetId};
+use super::{JobId, QueueId, RunId, ScheduleId, TargetId};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -34,15 +34,38 @@ impl RunStatus {
                 | Self::Unknown
         )
     }
+
+    /// Repeat only outcomes whose original execution is no longer uncertain.
+    /// An `Unknown` Run may still have run despite lost completion reporting.
+    #[must_use]
+    pub const fn is_repeatable(self) -> bool {
+        self.is_terminal() && !matches!(self, Self::Unknown)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RunStatus;
+
+    #[test]
+    fn unknown_outcome_is_terminal_but_not_safe_to_repeat() {
+        assert!(RunStatus::Unknown.is_terminal());
+        assert!(!RunStatus::Unknown.is_repeatable());
+        assert!(!RunStatus::Running.is_repeatable());
+        assert!(RunStatus::Succeeded.is_repeatable());
+        assert!(RunStatus::Failed.is_repeatable());
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Run {
     id: RunId,
     request_id: Option<Uuid>,
+    rerun_of_run_id: Option<RunId>,
     schedule_id: Option<ScheduleId>,
     job_id: JobId,
     target_id: TargetId,
+    queue_id: QueueId,
     status: RunStatus,
     scheduled_at: OffsetDateTime,
     created_at: OffsetDateTime,
@@ -59,9 +82,11 @@ pub struct Run {
 pub struct RunData {
     pub id: RunId,
     pub request_id: Option<Uuid>,
+    pub rerun_of_run_id: Option<RunId>,
     pub schedule_id: Option<ScheduleId>,
     pub job_id: JobId,
     pub target_id: TargetId,
+    pub queue_id: QueueId,
     pub status: RunStatus,
     pub scheduled_at: OffsetDateTime,
     pub created_at: OffsetDateTime,
@@ -80,9 +105,11 @@ impl Run {
         let RunData {
             id,
             request_id,
+            rerun_of_run_id,
             schedule_id,
             job_id,
             target_id,
+            queue_id,
             status,
             scheduled_at,
             created_at,
@@ -97,9 +124,11 @@ impl Run {
         Self {
             id,
             request_id,
+            rerun_of_run_id,
             schedule_id,
             job_id,
             target_id,
+            queue_id,
             status,
             scheduled_at,
             created_at,
@@ -122,6 +151,10 @@ impl Run {
         self.request_id
     }
     #[must_use]
+    pub const fn rerun_of_run_id(&self) -> Option<RunId> {
+        self.rerun_of_run_id
+    }
+    #[must_use]
     pub const fn schedule_id(&self) -> Option<ScheduleId> {
         self.schedule_id
     }
@@ -132,6 +165,10 @@ impl Run {
     #[must_use]
     pub const fn target_id(&self) -> TargetId {
         self.target_id
+    }
+    #[must_use]
+    pub const fn queue_id(&self) -> QueueId {
+        self.queue_id
     }
     #[must_use]
     pub const fn status(&self) -> RunStatus {

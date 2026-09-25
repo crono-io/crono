@@ -3,8 +3,9 @@
 use super::{
     ApplicationError, Authorizer, Capability, ControlPlaneStore, CreateJobInput, CreateQueueInput,
     CreateScheduleInput, JobDefinition, JobRecord, MonitorSnapshot, NewSchedule, Overview, Page,
-    RequestContext, ResourceScope, RunAttemptRecord, RunRecord, ScheduleRecord, StoreError,
-    TargetDefinition, TargetRecord, TargetSetRecord, UpdateQueueInput, WorkerRecord,
+    RequestContext, ResourceScope, RunAttemptRecord, RunEventRecord, RunListFilter, RunRecord,
+    ScheduleRecord, StoreError, TargetDefinition, TargetRecord, TargetSetRecord, UpdateQueueInput,
+    WorkerRecord,
 };
 use crate::{
     domain::{
@@ -273,6 +274,7 @@ impl Application {
             executor: input.executor,
             queue_id,
             executable: input.executable,
+            shell_command: input.shell_command,
             arguments: input.arguments,
             inputs: input.inputs,
             idempotent: input.idempotent,
@@ -335,6 +337,7 @@ impl Application {
             executor: input.executor,
             queue_id,
             executable: input.executable,
+            shell_command: input.shell_command,
             arguments: input.arguments,
             inputs: input.inputs,
             idempotent: input.idempotent,
@@ -886,6 +889,7 @@ impl Application {
     pub async fn list_runs(
         &self,
         context: &RequestContext,
+        filter: RunListFilter,
         limit: Option<u16>,
         before: Option<Uuid>,
     ) -> Result<Page<RunRecord>, ApplicationError> {
@@ -895,8 +899,60 @@ impl Application {
             .await?;
         Ok(self
             .store
-            .list_runs(&visibility, page_limit(limit)?, before)
+            .list_runs(&visibility, filter, page_limit(limit)?, before)
             .await?)
+    }
+
+    /// Repeat exactly one authorized historical Run's snapshot, not today's
+    /// Job or Target defaults. The source and new Run remain distinct.
+    ///
+    /// # Errors
+    ///
+    /// Returns authorization, validation, conflict, or persistence failures.
+    pub async fn rerun_run(
+        &self,
+        context: &RequestContext,
+        source_id: Uuid,
+        request_id: Uuid,
+    ) -> Result<CreateRunOutcome, ApplicationError> {
+        let source = self.get_run(context, source_id).await?;
+        if !source.run.status().is_repeatable() {
+            return Err(ApplicationError::invalid_request(
+                "Only Runs with a confirmed terminal outcome can be re-run.",
+            ));
+        }
+        if !source.has_execution_snapshot {
+            return Err(ApplicationError::invalid_request(
+                "This Run failed before an executable snapshot was created and cannot be re-run.",
+            ));
+        }
+        self.authorizer
+            .authorize(
+                context,
+                Capability::JobExecute,
+                &ResourceScope::Job(source.run.job_id()),
+            )
+            .await?;
+        let job = self.store.get_job(source.run.job_id()).await?;
+        self.authorizer
+            .authorize(
+                context,
+                Capability::TargetUse,
+                &ResourceScope::Target(source.run.target_id()),
+            )
+            .await?;
+        self.authorizer
+            .authorize(
+                context,
+                Capability::RunCreate,
+                &ResourceScope::Namespace(job.job.namespace_id()),
+            )
+            .await?;
+        let (run, created) = self.store.rerun_run(source.run.id(), request_id).await?;
+        Ok(CreateRunOutcome {
+            runs: vec![run],
+            created,
+        })
     }
 
     /// Read one Run after its resource-specific authorization decision.
@@ -943,6 +999,30 @@ impl Application {
             .await?)
     }
 
+    /// Return durable lifecycle milestones only after the Run-read decision;
+    /// event payloads stay server-side because they are not a public contract.
+    ///
+    /// # Errors
+    ///
+    /// Returns authorization, not-found, or persistence failures.
+    pub async fn list_run_events(
+        &self,
+        context: &RequestContext,
+        id: Uuid,
+    ) -> Result<Vec<RunEventRecord>, ApplicationError> {
+        self.authorizer
+            .authorize(context, Capability::RunRead, &ResourceScope::Run(id))
+            .await?;
+        let visibility = self
+            .authorizer
+            .visibility(context, Capability::RunRead)
+            .await?;
+        Ok(self
+            .store
+            .list_run_events(RunId::new(id), &visibility)
+            .await?)
+    }
+
     /// List recently observed workers after a control-plane authorization decision.
     ///
     /// Presence is operational metadata rather than Namespace-owned data, so
@@ -965,6 +1045,25 @@ impl Application {
             )
             .await?;
         Ok(self.store.list_workers(page_limit(limit)?, after).await?)
+    }
+
+    /// Read one worker's bounded diagnostics after the global `WorkerRead` decision.
+    ///
+    /// # Errors
+    /// Returns authorization, not-found, or dependency failures.
+    pub async fn get_worker(
+        &self,
+        context: &RequestContext,
+        worker_id: &str,
+    ) -> Result<WorkerRecord, ApplicationError> {
+        self.authorizer
+            .authorize(
+                context,
+                Capability::WorkerRead,
+                &ResourceScope::ControlPlane,
+            )
+            .await?;
+        Ok(self.store.get_worker(worker_id).await?)
     }
 
     /// Count only resources visible to the established principal.
@@ -1187,14 +1286,37 @@ fn validate_job(input: &CreateJobInput) -> Result<(), ApplicationError> {
             "execution retry policy is outside supported bounds",
         ));
     }
-    match (input.executor, input.executable.as_deref()) {
-        (ExecutorKind::Noop, None) => Ok(()),
-        (ExecutorKind::Process, Some(path)) if path.starts_with('/') && !path.contains('\0') => {
+    let path_valid = input
+        .executable
+        .as_deref()
+        .is_some_and(|path| path.starts_with('/') && !path.contains('\0') && path.len() <= 4096);
+    match input.executor {
+        ExecutorKind::Noop if input.executable.is_none() && input.shell_command.is_none() => Ok(()),
+        ExecutorKind::Process if path_valid && input.shell_command.is_none() => Ok(()),
+        ExecutorKind::Shell if path_valid => {
+            let Some(script) = input.shell_command.as_deref() else {
+                return Err(ApplicationError::invalid(
+                    "shell_command",
+                    "Shell Jobs require a script.",
+                ));
+            };
+            if script.trim().is_empty() || script.len() > 65_536 || script.contains('\0') {
+                return Err(ApplicationError::invalid(
+                    "shell_command",
+                    "Shell script must be nonempty, NUL-free, and at most 64 KiB.",
+                ));
+            }
+            if script.contains("{{") {
+                return Err(ApplicationError::invalid(
+                    "shell_command",
+                    "Pass input templates as Arguments and read them using $1, $2, etc.; shell source is literal.",
+                ));
+            }
             Ok(())
         }
         _ => Err(ApplicationError::invalid(
             "executable",
-            "process jobs require an absolute executable; noop jobs require none",
+            "Process and Shell Jobs require one absolute executable path; No-op Jobs require none.",
         )),
     }
 }

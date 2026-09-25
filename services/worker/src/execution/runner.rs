@@ -1,8 +1,9 @@
-//! Direct process execution and bounded line-oriented child output.
+//! Process and explicit shell execution with bounded line-oriented child output.
 //!
 //! Server-rendered argv and merged inputs are immutable; only sanitized copies
 //! enter events or Attempt tails. Both pipes are drained concurrently, and
-//! dropping this future cancels the pipe readers and kills the child.
+//! dropping this future cancels the pipe readers and kills the child. Shell
+//! scripts remain literal while rendered arguments enter as positional data.
 
 use crate::execution::{ExecutionEvent, ExecutionPhase, ExecutionTimeline, Redactor};
 use anyhow::{Context, Result, bail};
@@ -69,6 +70,10 @@ pub(crate) async fn execute_snapshot(
     if let Some(executable) = execution.executable.as_deref() {
         timeline.emit(ExecutionEvent::CommandResolved {
             executable: redactor.text(executable),
+            shell_command: execution
+                .shell_command
+                .as_deref()
+                .map(|script| redactor.text(script)),
             template: redactor.arguments(&execution.argument_templates),
             arguments: redactor.arguments(&execution.arguments),
         });
@@ -92,7 +97,9 @@ pub(crate) async fn execute_snapshot(
                 failure_phase: None,
             })
         }
-        ExecutorKind::Process => execute_process(execution, timeline, redactor).await,
+        ExecutorKind::Process | ExecutorKind::Shell => {
+            execute_process(execution, timeline, redactor).await
+        }
     }
 }
 
@@ -108,7 +115,7 @@ fn dry_run_snapshot(
 ) -> Result<ExecutionResult> {
     let command = match execution.executor {
         ExecutorKind::Noop => "no-op executor (no command)".to_string(),
-        ExecutorKind::Process => {
+        ExecutorKind::Process | ExecutorKind::Shell => {
             let executable = execution
                 .executable
                 .as_deref()
@@ -116,17 +123,23 @@ fn dry_run_snapshot(
             if !executable.starts_with('/') {
                 bail!("process executable is not absolute");
             }
+            if execution.executor == ExecutorKind::Shell && execution.shell_command.is_none() {
+                bail!("shell snapshot has no script");
+            }
             let arguments = redactor
                 .arguments(&execution.arguments)
                 .iter()
                 .map(|argument| format!("{argument:?}"))
                 .collect::<Vec<_>>()
                 .join(" ");
-            if arguments.is_empty() {
-                format!("{:?}", redactor.text(executable))
-            } else {
-                format!("{:?} {arguments}", redactor.text(executable))
-            }
+            let script = execution
+                .shell_command
+                .as_ref()
+                .map(|value| format!(" -c {:?} crono-job", redactor.text(value)))
+                .unwrap_or_default();
+            format!("{:?}{script} {arguments}", redactor.text(executable))
+                .trim_end()
+                .to_string()
         }
     };
     let line = format!("DRY RUN (not executed): {command}");
@@ -186,6 +199,15 @@ async fn execute_process(
     };
 
     let mut command = Command::new(executable);
+    if execution.executor == ExecutorKind::Shell {
+        let Some(script) = execution.shell_command.as_deref() else {
+            return Ok(ExecutionResult::failed(
+                ExecutionPhase::Command,
+                "shell snapshot has no script",
+            ));
+        };
+        command.args(["-c", script, "crono-job"]);
+    }
     command
         .args(&execution.arguments)
         .env_clear()
@@ -206,7 +228,7 @@ async fn execute_process(
         Err(error) => {
             return Ok(ExecutionResult::failed(
                 ExecutionPhase::Spawn,
-                format!("failed to spawn process executor: {error}"),
+                format!("failed to spawn executor {executable:?}: {error}"),
             ));
         }
     };

@@ -149,6 +149,7 @@ pub enum ExecutorKind {
     #[default]
     Noop,
     Process,
+    Shell,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -160,6 +161,9 @@ pub struct CreateJobRequest {
     #[serde(default)]
     pub executor: ExecutorKind,
     pub executable: Option<String>,
+    /// Literal shell source; input templates belong in positional arguments.
+    #[serde(default)]
+    pub shell_command: Option<String>,
     #[serde(default)]
     pub arguments: Vec<String>,
     #[serde(default = "default_inputs")]
@@ -190,6 +194,8 @@ pub struct UpdateJobRequest {
     pub queue_id: Uuid,
     pub executor: ExecutorKind,
     pub executable: Option<String>,
+    #[serde(default)]
+    pub shell_command: Option<String>,
     pub arguments: Vec<String>,
     pub inputs: serde_json::Value,
     pub idempotent: bool,
@@ -238,6 +244,8 @@ pub struct JobResource {
     pub queue_id: Uuid,
     pub queue: String,
     pub executable: Option<String>,
+    #[serde(default)]
+    pub shell_command: Option<String>,
     pub arguments: Vec<String>,
     pub inputs: serde_json::Value,
     pub idempotent: bool,
@@ -448,6 +456,26 @@ pub struct CreateRunRequest {
     pub inputs: serde_json::Value,
 }
 
+/// Idempotent request to repeat one historical Run's immutable execution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RerunRequest {
+    pub request_id: Uuid,
+}
+
+/// Server-established origin; a manual HTTP request cannot claim to be a CLI user.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum RunTriggerSource {
+    #[default]
+    Unknown,
+    Api,
+    Scheduler,
+    Rerun,
+}
+
 /// Durable logical execution state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -473,18 +501,71 @@ pub struct RunResource {
     pub schedule_id: Option<Uuid>,
     pub job_id: Uuid,
     pub job: String,
+    #[serde(default)]
+    pub namespace: String,
+    #[serde(default)]
+    pub job_name: String,
     pub target_id: Uuid,
     pub target: String,
+    #[serde(default)]
+    pub target_name: String,
+    /// Original Target Set label when this Run was one member of a batch.
+    pub target_set: Option<String>,
+    #[serde(default)]
+    pub queue: String,
+    #[serde(default)]
+    pub trigger_source: RunTriggerSource,
+    /// Reserved for a future verified identity; never inferred from client input.
+    pub trigger_actor: Option<String>,
+    pub rerun_of_run_id: Option<Uuid>,
+    /// Whether a terminal Run has a stored executable snapshot to repeat.
+    #[serde(default)]
+    pub rerunnable: bool,
     pub status: RunStatus,
     pub scheduled_at: String,
     pub created_at: String,
+    /// Time the Run record was materialized; scheduled occurrence stays separate.
+    #[serde(default)]
+    pub triggered_at: String,
     pub queued_at: Option<String>,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
+    /// Database-observed elapsed time from Run start to completion.
+    pub duration_ms: Option<u64>,
     pub attempt_count: u16,
     pub max_attempts: u16,
     pub lateness_seconds: u64,
     pub terminal_reason: Option<String>,
+}
+
+/// One durable server-side lifecycle event, without execution payloads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RunEventResource {
+    pub event_type: String,
+    pub created_at: String,
+}
+
+#[cfg(test)]
+mod run_resource_compatibility_tests {
+    use super::{RunResource, RunTriggerSource};
+
+    #[test]
+    fn older_server_run_response_remains_readable_without_new_metadata()
+    -> Result<(), serde_json::Error> {
+        let id = uuid::Uuid::now_v7();
+        let old = serde_json::json!({
+            "id": id, "job_id": id, "job": "demo/backup", "target_id": id,
+            "target": "demo/db", "status": "succeeded",
+            "scheduled_at": "2026-09-25T12:00:00Z", "created_at": "2026-09-25T12:00:00Z",
+            "attempt_count": 1, "max_attempts": 1, "lateness_seconds": 0
+        });
+        let run: RunResource = serde_json::from_value(old)?;
+        assert_eq!(run.trigger_source, RunTriggerSource::Unknown);
+        assert!(!run.rerunnable);
+        assert!(run.triggered_at.is_empty());
+        Ok(())
+    }
 }
 
 /// State of one execution Attempt within a durable Run.
@@ -507,6 +588,7 @@ pub enum AttemptStatus {
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct RunAttemptResource {
     pub id: Uuid,
+    pub worker_id: Option<String>,
     pub attempt: u16,
     pub status: AttemptStatus,
     pub started_at: Option<String>,
@@ -548,6 +630,31 @@ pub struct WorkerResource {
     pub started_at: String,
     pub last_seen_at: String,
     pub active_executions: u64,
+}
+
+/// Bounded, allowlisted worker facts; arbitrary process environment is never sent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WorkerDiagnostics {
+    pub hostname: String,
+    pub os: String,
+    pub architecture: String,
+    pub default_shell_path: String,
+    pub default_shell_present: bool,
+    pub dry_run: bool,
+    pub lang: Option<String>,
+    pub lc_all: Option<String>,
+    pub tz: Option<String>,
+}
+
+/// Authorized detail view of one worker presence record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WorkerDetailsResource {
+    #[serde(flatten)]
+    pub worker: WorkerResource,
+    pub diagnostics: Option<WorkerDiagnostics>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -670,6 +777,7 @@ pub struct DispatchEnvelope {
 pub enum ExecutionTrigger {
     Manual,
     Schedule,
+    Rerun,
 }
 
 /// Immutable executable configuration returned only after a successful claim.
@@ -677,6 +785,8 @@ pub enum ExecutionTrigger {
 pub struct ExecutionSnapshot {
     pub executor: ExecutorKind,
     pub executable: Option<String>,
+    #[serde(default)]
+    pub shell_command: Option<String>,
     /// Original argv templates; absent in snapshots created before timeline support.
     #[serde(default)]
     pub argument_templates: Vec<String>,
@@ -738,6 +848,8 @@ pub struct WorkerHeartbeatRequest {
     pub queue_id: Uuid,
     pub concurrency: u16,
     pub version: String,
+    #[serde(default)]
+    pub diagnostics: Option<WorkerDiagnostics>,
 }
 
 /// Worker request for resolving a configured Queue name to stable routing data.
@@ -782,6 +894,17 @@ pub struct CompletionRequest {
     pub stdout_tail: String,
     pub stderr_tail: String,
     pub error: Option<String>,
+}
+
+/// Lease-scoped, bounded live output snapshot; completion remains authoritative.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OutputSnapshotRequest {
+    pub attempt_id: Uuid,
+    pub worker_id: String,
+    pub sequence: u64,
+    pub stdout_tail: String,
+    pub stderr_tail: String,
 }
 
 #[cfg(test)]
