@@ -148,6 +148,7 @@ pub enum MaterialSymbol {
     Check,
     Dashboard,
     Dns,
+    Error,
     ExpandMore,
     Info,
     Lan,
@@ -156,6 +157,7 @@ pub enum MaterialSymbol {
     Monitoring,
     PlayCircle,
     Queue,
+    Refresh,
     Replay,
     SearchOff,
     Settings,
@@ -174,6 +176,7 @@ impl MaterialSymbol {
             Self::Check => "check",
             Self::Dashboard => "dashboard",
             Self::Dns => "dns",
+            Self::Error => "error",
             Self::ExpandMore => "expand_more",
             Self::Info => "info",
             Self::Lan => "lan",
@@ -182,6 +185,7 @@ impl MaterialSymbol {
             Self::Monitoring => "monitoring",
             Self::PlayCircle => "play_circle",
             Self::Queue => "queue",
+            Self::Refresh => "refresh",
             Self::Replay => "replay",
             Self::SearchOff => "search_off",
             Self::Settings => "settings",
@@ -418,8 +422,10 @@ mod tests {
     }
 
     #[test]
-    fn run_action_symbols_have_intentional_ligatures() {
+    fn action_and_feedback_symbols_have_intentional_ligatures() {
+        assert_eq!(MaterialSymbol::Error.as_str(), "error");
         assert_eq!(MaterialSymbol::Info.as_str(), "info");
+        assert_eq!(MaterialSymbol::Refresh.as_str(), "refresh");
         assert_eq!(MaterialSymbol::Terminal.as_str(), "terminal");
         assert_eq!(MaterialSymbol::Replay.as_str(), "replay");
         assert_eq!(MaterialSymbol::Timer.as_str(), "timer");

@@ -4,9 +4,11 @@
 //! explicit, separately authorized read and is not embedded in the Run record.
 
 use super::{
-    RUN_ACTION_CLASS, display_duration, display_event_time, display_time, history::RerunAction,
-    output::RunAttemptOutput, run_triggered_at, status_can_change, status_class, status_label,
-    trigger_label,
+    RUN_ACTION_CLASS, display_duration, display_event_time, display_time,
+    history::RerunAction,
+    notice::{CreatedRunNotice, show_created_run},
+    output::RunAttemptOutput,
+    run_triggered_at, status_can_change, status_class, status_label, trigger_label,
 };
 use crate::{
     api,
@@ -22,6 +24,11 @@ use uuid::Uuid;
 pub fn RunDetailsPage() -> impl IntoView {
     let created_run_id = RwSignal::new(None::<Uuid>);
     let params = use_params_map();
+    // The router may reuse this page for another Run ID; do not carry its notice.
+    Effect::new(move |_| {
+        let _ = params.get().get("run_id");
+        created_run_id.set(None);
+    });
     let run_id = move || {
         params
             .get()
@@ -43,9 +50,9 @@ pub fn RunDetailsPage() -> impl IntoView {
             <PageHeader title="Run details" description="Inspect execution timing, dispatch history, and Attempt output.">
                 <A href=AppRoute::Runs.path() attr:class="text-sm font-medium text-crono-primary">"← All Runs"</A>
             </PageHeader>
-            {move || created_run_id.get().map(|id| view! { <p class="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800" role="status">"New Run created. "<A href=crate::navigation::run_details_path(id) attr:class="font-semibold underline">"View new Run →"</A></p> })}
+            <CreatedRunNotice notice=created_run_id />
             {move || run.map(|result| match result {
-                Ok(item) => view! { <RunDetails run=item.clone() on_refresh=Callback::new(move |()| run.refetch()) on_created=Callback::new(move |id| { created_run_id.set(Some(id)); run.refetch(); }) /> }.into_any(),
+                Ok(item) => view! { <RunDetails run=item.clone() on_refresh=Callback::new(move |()| run.refetch()) on_open=Callback::new(move |()| created_run_id.set(None)) on_created=Callback::new(move |id| { show_created_run(created_run_id, id); run.refetch(); }) /> }.into_any(),
                 Err(error) => view! { <p class="rounded-xl border border-crono-border bg-crono-surface p-6 text-sm text-crono-failed" role="alert">{error.message.clone()}</p> }.into_any(),
             }).unwrap_or_else(|| view! { <p class="text-sm text-crono-muted">"Loading Run…"</p> }.into_any())}
         </div>
@@ -56,6 +63,7 @@ pub fn RunDetailsPage() -> impl IntoView {
 fn RunDetails(
     run: crono_api::RunResource,
     on_refresh: Callback<()>,
+    on_open: Callback<()>,
     on_created: Callback<Uuid>,
 ) -> impl IntoView {
     let output_open = RwSignal::new(false);
@@ -85,15 +93,15 @@ fn RunDetails(
             {run.terminal_reason.clone().map(|reason| view! { <p class="rounded-md bg-red-50 p-3 text-sm text-crono-failed">{reason}</p> })}
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
                 {status_can_change(run_status).then(|| view! {
-                    <button type="button" class=RUN_ACTION_CLASS on:click=move |_| on_refresh.run(())>"Refresh status"</button>
+                    <button type="button" class=RUN_ACTION_CLASS on:click=move |_| on_refresh.run(())><Icon symbol=MaterialSymbol::Refresh class="text-lg" />"Refresh status"</button>
                 })}
                 <button type="button" class=RUN_ACTION_CLASS aria-expanded=move || output_open.get().to_string() on:click=move |_| output_open.update(|open| *open = !*open)><Icon symbol=MaterialSymbol::Terminal class="text-lg" />{move || if output_open.get() { "Hide output" } else { "View output" }}</button>
-                <Show when=move || run.rerunnable><RerunAction run=run.clone() on_created /></Show>
+                <Show when=move || run.rerunnable><RerunAction run=run.clone() on_open on_created /></Show>
             </div>
             <Show when=move || output_open.get()><RunAttemptOutput run_id status=run_status /></Show>
         </section>
         <section class="rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
-            <div class="flex items-center justify-between"><h2 class="font-semibold text-crono-text">"Execution timeline"</h2><button type="button" class="text-sm font-medium text-crono-primary" on:click=move |_| events.refetch()>"Refresh timeline"</button></div>
+            <div class="flex flex-wrap items-center justify-between gap-2"><h2 class="font-semibold text-crono-text">"Execution timeline"</h2><TimelineRefreshButton status=run_status on_refresh=Callback::new(move |()| events.refetch()) /></div>
             <p class="mt-1 text-xs text-crono-muted">"Server-observed lifecycle events. Worker execution events are not persisted here yet."</p>
             {move || events.map(|result| match result {
                 Ok(items) if items.is_empty() => view! { <p class="mt-4 text-sm text-crono-muted">"No timeline events recorded."</p> }.into_any(),
@@ -103,5 +111,84 @@ fn RunDetails(
                 Err(error) => view! { <p class="mt-4 text-sm text-crono-failed" role="alert">{error.message.clone()}</p> }.into_any(),
             }).unwrap_or_else(|| view! { <p class="mt-4 text-sm text-crono-muted">"Loading timeline…"</p> }.into_any())}
         </section>
+    }
+}
+
+/// Offer timeline refresh only while the server can still append Run events.
+#[component]
+fn TimelineRefreshButton(status: crono_api::RunStatus, on_refresh: Callback<()>) -> impl IntoView {
+    status_can_change(status).then(|| {
+        view! {
+            <button type="button" class=RUN_ACTION_CLASS on:click=move |_| on_refresh.run(())>
+                <Icon symbol=MaterialSymbol::Refresh class="text-lg" />
+                "Refresh timeline"
+            </button>
+        }
+    })
+}
+
+#[cfg(test)]
+mod browser_tests {
+    use super::TimelineRefreshButton;
+    use crono_api::RunStatus;
+    use leptos::prelude::*;
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
+    use web_sys::HtmlElement;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
+    fn timeline_refresh_has_an_icon_only_for_active_runs() {
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let host = document
+            .create_element("div")
+            .ok()
+            .and_then(|element| element.dyn_into::<HtmlElement>().ok());
+        assert!(host.is_some(), "browser test requires a host element");
+        let Some(host) = host else {
+            return;
+        };
+        let Some(body) = document.body() else {
+            return;
+        };
+        assert!(body.append_child(&host).is_ok());
+        let handle = leptos::mount::mount_to(host.clone(), || {
+            view! {
+                <div id="running-timeline"><TimelineRefreshButton status=RunStatus::Running on_refresh=Callback::new(|()| {}) /></div>
+                <div id="finished-timeline"><TimelineRefreshButton status=RunStatus::Succeeded on_refresh=Callback::new(|()| {}) /></div>
+            }
+        });
+        let refresh = host
+            .query_selector("#running-timeline button")
+            .ok()
+            .flatten();
+        assert!(refresh.is_some(), "running Runs should offer refresh");
+        assert!(
+            refresh
+                .as_ref()
+                .and_then(|button| button.text_content())
+                .is_some_and(|text| text.contains("Refresh timeline"))
+        );
+        let icon = refresh.and_then(|button| {
+            button
+                .query_selector(".material-symbols-outlined")
+                .ok()
+                .flatten()
+        });
+        assert_eq!(
+            icon.and_then(|icon| icon.text_content()).as_deref(),
+            Some("refresh")
+        );
+        assert!(
+            host.query_selector("#finished-timeline button")
+                .ok()
+                .flatten()
+                .is_none()
+        );
+        drop(handle);
+        host.remove();
     }
 }

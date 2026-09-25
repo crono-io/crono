@@ -5,8 +5,10 @@
 
 use super::{
     ACTION_CLASS, RUN_ACTION_CLASS, display_duration, display_time, history_time_parts,
-    output::RunAttemptOutput, run_job_name, run_namespace, run_target_name, run_triggered_at,
-    status_class, status_label, trigger_label,
+    notice::{CreatedRunNotice, show_created_run},
+    output::RunAttemptOutput,
+    run_job_name, run_namespace, run_target_name, run_triggered_at, status_class, status_label,
+    trigger_label,
 };
 use crate::{
     api,
@@ -81,7 +83,7 @@ pub fn RunsPage() -> impl IntoView {
             <PageHeader title="Runs" description="Observe executions, inspect failures, and repeat previous runs.">
                 <A href=AppRoute::RunsNew.path() attr:class=ACTION_CLASS>"Run a Job"</A>
             </PageHeader>
-            {move || created_run_id.get().map(|id| view! { <p class="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800" role="status">"New Run created. "<A href=run_details_path(id) attr:class="font-semibold underline">"View new Run →"</A></p> })}
+            <CreatedRunNotice notice=created_run_id />
             <section class="grid gap-3 rounded-xl border border-crono-border bg-crono-surface p-4 sm:grid-cols-2 lg:grid-cols-5">
                 <ResourceSelect id="runs-namespace-filter" label="Namespace" placeholder="All namespaces" options=namespace_choices.options selected=namespace_id loading=namespace_choices.loading load_error=namespace_choices.load_error optional=true />
                 <div><label for="runs-status-filter" class="mb-2 block text-sm font-medium text-crono-text">"Status"</label>
@@ -106,7 +108,7 @@ pub fn RunsPage() -> impl IntoView {
                             <A href=AppRoute::RunsNew.path() attr:class=ACTION_CLASS>"Run a Job"</A>
                         </EmptyState>
                     }.into_any(),
-                    Ok(page) => view! { <RunList page=page.clone() on_created=Callback::new(move |id| { created_run_id.set(Some(id)); runs.refetch(); }) /> }.into_any(),
+                    Ok(page) => view! { <RunList page=page.clone() on_open=Callback::new(move |()| created_run_id.set(None)) on_created=Callback::new(move |id| { show_created_run(created_run_id, id); runs.refetch(); }) /> }.into_any(),
                     Err(error) => view! { <p class="px-6 py-10 text-center text-sm text-crono-failed" role="alert">{error.message.clone()}</p> }.into_any(),
                 }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Runs…"</p> }.into_any())}
             </section>
@@ -124,20 +126,28 @@ pub fn RunsPage() -> impl IntoView {
 
 /// Align execution times across Runs without coupling the list to output loading.
 #[component]
-fn RunList(page: Page<RunResource>, on_created: Callback<Uuid>) -> impl IntoView {
+fn RunList(
+    page: Page<RunResource>,
+    on_open: Callback<()>,
+    on_created: Callback<Uuid>,
+) -> impl IntoView {
     view! {
         <div class="hidden grid-cols-[minmax(0,3fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-x-5 border-b border-crono-border bg-crono-primary-soft px-5 py-3 text-xs font-medium uppercase tracking-wide text-crono-muted sm:px-6 xl:grid">
             <span>"Job / Target"</span><span>"Started"</span><span>"Finished"</span><span>"Status"</span>
         </div>
         <ul class="divide-y divide-crono-border">{page.items.into_iter().map(|run| view! {
-            <li class="px-5 py-4 sm:px-6"><RunListItem run on_created /></li>
+            <li class="px-5 py-4 sm:px-6"><RunListItem run on_open on_created /></li>
         }).collect_view()}</ul>
     }
 }
 
 /// Keep dates, clock times, and statuses in stable columns across the history.
 #[component]
-fn RunListItem(run: RunResource, on_created: Callback<Uuid>) -> impl IntoView {
+fn RunListItem(
+    run: RunResource,
+    on_open: Callback<()>,
+    on_created: Callback<Uuid>,
+) -> impl IntoView {
     let output_open = RwSignal::new(false);
     let run_id = run.id;
     let destination = run.target_set.as_ref().map_or_else(
@@ -191,7 +201,7 @@ fn RunListItem(run: RunResource, on_created: Callback<Uuid>) -> impl IntoView {
             <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
                 <A href=details_path attr:class=RUN_ACTION_CLASS><Icon symbol=MaterialSymbol::Info class="text-lg" />"Details"</A>
                 <button type="button" class=RUN_ACTION_CLASS aria-expanded=move || output_open.get().to_string() on:click=move |_| output_open.update(|open| *open = !*open)><Icon symbol=MaterialSymbol::Terminal class="text-lg" />{move || if output_open.get() { "Hide output" } else { "Output" }}</button>
-                <Show when=move || rerun_allowed><RerunAction run=rerun_record.clone() on_created /></Show>
+                <Show when=move || rerun_allowed><RerunAction run=rerun_record.clone() on_open on_created /></Show>
             </div>
             <Show when=move || output_open.get()><RunAttemptOutput run_id status=run.status /></Show>
         </div>
@@ -217,11 +227,16 @@ fn RunHistoryTime(value: Option<String>) -> impl IntoView {
 }
 
 /// Require confirmation before repeating a saved, potentially disruptive command.
+/// The parent owns success feedback; this control retains only local failures.
 #[component]
-pub(super) fn RerunAction(run: RunResource, on_created: Callback<Uuid>) -> impl IntoView {
+pub(super) fn RerunAction(
+    run: RunResource,
+    on_open: Callback<()>,
+    on_created: Callback<Uuid>,
+) -> impl IntoView {
     let confirming = RwSignal::new(false);
     let submitting = RwSignal::new(false);
-    let result = RwSignal::new(None::<Result<Uuid, String>>);
+    let error = RwSignal::new(None::<String>);
     let request_id = RwSignal::new(Uuid::now_v7());
     let run_id = run.id;
     let job = run.job;
@@ -231,7 +246,7 @@ pub(super) fn RerunAction(run: RunResource, on_created: Callback<Uuid>) -> impl 
         .map(|set| format!("This repeats only {target}, one member of Target Set {set}."));
     view! {
         <div class="contents">
-            <button type="button" class=RUN_ACTION_CLASS aria-expanded=move || confirming.get().to_string() disabled=move || submitting.get() on:click=move |_| { request_id.set(Uuid::now_v7()); result.set(None); confirming.set(true); }><Icon symbol=MaterialSymbol::Replay class="text-lg" />"Re-run"</button>
+            <button type="button" class=RUN_ACTION_CLASS aria-expanded=move || confirming.get().to_string() disabled=move || submitting.get() on:click=move |_| { on_open.run(()); request_id.set(Uuid::now_v7()); error.set(None); confirming.set(true); }><Icon symbol=MaterialSymbol::Replay class="text-lg" />"Re-run"</button>
             <Show when=move || confirming.get()>
                 <div class="mt-2 w-full basis-full rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-crono-text" role="group" aria-label="Confirm re-run">
                     <p class="font-semibold">"Run again?"</p>
@@ -239,14 +254,14 @@ pub(super) fn RerunAction(run: RunResource, on_created: Callback<Uuid>) -> impl 
                     <p class="mt-1 text-crono-muted">"The original saved execution command, inputs, and policy will be reused. Secret values are not shown here."</p>
                     {set_note.clone().map(|note| view! { <p class="mt-1 text-crono-muted">{note}</p> })}
                     <div class="mt-3 flex flex-wrap gap-3">
-                        <button type="button" class="rounded-md px-3 py-2 font-medium text-crono-muted hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary" on:click=move |_| confirming.set(false)>"Cancel"</button>
+                        <button type="button" class="rounded-md px-3 py-2 font-medium text-crono-muted hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary" on:click=move |_| { confirming.set(false); error.set(None); }>"Cancel"</button>
                         <button type="button" class="rounded-md bg-crono-primary px-3 py-2 font-semibold text-white hover:bg-crono-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary focus-visible:ring-offset-2 disabled:opacity-50" disabled=move || submitting.get() on:click=move |_| {
-                            submitting.set(true); result.set(None);
+                            submitting.set(true); error.set(None);
                             let request_id = request_id.get_untracked();
                             spawn_local(async move {
                                 match api::rerun_run(run_id, request_id).await {
-                                    Ok(created) => { result.set(Some(Ok(created.id))); confirming.set(false); on_created.run(created.id); }
-                                    Err(error) => result.set(Some(Err(error.message))),
+                                    Ok(created) => { confirming.set(false); on_created.run(created.id); }
+                                    Err(failure) => error.set(Some(failure.message)),
                                 }
                                 submitting.set(false);
                             });
@@ -254,10 +269,7 @@ pub(super) fn RerunAction(run: RunResource, on_created: Callback<Uuid>) -> impl 
                     </div>
                 </div>
             </Show>
-            {move || result.get().map(|outcome| match outcome {
-                Ok(id) => view! { <A href=run_details_path(id) attr:class="basis-full text-sm font-medium text-crono-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">"New Run created →"</A> }.into_any(),
-                Err(message) => view! { <span class="basis-full text-sm text-crono-failed" role="alert">{message}</span> }.into_any(),
-            })}
+            {move || error.get().map(|message| view! { <span class="basis-full text-sm text-crono-failed" role="alert">{message}</span> })}
         </div>
     }
 }
@@ -322,7 +334,7 @@ mod browser_tests {
             view! {
                 <div class="flex flex-wrap">
                     <span>"Other action"</span>
-                    <RerunAction run=run.clone() on_created=Callback::new(|_| {}) />
+                    <RerunAction run=run.clone() on_open=Callback::new(|()| {}) on_created=Callback::new(|_| {}) />
                 </div>
             }
         });

@@ -7,6 +7,7 @@
 mod details;
 mod history;
 mod new;
+mod notice;
 mod output;
 
 pub use details::RunDetailsPage;

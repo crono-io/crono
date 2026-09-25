@@ -23,6 +23,9 @@ selected UUID rather than a display name. Target Sets use the same pattern for
 multi-selection, and Job creation selects an enabled Queue by UUID. Loading,
 empty, stale-selection, API, and field validation
 states remain in the form so failed submissions do not discard entered values.
+Submission feedback sits beside the Save action: success uses a status notice,
+while API failures use a visible alert. A duplicate Job name also appears beside
+the Name field, and the alert links back to All Jobs.
 The Resources sidebar's Jobs submenu links to All Jobs (`/jobs`) and Create Job
 (`/jobs/new`), never to individual Job records. Browsing requires a selected
 Namespace and offers a Create Job action and an actionable empty state. Each
@@ -40,9 +43,15 @@ those fields on narrow screens. Start and finish retain seconds and exact-time
 tooltips; the finish cell labels duration as elapsed time. History actions use
 decorative Material Symbols alongside visible Details, Output, and Re-run text,
 and the Re-run confirmation expands beneath the action row on narrow screens.
-Run details offer Refresh status only while the Run can still change. Opened
-Attempt output likewise offers Refresh output only for nonterminal Runs; terminal
-outcomes load output on demand without a redundant refresh control. Eligible
+Successful repeats show one link to the new Run. That notice clears when another
+repeat opens, can be dismissed, and expires after eight seconds; failed repeats
+keep their error beside the confirmation.
+Run details offer Refresh status and Refresh timeline only while the Run can
+still change; both use labeled refresh icons. Opened Attempt output likewise
+offers Refresh output only for nonterminal Runs; terminal
+outcomes load output on demand without a redundant refresh control. The live
+refresh control pairs the Material symbol with visible text and keyboard focus
+styling; the shared icon font stylesheet already covers that symbol. Eligible
 terminal Runs still offer Re-run.
 
 During an active Attempt, the worker uploads bounded, redacted output tails

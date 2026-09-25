@@ -6,7 +6,7 @@
 //! fetched once on opening rather than showing a redundant refresh control.
 
 use super::status_can_change;
-use crate::api;
+use crate::{api, components::Icon, navigation::MaterialSymbol};
 use crono_api::RunStatus;
 use leptos::prelude::*;
 use uuid::Uuid;
@@ -18,7 +18,10 @@ pub(super) fn RunAttemptOutput(run_id: Uuid, status: RunStatus) -> impl IntoView
     view! {
         <div class="mt-3 rounded-md border border-crono-border bg-zinc-50 p-3">
             {status_can_change(status).then(|| view! {
-                <button type="button" class="text-xs font-medium text-crono-primary hover:text-crono-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary" on:click=move |_| attempts.refetch()>"Refresh output"</button>
+                <button type="button" class="inline-flex items-center gap-1.5 rounded-md border border-crono-border bg-white px-2.5 py-1.5 text-xs font-medium text-crono-primary shadow-sm transition-colors hover:border-crono-primary/40 hover:bg-crono-primary-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary" on:click=move |_| attempts.refetch()>
+                    <Icon symbol=MaterialSymbol::Refresh class="text-base leading-none" />
+                    <span>"Refresh output"</span>
+                </button>
             })}
             {move || attempts.map(|result| match result {
                 Ok(items) if items.is_empty() => view! { <p class="mt-2 text-sm text-crono-muted">"No attempts yet."</p> }.into_any(),
@@ -103,9 +106,21 @@ mod browser_tests {
                 .is_none()
         );
         let refresh = host.query_selector("#running-output button").ok().flatten();
+        assert!(
+            refresh
+                .as_ref()
+                .and_then(|button| button.text_content())
+                .is_some_and(|text| text.contains("Refresh output"))
+        );
         assert_eq!(
-            refresh.and_then(|button| button.text_content()).as_deref(),
-            Some("Refresh output")
+            refresh
+                .and_then(|button| button
+                    .query_selector(".material-symbols-outlined")
+                    .ok()
+                    .flatten())
+                .and_then(|icon| icon.text_content())
+                .as_deref(),
+            Some("refresh")
         );
         drop(handle);
         host.remove();
