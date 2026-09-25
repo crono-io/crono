@@ -28,6 +28,7 @@ pub struct CreateJobInput {
     pub arguments: Vec<String>,
     pub inputs: serde_json::Value,
     pub idempotent: bool,
+    pub dry_run: bool,
     pub max_attempts: u16,
     pub retry_initial_seconds: u32,
     pub retry_max_seconds: u32,

@@ -17,6 +17,7 @@ pub enum AppRoute {
     Schedules,
     Runs,
     Workers,
+    Monitor,
     Settings,
 }
 
@@ -35,6 +36,7 @@ impl AppRoute {
             Self::Schedules => "/schedules",
             Self::Runs => "/runs",
             Self::Workers => "/workers",
+            Self::Monitor => "/monitor",
             Self::Settings => "/settings",
         }
     }
@@ -53,6 +55,7 @@ impl AppRoute {
             Self::Schedules => "Schedules",
             Self::Runs => "Runs",
             Self::Workers => "Workers",
+            Self::Monitor => "Monitor",
             Self::Settings => "Settings",
         }
     }
@@ -70,6 +73,7 @@ impl AppRoute {
             Self::Schedules => MaterialSymbol::CalendarMonth,
             Self::Runs => MaterialSymbol::PlayCircle,
             Self::Workers => MaterialSymbol::Memory,
+            Self::Monitor => MaterialSymbol::Monitoring,
             Self::Settings => MaterialSymbol::Settings,
         }
     }
@@ -132,6 +136,7 @@ pub enum MaterialSymbol {
     Lan,
     LightMode,
     Memory,
+    Monitoring,
     PlayCircle,
     Queue,
     SearchOff,
@@ -153,6 +158,7 @@ impl MaterialSymbol {
             Self::Lan => "lan",
             Self::LightMode => "light_mode",
             Self::Memory => "memory",
+            Self::Monitoring => "monitoring",
             Self::PlayCircle => "play_circle",
             Self::Queue => "queue",
             Self::SearchOff => "search_off",
@@ -178,10 +184,10 @@ const RESOURCE_ROUTES: &[AppRoute] = &[
     AppRoute::TargetSets,
 ];
 const EXECUTION_ROUTES: &[AppRoute] = &[AppRoute::Schedules, AppRoute::Runs, AppRoute::Workers];
-const SYSTEM_ROUTES: &[AppRoute] = &[AppRoute::Settings];
+const SYSTEM_ROUTES: &[AppRoute] = &[AppRoute::Monitor, AppRoute::Settings];
 
 /// Complete route inventory used for exact matching and verification.
-pub const ALL_ROUTES: [AppRoute; 11] = [
+pub const ALL_ROUTES: [AppRoute; 12] = [
     AppRoute::Overview,
     AppRoute::Namespaces,
     AppRoute::Queues,
@@ -192,6 +198,7 @@ pub const ALL_ROUTES: [AppRoute; 11] = [
     AppRoute::Schedules,
     AppRoute::Runs,
     AppRoute::Workers,
+    AppRoute::Monitor,
     AppRoute::Settings,
 ];
 
@@ -256,6 +263,7 @@ mod tests {
             "/target-sets",
             "/runs",
             "/workers",
+            "/monitor",
             "/settings",
         ];
 

@@ -1,7 +1,7 @@
 //! `OpenAPI` document and route registration.
 
 use super::{
-    handlers::{control_plane, health},
+    handlers::{control_plane, health, monitor},
     state::AppState,
 };
 use utoipa::openapi::{InfoBuilder, License, OpenApiBuilder, Tag};
@@ -65,7 +65,8 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(control_plane::get_run))
         .routes(routes!(control_plane::list_run_attempts))
         .routes(routes!(control_plane::list_workers))
-        .routes(routes!(control_plane::overview));
+        .routes(routes!(control_plane::overview))
+        .routes(routes!(monitor::monitor));
 
     let mut health_tag = Tag::new("health");
     health_tag.description = Some("Process liveness, readiness, and health".to_string());

@@ -21,6 +21,7 @@ pub(crate) const OUTPUT_LIMIT: usize = 65_536;
 #[derive(Debug)]
 pub(crate) struct ExecutionResult {
     pub(crate) succeeded: bool,
+    pub(crate) skipped: bool,
     pub(crate) exit_code: Option<i32>,
     pub(crate) stdout_tail: String,
     pub(crate) stderr_tail: String,
@@ -33,6 +34,7 @@ impl ExecutionResult {
     fn failed(phase: ExecutionPhase, error: impl std::fmt::Display) -> Self {
         Self {
             succeeded: false,
+            skipped: false,
             exit_code: None,
             stdout_tail: String::new(),
             stderr_tail: String::new(),
@@ -82,6 +84,7 @@ pub(crate) async fn execute_snapshot(
             });
             Ok(ExecutionResult {
                 succeeded: true,
+                skipped: false,
                 exit_code: Some(0),
                 stdout_tail: String::new(),
                 stderr_tail: String::new(),
@@ -135,6 +138,7 @@ fn dry_run_snapshot(
     }
     Ok(ExecutionResult {
         succeeded: true,
+        skipped: true,
         exit_code: None,
         stdout_tail: bounded_command_prefix(&line),
         stderr_tail: String::new(),
@@ -238,6 +242,7 @@ async fn execute_process(
     });
     Ok(ExecutionResult {
         succeeded: status.success(),
+        skipped: false,
         exit_code: status.code(),
         stdout_tail,
         stderr_tail,

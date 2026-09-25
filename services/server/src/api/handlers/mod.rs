@@ -2,3 +2,4 @@
 
 pub mod control_plane;
 pub mod health;
+pub mod monitor;

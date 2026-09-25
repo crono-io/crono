@@ -108,6 +108,8 @@ pub enum Capability {
     RunCreate,
     RunRead,
     WorkerRead,
+    /// Read system-wide operational state without exposing execution payloads.
+    MonitorRead,
 }
 
 /// Resource named by one authorization decision.

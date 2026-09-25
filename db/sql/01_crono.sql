@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS crono.jobs (
     arguments jsonb NOT NULL DEFAULT '[]'::jsonb,
     inputs jsonb NOT NULL DEFAULT '{}'::jsonb,
     idempotent boolean NOT NULL DEFAULT false,
+    dry_run boolean NOT NULL DEFAULT false,
     max_attempts integer NOT NULL DEFAULT 1,
     retry_initial_seconds integer NOT NULL DEFAULT 1,
     retry_max_seconds integer NOT NULL DEFAULT 60,
@@ -222,6 +223,8 @@ BEGIN;
 
 ALTER TABLE crono.jobs
     ADD COLUMN IF NOT EXISTS inputs jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE crono.jobs
+    ADD COLUMN IF NOT EXISTS dry_run boolean NOT NULL DEFAULT false;
 ALTER TABLE crono.jobs DROP CONSTRAINT IF EXISTS jobs_inputs_object;
 ALTER TABLE crono.jobs
     ADD CONSTRAINT jobs_inputs_object CHECK (jsonb_typeof(inputs) = 'object');
@@ -283,7 +286,7 @@ CREATE TABLE IF NOT EXISTS crono.run_attempts (
     CONSTRAINT run_attempts_run_attempt_unique UNIQUE (run_id, attempt),
     CONSTRAINT run_attempts_attempt_positive CHECK (attempt > 0),
     CONSTRAINT run_attempts_status_supported CHECK (
-        status IN ('pending_dispatch', 'queued', 'running', 'succeeded', 'failed', 'dead', 'unknown')
+        status IN ('pending_dispatch', 'queued', 'running', 'succeeded', 'skipped', 'failed', 'dead', 'unknown')
     ),
     CONSTRAINT run_attempts_output_bounded CHECK (
         (stdout_tail IS NULL OR octet_length(stdout_tail) <= 65536)
@@ -291,6 +294,12 @@ CREATE TABLE IF NOT EXISTS crono.run_attempts (
         AND (error IS NULL OR char_length(error) <= 1024)
     )
 );
+
+ALTER TABLE crono.run_attempts DROP CONSTRAINT IF EXISTS run_attempts_status_supported;
+ALTER TABLE crono.run_attempts
+    ADD CONSTRAINT run_attempts_status_supported CHECK (
+        status IN ('pending_dispatch', 'queued', 'running', 'succeeded', 'skipped', 'failed', 'dead', 'unknown')
+    );
 
 CREATE TABLE IF NOT EXISTS crono.worker_presence (
     worker_id text PRIMARY KEY,

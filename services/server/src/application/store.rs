@@ -29,6 +29,7 @@ pub struct JobDefinition {
     pub arguments: Vec<String>,
     pub inputs: serde_json::Value,
     pub idempotent: bool,
+    pub dry_run: bool,
     pub max_attempts: u16,
     pub retry_initial_seconds: u32,
     pub retry_max_seconds: u32,
@@ -95,6 +96,22 @@ pub struct MetricsSnapshot {
     pub execution_queued: i64,
     pub execution_running: i64,
     pub worker_active: i64,
+}
+
+/// System-wide PostgreSQL and execution state sampled for the operator monitor.
+/// Pool values belong only to the API instance that served the request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MonitorSnapshot {
+    pub database_size_bytes: i64,
+    pub database_connections: i64,
+    pub pool_connections: u32,
+    pub pool_idle_connections: u32,
+    pub pool_max_connections: u32,
+    pub enabled_schedules: i64,
+    pub due_schedules: i64,
+    pub earliest_next_run_at: Option<OffsetDateTime>,
+    pub online_workers: i64,
+    pub metrics: MetricsSnapshot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,5 +333,6 @@ pub trait ControlPlaneStore: Send + Sync {
     async fn complete_attempt(&self, request: &CompletionRequest) -> Result<bool, StoreError>;
     async fn reconcile(&self, limit: u16) -> Result<u64, StoreError>;
     async fn metrics_snapshot(&self) -> Result<MetricsSnapshot, StoreError>;
+    async fn monitor_snapshot(&self) -> Result<MonitorSnapshot, StoreError>;
     async fn ready(&self) -> bool;
 }

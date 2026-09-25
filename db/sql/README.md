@@ -71,6 +71,10 @@ manual Run path inserts the Run, first Attempt, and outbox row in one
 transaction. The dispatcher marks the outbox, Attempt, and Run queued only
 after a JetStream persistence acknowledgement; failed sends remain pending
 with bounded operational error text and do not consume execution retries.
+Jobs can opt into dry-run mode; that boolean is copied into each new Run
+snapshot, while existing Jobs and older snapshots default to normal execution.
+A worker-confirmed dry run stores a skipped Attempt and Run with bounded
+command output and never creates an execution retry.
 Worker presence is refreshed through the server's NATS control handler rather
 than by granting workers database access. The reconciler bounds retained
 offline presence records to seven days.

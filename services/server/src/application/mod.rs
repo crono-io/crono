@@ -23,6 +23,6 @@ pub use model::{
 };
 pub use service::{Application, CreateRunOutcome};
 pub use store::{
-    ControlPlaneStore, JobDefinition, MetricsSnapshot, NewSchedule, OutboxRecord,
+    ControlPlaneStore, JobDefinition, MetricsSnapshot, MonitorSnapshot, NewSchedule, OutboxRecord,
     PlannedOccurrence, SchedulePlan, StoreError, TargetDefinition,
 };

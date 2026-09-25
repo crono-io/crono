@@ -110,7 +110,7 @@ scan_apps() {
     pid="${proc##*/}"
     if matches_checkout "$pid" "$scope"; then
       matched_pids+=("$pid")
-      if [[ "$managed_kind" == just ]]; then
+      if [[ "$managed_kind" == marked || "$managed_kind" == just ]]; then
         pgid="$(ps -o pgid= -p "$pid" 2>/dev/null)" || continue
         pgid="${pgid//[[:space:]]/}"
         if [[ "$pgid" == "$pid" ]]; then
@@ -178,6 +178,20 @@ check_port_free() {
   fi
 }
 
+# A failed bind is authoritative. Recheck after an early server exit because
+# another process can acquire a port between a preflight check and bind(2).
+describe_port_after_failure() {
+  local port="$1"
+  local listeners
+  if listeners="$(ss -H -ltnp "sport = :$port" 2>/dev/null)"; then
+    if [[ -n "$listeners" ]]; then
+      printf 'API port %s now has a listener:\n%s\n' "$port" "$listeners" >&2
+    else
+      echo "No API listener is visible on port $port. If bind reported address-in-use, recently closed TCP connections may need time to expire." >&2
+    fi
+  fi
+}
+
 valid_port() {
   [[ "$1" =~ ^[0-9]+$ ]] && ((10#$1 >= 1 && 10#$1 <= 65535))
 }
@@ -195,19 +209,22 @@ start_stack() {
     return 2
   }
 
+  cd -- "$project_root"
+
   child_pids=()
   trap cleanup_children EXIT
   trap 'exit 130' INT TERM
 
-  # The lock covers cleanup and readiness checks, not the lifetime of the
-  # stack. A second start replaces the first; stop works from another shell.
+  # The lock covers preparation, cleanup, and readiness, not stack lifetime.
+  # A second start replaces the first; stop works from another shell.
   flock -w 130 -x 9 || { echo "Timed out waiting for Crono development lock" >&2; return 1; }
   stop_apps apps
+  just dev-infra
+  cargo build --locked -p crono-server --bin crono-server
   check_port_free "$server_port" API
-  check_port_free "$web_port" Web
 
   setsid env CRONO_DEV_STACK_ROOT="$project_root" CRONO_DEV_ROLE=server \
-    just server "$server_port" "$verbosity" 9>&- &
+    "$project_root/target/debug/crono-server" "$verbosity" --port "$server_port" 9>&- &
   server_pid=$!
   child_pids+=("$server_pid")
   for ((attempt = 1; attempt <= 120; attempt++)); do
@@ -218,6 +235,7 @@ start_stack() {
         status=$?
       fi
       echo "Crono API exited before becoming ready" >&2
+      describe_port_after_failure "$server_port"
       return "$status"
     fi
     if curl --fail --silent --output /dev/null "http://127.0.0.1:${server_port}/ready"; then
@@ -228,10 +246,13 @@ start_stack() {
   done
   [[ "$ready" == true ]] || { echo "Crono API did not become ready within 120 seconds" >&2; return 1; }
 
+  check_port_free "$web_port" Web
+  cd -- "$project_root/apps/web"
   setsid env CRONO_DEV_STACK_ROOT="$project_root" CRONO_DEV_ROLE=web \
-    just web "$address" "$web_port" 9>&- &
+    NO_COLOR=true trunk serve --address "$address" --port "$web_port" 9>&- &
   web_pid=$!
   child_pids+=("$web_pid")
+  cd -- "$project_root"
   ready=false
   for ((attempt = 1; attempt <= 120; attempt++)); do
     if ! kill -0 "$web_pid" 2>/dev/null; then
@@ -257,11 +278,13 @@ start_stack() {
   wait -n "$server_pid" "$web_pid"
   status=$?
   set -e
-  if ((status == 0)); then
-    echo "A Crono development service stopped unexpectedly" >&2
-    return 1
-  fi
-  return "$status"
+  case "$status" in
+    0|130|143)
+      echo "Crono development stack stopped"
+      return 0
+      ;;
+    *) return "$status" ;;
+  esac
 }
 
 main() {

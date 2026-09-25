@@ -108,6 +108,7 @@ stateDiagram-v2
     pending_dispatch --> skipped: misfire deadline expires
     queued --> running: PostgreSQL claim succeeds
     running --> succeeded: completion commits
+    running --> skipped: dry run completes without starting a process
     running --> failed: permanent or exhausted failure
     running --> retry_wait: retryable idempotent failure
     running --> unknown: ambiguous non-idempotent lease loss
@@ -138,11 +139,11 @@ After a successful claim, the worker builds a typed, serializable execution time
 
 `crono-worker run --log-format pretty` writes compact, run-attributed execution events to stderr; `--log-format json` writes one serialized event envelope per line. Worker-internal diagnostics remain separate `tracing` JSON logs. The event type lives in the shared `crono-execution` crate while the worker owns the sink and renderer, allowing a future NATS/API sink to forward the same envelopes to the server for a web timeline. The current server does not persist these events; it still stores only bounded Attempt output tails. Synchronous emission provides bounded-memory backpressure rather than an unbounded output queue. A child producing output faster than stderr can accept it may slow down, but cannot exhaust the worker's memory through timeline buffering.
 
-Start a worker with `crono-worker run --dry-run` to inspect its rendered commands. It still claims and acknowledges work, reports each Run as succeeded, and prints a sanitized command to worker stdout and the Attempt's bounded stdout record, but it never starts the process or creates an inputs file. The Runs page loads Attempt output through `GET /api/runs/{run_id}/attempts` under the existing Run-read authorization. Known sensitive input keys and credential-like argv switches are redacted before events, dry-run output, and Attempt tails are emitted. This is a fallback, not a secret-management boundary: literal credentials, transformed secrets, and values under unrecognized keys may escape detection. Do not place credentials in Crono inputs or command arguments.
+Enable Dry run on a Job to inspect its future manual and scheduled Runs without starting the executable, even when the worker itself was not started with `--dry-run`. The setting is copied into each immutable Run snapshot; changing the Job does not change Runs already created. `crono-worker run --dry-run` applies the same behavior to every Job claimed by that worker. Either way, the worker still claims and acknowledges the Attempt, prints a sanitized resolved command to worker stdout and the Attempt's bounded stdout record, and reports both the Attempt and Run as skipped rather than successful. It never starts the process or creates an inputs file. Deploy the server/schema before new web and worker versions: an older server ignores the new completion marker and still records a dry run as succeeded. The Runs page loads Attempt output through `GET /api/runs/{run_id}/attempts` under the existing Run-read authorization. Known sensitive input keys and credential-like argv switches are redacted before events, dry-run output, and Attempt tails are emitted. This is a fallback, not a secret-management boundary: literal credentials, transformed secrets, and values under unrecognized keys may escape detection. Do not place credentials in Crono inputs or command arguments.
 
 ## Commands, templates, and inputs
 
-A Job defines what runs: `noop` or `process`, an absolute executable for process Jobs, ordered argument templates, default inputs, and retry behavior. A Target defines where or with what destination-specific argument suffixes and inputs. A Target Set is an explicit collection of Targets plus inputs shared by every member; selecting one fans out to one Run per Target. Schedules and manual Runs can add a final invocation input layer.
+A Job defines what runs: `noop` or `process`, an absolute executable for process Jobs, ordered argument templates, default inputs, dry-run mode, and retry behavior. A Target defines where or with what destination-specific argument suffixes and inputs. A Target Set is an explicit collection of Targets plus inputs shared by every member; selecting one fans out to one Run per Target. Schedules and manual Runs can add a final invocation input layer.
 
 Input objects merge from least to most specific:
 
@@ -251,6 +252,8 @@ When reviewing failure behavior, stop NATS after creating the definitions but be
 
 `GET /live` reports process liveness. `GET /ready` requires PostgreSQL because durable state cannot be accepted without it. `GET /health` reports PostgreSQL and NATS separately; NATS failure is degraded transport health, not failed liveness or readiness. `GET /api/workers` reports authorized heartbeat-backed presence for the Workers screen. `GET /metrics` exports bounded-cardinality Prometheus metrics for scheduler decisions, execution lateness, outbox depth/age/publication, Run states, active execution leases, expired leases, and NATS connectivity. Resource IDs appear in structured logs, never metric labels.
 
+The System → Monitor page (`/monitor`) calls operator-authorized `GET /api/monitor` for a live, read-only snapshot. It refreshes every 30 seconds while open and can be refreshed manually; it does not retain history. PostgreSQL-backed counts show enabled and due Schedules, the earliest pending occurrence, unpublished outbox depth and age, queued and running Runs, and online worker presence. Database size covers the entire connected PostgreSQL database, not just the `crono` schema. Database connection count is database-wide, while connection-pool usage, JetStream availability, and the scheduler/publisher last successful database-poll times describe only the API instance answering the request. A missing database sample is shown as unavailable rather than reusing stale values. `MonitorRead` is a separate control-plane capability for a future operator policy; the current server-owned development identity grants it. The page does not expose credentials or execution payloads, and `/metrics` remains the source for Prometheus counters and long-term external monitoring.
+
 ## Workspace
 
 | Package | Responsibility |
@@ -266,17 +269,23 @@ When reviewing failure behavior, stop NATS after creating the definitions but be
 Public routes use `/api` directly; there is no `/api/v1` or draft compatibility layer. `crono-server-openapi` emits the route-derived OpenAPI document.
 
 Run `just dev-start` to launch the API and live-reloading web application
-together. It stops stale server and web processes from this checkout before
-starting, waits for API readiness before starting the web proxy, and stops the
-sibling process when either application exits. Running it again replaces the
-previous stack. Ports occupied by unrelated processes are reported rather than
-forcibly cleared. `just dev-stop` works from another shell, even if the
+together. It stops stale server and web processes from this checkout, prepares
+PostgreSQL and NATS, builds the API, then launches the built server and Trunk
+directly. It waits for API readiness before starting the web proxy and stops
+the sibling process when either application exits. Running it again replaces
+the previous stack, and an intentional stop ends its foreground launcher
+successfully. Ports occupied by unrelated processes are reported rather
+than forcibly cleared. `just dev-stop` works from another shell, even if the
 original launcher is gone: it stops this checkout's server, web, and worker
 processes plus the named `crono-postgres` and `crono-nats` containers. Container
 volumes are preserved. The process cleanup uses Linux `/proc` and `flock` to
 scope and coordinate these commands, including binaries replaced by a rebuild.
-Startup uses `ss` to check listeners on every IPv4 and IPv6 address before the
-API binds `[::]`; an unrelated port owner is shown but never killed.
+Startup uses `ss` to check listeners on every IPv4 and IPv6 address immediately
+before binding each fixed port; an unrelated port owner is shown but never
+killed. The API sets `SO_REUSEADDR` so normal quick restarts work after an
+accepted connection without permitting two live listeners on one port. A
+one-time restart from an older binary that lacked this socket option may still
+need its closed TCP connections to expire.
 
 The common development workflow is:
 

@@ -9,9 +9,9 @@
 
 use crate::{
     application::{
-        ControlPlaneStore, JobDefinition, JobRecord, MetricsSnapshot, NewSchedule, OutboxRecord,
-        Overview, Page, RunAttemptRecord, RunRecord, SchedulePlan, ScheduleRecord, StoreError,
-        TargetDefinition, TargetRecord, TargetSetRecord, VisibilityScope, WorkerRecord,
+        ControlPlaneStore, JobDefinition, JobRecord, MetricsSnapshot, MonitorSnapshot, NewSchedule,
+        OutboxRecord, Overview, Page, RunAttemptRecord, RunRecord, SchedulePlan, ScheduleRecord,
+        StoreError, TargetDefinition, TargetRecord, TargetSetRecord, VisibilityScope, WorkerRecord,
     },
     domain::{
         AttemptId, CatchupPolicy, DispatchId, ExecutorKind, Job, JobData, JobId, MisfirePolicy,
@@ -32,6 +32,8 @@ use time::OffsetDateTime;
 use tracing::error;
 use uuid::Uuid;
 
+const MAX_POOL_CONNECTIONS: u32 = 20;
+
 #[derive(Debug, sqlx::FromRow)]
 struct JobRow {
     id: Uuid,
@@ -44,6 +46,7 @@ struct JobRow {
     arguments: serde_json::Value,
     inputs: serde_json::Value,
     idempotent: bool,
+    dry_run: bool,
     max_attempts: i32,
     retry_initial_seconds: i32,
     retry_max_seconds: i32,
@@ -167,6 +170,7 @@ struct ExecutionRow {
     job_inputs: serde_json::Value,
     target_inputs: serde_json::Value,
     idempotent: bool,
+    dry_run: bool,
     max_attempts: i32,
     retry_initial_seconds: i32,
     retry_max_seconds: i32,
@@ -218,7 +222,7 @@ impl PostgresStore {
     /// Returns an availability error when the pool cannot connect.
     pub async fn connect(database_url: &str) -> Result<Self, StoreError> {
         let pool = PgPoolOptions::new()
-            .max_connections(20)
+            .max_connections(MAX_POOL_CONNECTIONS)
             .acquire_timeout(Duration::from_secs(3))
             .connect(database_url)
             .await
@@ -401,15 +405,15 @@ impl ControlPlaneStore for PostgresStore {
         let row = sqlx::query_as::<_, JobRow>(
             "INSERT INTO crono.jobs (
                  namespace_id, name, executor, queue_id, executable, arguments,
-                 inputs, idempotent, max_attempts, retry_initial_seconds,
+                 inputs, idempotent, dry_run, max_attempts, retry_initial_seconds,
                  retry_max_seconds, retry_multiplier, retry_jitter
              )
-             SELECT n.id, $2, $3, q.id, $5, $6, $7, $8, $9, $10, $11, $12, $13
+             SELECT n.id, $2, $3, q.id, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
                FROM crono.namespaces n CROSS JOIN crono.queues q
               WHERE n.id = $1 AND q.id = $4 AND q.enabled
              RETURNING id, namespace_id, name, executor, queue_id,
                        (SELECT name FROM crono.queues WHERE id = $4) AS queue_name, executable,
-                       arguments, inputs, idempotent, max_attempts, retry_initial_seconds,
+                       arguments, inputs, idempotent, dry_run, max_attempts, retry_initial_seconds,
                        retry_max_seconds, retry_multiplier, retry_jitter,
                        created_at, updated_at,
                        (SELECT name FROM crono.namespaces WHERE id = $1) AS namespace_name",
@@ -422,6 +426,7 @@ impl ControlPlaneStore for PostgresStore {
         .bind(arguments)
         .bind(&definition.inputs)
         .bind(definition.idempotent)
+        .bind(definition.dry_run)
         .bind(i32::from(definition.max_attempts))
         .bind(i32::try_from(definition.retry_initial_seconds).map_err(|_| StoreError::Internal)?)
         .bind(i32::try_from(definition.retry_max_seconds).map_err(|_| StoreError::Internal)?)
@@ -449,7 +454,7 @@ impl ControlPlaneStore for PostgresStore {
         let rows = sqlx::query_as::<_, JobRow>(
             "SELECT j.id, j.namespace_id, j.name, j.executor, j.queue_id,
                     q.name AS queue_name, j.executable,
-                    j.arguments, j.inputs, j.idempotent, j.max_attempts, j.retry_initial_seconds,
+                    j.arguments, j.inputs, j.idempotent, j.dry_run, j.max_attempts, j.retry_initial_seconds,
                     j.retry_max_seconds, j.retry_multiplier, j.retry_jitter,
                     j.created_at, j.updated_at,
                     n.name AS namespace_name
@@ -477,7 +482,7 @@ impl ControlPlaneStore for PostgresStore {
         let row = sqlx::query_as::<_, JobRow>(
             "SELECT j.id, j.namespace_id, j.name, j.executor, j.queue_id,
                     q.name AS queue_name, j.executable,
-                    j.arguments, j.inputs, j.idempotent, j.max_attempts, j.retry_initial_seconds,
+                    j.arguments, j.inputs, j.idempotent, j.dry_run, j.max_attempts, j.retry_initial_seconds,
                     j.retry_max_seconds, j.retry_multiplier, j.retry_jitter,
                     j.created_at, j.updated_at,
                     n.name AS namespace_name
@@ -506,9 +511,9 @@ impl ControlPlaneStore for PostgresStore {
                  UPDATE crono.jobs
                     SET name = $2, executor = $3, queue_id = q.id, executable = $5,
                         arguments = $6, inputs = $7, idempotent = $8,
-                        max_attempts = $9, retry_initial_seconds = $10,
-                        retry_max_seconds = $11, retry_multiplier = $12,
-                        retry_jitter = $13, updated_at = statement_timestamp()
+                        dry_run = $9, max_attempts = $10, retry_initial_seconds = $11,
+                        retry_max_seconds = $12, retry_multiplier = $13,
+                        retry_jitter = $14, updated_at = statement_timestamp()
                    FROM crono.queues q
                   WHERE crono.jobs.id = $1 AND q.id = $4
                     AND (q.enabled OR q.id = crono.jobs.queue_id)
@@ -516,7 +521,7 @@ impl ControlPlaneStore for PostgresStore {
              )
              SELECT j.id, j.namespace_id, j.name, j.executor, j.queue_id,
                     q.name AS queue_name, j.executable, j.arguments, j.inputs,
-                    j.idempotent, j.max_attempts, j.retry_initial_seconds,
+                    j.idempotent, j.dry_run, j.max_attempts, j.retry_initial_seconds,
                     j.retry_max_seconds, j.retry_multiplier, j.retry_jitter,
                     j.created_at, j.updated_at, n.name AS namespace_name
                FROM changed j
@@ -531,6 +536,7 @@ impl ControlPlaneStore for PostgresStore {
         .bind(arguments)
         .bind(&definition.inputs)
         .bind(definition.idempotent)
+        .bind(definition.dry_run)
         .bind(i32::from(definition.max_attempts))
         .bind(i32::try_from(definition.retry_initial_seconds).map_err(|_| StoreError::Internal)?)
         .bind(i32::try_from(definition.retry_max_seconds).map_err(|_| StoreError::Internal)?)
@@ -1557,8 +1563,13 @@ impl ControlPlaneStore for PostgresStore {
     }
 
     async fn complete_attempt(&self, request: &CompletionRequest) -> Result<bool, StoreError> {
+        if request.skipped && !request.succeeded {
+            return Err(StoreError::Internal);
+        }
         let mut transaction = self.pool.begin().await.map_err(store_error)?;
-        let status = if request.succeeded {
+        let status = if request.skipped {
+            "skipped"
+        } else if request.succeeded {
             "succeeded"
         } else {
             "failed"
@@ -1598,9 +1609,13 @@ impl ControlPlaneStore for PostgresStore {
         .fetch_one(&mut *transaction)
         .await
         .map_err(store_error)?;
-        let should_retry =
-            !request.succeeded && retry.idempotent && retry.attempt_count < retry.max_attempts;
-        if request.succeeded {
+        let should_retry = !request.succeeded
+            && !request.skipped
+            && retry.idempotent
+            && retry.attempt_count < retry.max_attempts;
+        if request.skipped {
+            crate::metrics::global().execution_skipped.inc();
+        } else if request.succeeded {
             crate::metrics::global().execution_success.inc();
         } else {
             crate::metrics::global().execution_failure.inc();
@@ -1608,7 +1623,9 @@ impl ControlPlaneStore for PostgresStore {
                 crate::metrics::global().execution_retry.inc();
             }
         }
-        let run_status = if request.succeeded {
+        let run_status = if request.skipped {
+            "skipped"
+        } else if request.succeeded {
             "succeeded"
         } else if should_retry {
             "retry_wait"
@@ -1627,7 +1644,11 @@ impl ControlPlaneStore for PostgresStore {
         .bind(run_id)
         .bind(run_status)
         .bind(next_retry_at)
-        .bind(request.error.as_deref().map(bounded_error))
+        .bind(if request.skipped {
+            Some("dry run".to_string())
+        } else {
+            request.error.as_deref().map(bounded_error)
+        })
         .execute(&mut *transaction)
         .await
         .map_err(store_error)?;
@@ -1696,6 +1717,48 @@ impl ControlPlaneStore for PostgresStore {
             execution_running: row.3,
             worker_active: row.4,
         })
+    }
+
+    async fn monitor_snapshot(&self) -> Result<MonitorSnapshot, StoreError> {
+        // The size function walks PostgreSQL's database files. Keep this
+        // operator-only query bounded even when a dependency is struggling.
+        tokio::time::timeout(Duration::from_secs(3), async {
+            let metrics = self.metrics_snapshot().await?;
+            let row = sqlx::query_as::<_, (i64, i64, i64, i64, Option<OffsetDateTime>, i64)>(
+                "SELECT pg_database_size(current_database())::bigint,
+                        COALESCE((SELECT numbackends::bigint FROM pg_stat_database
+                                  WHERE datname = current_database()), 0),
+                        (SELECT count(*) FROM crono.schedules
+                          WHERE enabled = true AND next_run_at IS NOT NULL),
+                        (SELECT count(*) FROM crono.schedules
+                          WHERE enabled = true AND next_run_at <= statement_timestamp()),
+                        (SELECT min(next_run_at) FROM crono.schedules
+                          WHERE enabled = true AND next_run_at IS NOT NULL),
+                        (SELECT count(*) FROM crono.worker_presence
+                          WHERE last_seen_at >= statement_timestamp() - interval '30 seconds')",
+            )
+            .fetch_one(&self.pool)
+            .await
+            .map_err(store_error)?;
+            let pool_connections = self.pool.size();
+            let pool_idle_connections = u32::try_from(self.pool.num_idle())
+                .map_err(|_| StoreError::Internal)?
+                .min(pool_connections);
+            Ok(MonitorSnapshot {
+                database_size_bytes: row.0,
+                database_connections: row.1,
+                pool_connections,
+                pool_idle_connections,
+                pool_max_connections: MAX_POOL_CONNECTIONS,
+                enabled_schedules: row.2,
+                due_schedules: row.3,
+                earliest_next_run_at: row.4,
+                online_workers: row.5,
+                metrics,
+            })
+        })
+        .await
+        .map_err(|_| StoreError::Unavailable)?
     }
 }
 
@@ -1889,7 +1952,7 @@ async fn load_execution_ids(
                 q.name AS queue_name, j.executable,
                 j.arguments AS job_arguments, t.arguments AS target_arguments,
                 j.inputs AS job_inputs, t.inputs AS target_inputs,
-                j.idempotent, j.max_attempts, j.retry_initial_seconds,
+                j.idempotent, j.dry_run, j.max_attempts, j.retry_initial_seconds,
                 j.retry_max_seconds, j.retry_multiplier, j.retry_jitter
            FROM crono.jobs j
            JOIN crono.queues q ON q.id = j.queue_id
@@ -2014,6 +2077,7 @@ fn execution_snapshot_with_inputs(
         queue_id: execution.queue_id,
         queue: execution.queue_name.clone(),
         idempotent: execution.idempotent,
+        dry_run: execution.dry_run,
         retry_initial_seconds: u32::try_from(execution.retry_initial_seconds)
             .map_err(|_| "invalid persisted retry delay".to_owned())?,
         retry_max_seconds: u32::try_from(execution.retry_max_seconds)
@@ -2308,6 +2372,7 @@ fn job_from_row(row: JobRow) -> Result<JobRecord, StoreError> {
             arguments,
             inputs: row.inputs,
             idempotent: row.idempotent,
+            dry_run: row.dry_run,
             max_attempts,
             retry_initial_seconds,
             retry_max_seconds,
@@ -2672,4 +2737,52 @@ fn is_foreign_key_violation(error: &sqlx::Error) -> bool {
     error
         .as_database_error()
         .is_some_and(|database| matches!(database.code().as_deref(), Some("23001" | "23503")))
+}
+
+#[cfg(test)]
+mod dry_run_snapshot_tests {
+    use super::{ExecutionRow, scheduled_snapshot};
+    use anyhow::Result;
+    use crono_api::{ExecutionSnapshot, ExecutionTrigger};
+    use time::OffsetDateTime;
+    use uuid::Uuid;
+
+    #[test]
+    fn scheduled_snapshots_keep_job_dry_run_setting() -> Result<()> {
+        let now = OffsetDateTime::now_utc();
+        let execution = ExecutionRow {
+            namespace_id: Uuid::now_v7(),
+            job_id: Uuid::now_v7(),
+            target_id: Uuid::now_v7(),
+            executor: "process".to_string(),
+            queue_id: Uuid::now_v7(),
+            queue_name: "default".to_string(),
+            executable: Some("/bin/echo".to_string()),
+            job_arguments: serde_json::json!(["hello {{ name }}"]),
+            target_arguments: serde_json::json!([]),
+            job_inputs: serde_json::json!({"name": "world"}),
+            target_inputs: serde_json::json!({}),
+            idempotent: false,
+            dry_run: true,
+            max_attempts: 1,
+            retry_initial_seconds: 1,
+            retry_max_seconds: 60,
+            retry_multiplier: 2.0,
+            retry_jitter: 0.2,
+        };
+        let snapshot = scheduled_snapshot(
+            Uuid::now_v7(),
+            &execution,
+            None,
+            &serde_json::json!({}),
+            now,
+        )
+        .map_err(anyhow::Error::msg)?;
+        let snapshot: ExecutionSnapshot = serde_json::from_value(snapshot)?;
+        assert!(snapshot.dry_run);
+        assert_eq!(snapshot.arguments, ["hello world"]);
+        assert_eq!(snapshot.trigger, Some(ExecutionTrigger::Schedule));
+        assert_eq!(snapshot.scheduled_at, Some(now));
+        Ok(())
+    }
 }

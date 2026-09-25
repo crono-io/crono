@@ -19,15 +19,20 @@ pub struct Metrics {
     pub scheduler_due: Counter,
     pub scheduler_misfire: Counter,
     pub scheduler_skipped: Counter,
+    /// Unix time of this instance's last successful due-Schedule database claim.
+    pub scheduler_last_poll_unix_seconds: Gauge,
     pub outbox_publish: Counter,
     pub outbox_publish_failure: Counter,
     pub outbox_publish_latency: Histogram,
     pub outbox_pending: Gauge,
     pub outbox_oldest_seconds: Gauge,
+    /// Unix time of this instance's last successful outbox database claim.
+    pub outbox_last_poll_unix_seconds: Gauge,
     pub execution_queued: Gauge,
     pub execution_running: Gauge,
     pub execution_lateness: Histogram,
     pub execution_success: Counter,
+    pub execution_skipped: Counter,
     pub execution_failure: Counter,
     pub execution_retry: Counter,
     pub worker_lease_expired: Counter,
@@ -41,15 +46,18 @@ impl Metrics {
         let scheduler_due = Counter::default();
         let scheduler_misfire = Counter::default();
         let scheduler_skipped = Counter::default();
+        let scheduler_last_poll_unix_seconds = Gauge::default();
         let outbox_publish = Counter::default();
         let outbox_publish_failure = Counter::default();
         let outbox_publish_latency = Histogram::new(exponential_buckets(0.001, 2.0, 16));
         let outbox_pending = Gauge::default();
         let outbox_oldest_seconds = Gauge::default();
+        let outbox_last_poll_unix_seconds = Gauge::default();
         let execution_queued = Gauge::default();
         let execution_running = Gauge::default();
         let execution_lateness = Histogram::new(exponential_buckets(1.0, 2.0, 24));
         let execution_success = Counter::default();
+        let execution_skipped = Counter::default();
         let execution_failure = Counter::default();
         let execution_retry = Counter::default();
         let worker_lease_expired = Counter::default();
@@ -60,6 +68,7 @@ impl Metrics {
             &scheduler_due,
             &scheduler_misfire,
             &scheduler_skipped,
+            &scheduler_last_poll_unix_seconds,
         );
         register_outbox(
             &mut registry,
@@ -68,6 +77,7 @@ impl Metrics {
             &outbox_publish_latency,
             &outbox_pending,
             &outbox_oldest_seconds,
+            &outbox_last_poll_unix_seconds,
         );
         register_execution(
             &mut registry,
@@ -77,6 +87,11 @@ impl Metrics {
             &execution_success,
             &execution_failure,
             &execution_retry,
+        );
+        registry.register(
+            "crono_execution_skipped",
+            "Worker-claimed executions skipped without running a process",
+            execution_skipped.clone(),
         );
         register_worker(
             &mut registry,
@@ -89,15 +104,18 @@ impl Metrics {
             scheduler_due,
             scheduler_misfire,
             scheduler_skipped,
+            scheduler_last_poll_unix_seconds,
             outbox_publish,
             outbox_publish_failure,
             outbox_publish_latency,
             outbox_pending,
             outbox_oldest_seconds,
+            outbox_last_poll_unix_seconds,
             execution_queued,
             execution_running,
             execution_lateness,
             execution_success,
+            execution_skipped,
             execution_failure,
             execution_retry,
             worker_lease_expired,
@@ -123,6 +141,7 @@ fn register_scheduler(
     due: &Counter,
     misfire: &Counter,
     skipped: &Counter,
+    last_poll: &Gauge,
 ) {
     registry.register(
         "crono_scheduler_due",
@@ -139,6 +158,11 @@ fn register_scheduler(
         "Occurrences skipped",
         skipped.clone(),
     );
+    registry.register(
+        "crono_scheduler_last_poll_unix_seconds",
+        "Last successful due-Schedule database claim on this API instance",
+        last_poll.clone(),
+    );
 }
 
 fn register_outbox(
@@ -148,6 +172,7 @@ fn register_outbox(
     latency: &Histogram,
     pending: &Gauge,
     oldest: &Gauge,
+    last_poll: &Gauge,
 ) {
     registry.register(
         "crono_outbox_publish",
@@ -173,6 +198,11 @@ fn register_outbox(
         "crono_outbox_oldest_seconds",
         "Age of the oldest pending outbox message",
         oldest.clone(),
+    );
+    registry.register(
+        "crono_outbox_last_poll_unix_seconds",
+        "Last successful outbox database claim on this API instance",
+        last_poll.clone(),
     );
 }
 

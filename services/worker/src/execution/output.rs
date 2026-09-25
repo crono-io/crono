@@ -91,6 +91,10 @@ impl EventSink for ConsoleSink {
                     ExecutionEvent::RunCompleted { total_duration_ms } => {
                         ("✓ completed", format!("in {total_duration_ms}ms"))
                     }
+                    ExecutionEvent::RunSkipped {
+                        reason,
+                        total_duration_ms,
+                    } => ("run skipped", format!("{reason} in {total_duration_ms}ms")),
                     ExecutionEvent::RunFailed {
                         phase,
                         error,
@@ -108,11 +112,12 @@ impl EventSink for ConsoleSink {
                     ExecutionEvent::ResultReportingFailed {
                         error,
                         execution_succeeded,
+                        execution_skipped,
                         total_duration_ms,
                     } => (
                         "ERROR result report",
                         format!(
-                            "execution_succeeded={execution_succeeded} duration={total_duration_ms}ms error={}",
+                            "execution_succeeded={execution_succeeded} execution_skipped={execution_skipped} duration={total_duration_ms}ms error={}",
                             terminal_safe(error)
                         ),
                     ),

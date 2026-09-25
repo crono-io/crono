@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Stand in for both the built API binary and Trunk's development server.
+set -euo pipefail
+
+port=""
+while (($# > 0)); do
+  if [[ "$1" == --port ]]; then
+    port="${2-}"
+    shift 2
+  else
+    shift
+  fi
+done
+[[ -n "$port" ]] || exit 2
+
+exec python3 -m http.server "$port" --bind 127.0.0.1 \
+  --directory "$CRONO_DEV_STACK_ROOT/public"

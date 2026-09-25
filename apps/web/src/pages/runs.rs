@@ -239,6 +239,7 @@ const fn attempt_status(status: crono_api::AttemptStatus) -> &'static str {
         crono_api::AttemptStatus::Queued => "queued",
         crono_api::AttemptStatus::Running => "running",
         crono_api::AttemptStatus::Succeeded => "succeeded",
+        crono_api::AttemptStatus::Skipped => "skipped",
         crono_api::AttemptStatus::Failed => "failed",
         crono_api::AttemptStatus::Dead => "dead",
         crono_api::AttemptStatus::Unknown => "unknown",

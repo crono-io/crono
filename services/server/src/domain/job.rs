@@ -24,6 +24,7 @@ pub struct Job {
     arguments: Vec<String>,
     inputs: serde_json::Value,
     idempotent: bool,
+    dry_run: bool,
     max_attempts: u16,
     retry_initial_seconds: u32,
     retry_max_seconds: u32,
@@ -44,6 +45,7 @@ pub struct JobData {
     pub arguments: Vec<String>,
     pub inputs: serde_json::Value,
     pub idempotent: bool,
+    pub dry_run: bool,
     pub max_attempts: u16,
     pub retry_initial_seconds: u32,
     pub retry_max_seconds: u32,
@@ -66,6 +68,7 @@ impl Job {
             arguments,
             inputs,
             idempotent,
+            dry_run,
             max_attempts,
             retry_initial_seconds,
             retry_max_seconds,
@@ -84,6 +87,7 @@ impl Job {
             arguments,
             inputs,
             idempotent,
+            dry_run,
             max_attempts,
             retry_initial_seconds,
             retry_max_seconds,
@@ -129,6 +133,10 @@ impl Job {
     #[must_use]
     pub const fn idempotent(&self) -> bool {
         self.idempotent
+    }
+    #[must_use]
+    pub const fn dry_run(&self) -> bool {
+        self.dry_run
     }
     #[must_use]
     pub const fn max_attempts(&self) -> u16 {

@@ -9,9 +9,9 @@
 use crono_api::{
     CreateJobRequest, CreateNamespaceRequest, CreateQueueRequest, CreateRunRequest,
     CreateScheduleRequest, CreateTargetRequest, CreateTargetSetRequest, ErrorEnvelope,
-    ExecutionTarget, JobResource, NamespaceResource, OverviewResource, Page, QueueResource,
-    RunAttemptResource, RunBatchResource, RunResource, ScheduleResource, TargetResource,
-    TargetSetResource, UpdateJobRequest, UpdateQueueRequest, UpdateScheduleRequest,
+    ExecutionTarget, JobResource, MonitorResource, NamespaceResource, OverviewResource, Page,
+    QueueResource, RunAttemptResource, RunBatchResource, RunResource, ScheduleResource,
+    TargetResource, TargetSetResource, UpdateJobRequest, UpdateQueueRequest, UpdateScheduleRequest,
     UpdateTargetRequest, UpdateTargetSetRequest, WorkerResource,
 };
 use gloo_net::http::{Request, Response};
@@ -33,6 +33,11 @@ pub type ApiResult<T> = Result<T, ApiError>;
 
 pub async fn overview() -> ApiResult<OverviewResource> {
     get(&format!("{API_ROOT}/overview")).await
+}
+
+/// Read the operator-only system snapshot through the typed API contract.
+pub async fn monitor() -> ApiResult<MonitorResource> {
+    get(&format!("{API_ROOT}/monitor")).await
 }
 
 pub async fn list_namespaces() -> ApiResult<Page<NamespaceResource>> {

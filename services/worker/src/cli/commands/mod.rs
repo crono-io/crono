@@ -44,7 +44,7 @@ pub fn new() -> Command {
                 .long("dry-run")
                 .global(true)
                 .action(ArgAction::SetTrue)
-                .help("Print claimed commands without executing them; Runs still succeed"),
+                .help("Print claimed commands without executing them; Runs are skipped"),
         )
         .arg(
             Arg::new("log-format")

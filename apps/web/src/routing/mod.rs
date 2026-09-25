@@ -5,8 +5,8 @@
 //! client/service boundary.
 
 use crate::pages::{
-    CreateJobPage, EditJobPage, JobsPage, NamespacesPage, NotFoundPage, OverviewPage, QueuesPage,
-    RunsPage, SchedulesPage, SettingsPage, TargetSetsPage, TargetsPage, WorkersPage,
+    CreateJobPage, EditJobPage, JobsPage, MonitorPage, NamespacesPage, NotFoundPage, OverviewPage,
+    QueuesPage, RunsPage, SchedulesPage, SettingsPage, TargetSetsPage, TargetsPage, WorkersPage,
 };
 use leptos::prelude::*;
 use leptos_router::{
@@ -30,6 +30,7 @@ pub fn RouterContent() -> impl IntoView {
             <Route path=path!("/schedules") view=SchedulesPage />
             <Route path=path!("/runs") view=RunsPage />
             <Route path=path!("/workers") view=WorkersPage />
+            <Route path=path!("/monitor") view=MonitorPage />
             <Route path=path!("/settings") view=SettingsPage />
         </Routes>
     }

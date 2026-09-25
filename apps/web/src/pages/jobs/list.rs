@@ -73,7 +73,7 @@ fn ResourceList(jobs: LocalResource<api::ApiResult<Page<JobResource>>>) -> impl 
                                 <div class="min-w-0">
                                     <p class="font-medium text-crono-text">{job.name}</p>
                                     <p class="text-sm text-crono-muted">{job.qualified_name}</p>
-                                    <p class="mt-1 text-xs text-crono-muted">{format!("{:?} · {} · {} argv items", job.executor, job.queue, job.arguments.len())}</p>
+                                    <p class="mt-1 text-xs text-crono-muted">{format!("{:?} · {} · {} argv items{}", job.executor, job.queue, job.arguments.len(), if job.dry_run { " · Dry run" } else { "" })}</p>
                                 </div>
                                 <A href=edit_path attr:class="text-sm font-medium text-crono-primary hover:text-crono-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">"Edit →"</A>
                             </li>

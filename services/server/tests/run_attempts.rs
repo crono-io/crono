@@ -72,6 +72,7 @@ async fn create_run_with_attempts(
                 arguments: Vec::new(),
                 inputs: serde_json::json!({}),
                 idempotent: false,
+                dry_run: false,
                 max_attempts: 2,
                 retry_initial_seconds: 1,
                 retry_max_seconds: 1,

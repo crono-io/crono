@@ -166,6 +166,9 @@ pub struct CreateJobRequest {
     pub inputs: serde_json::Value,
     #[serde(default)]
     pub idempotent: bool,
+    /// Preview future Runs without starting the configured executable.
+    #[serde(default)]
+    pub dry_run: bool,
     #[serde(default = "default_max_attempts")]
     pub max_attempts: u16,
     #[serde(default = "default_retry_initial_seconds")]
@@ -190,6 +193,8 @@ pub struct UpdateJobRequest {
     pub arguments: Vec<String>,
     pub inputs: serde_json::Value,
     pub idempotent: bool,
+    #[serde(default)]
+    pub dry_run: bool,
     pub max_attempts: u16,
     pub retry_initial_seconds: u32,
     pub retry_max_seconds: u32,
@@ -236,6 +241,7 @@ pub struct JobResource {
     pub arguments: Vec<String>,
     pub inputs: serde_json::Value,
     pub idempotent: bool,
+    pub dry_run: bool,
     pub max_attempts: u16,
     pub retry_initial_seconds: u32,
     pub retry_max_seconds: u32,
@@ -490,6 +496,7 @@ pub enum AttemptStatus {
     Queued,
     Running,
     Succeeded,
+    Skipped,
     Failed,
     Dead,
     Unknown,
@@ -552,6 +559,53 @@ pub struct OverviewResource {
     pub target_sets: u64,
     pub schedules: u64,
     pub runs: u64,
+}
+
+/// Read-only operator snapshot; database values cover the connected database,
+/// while instance poll times and transport availability describe one API process.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct MonitorResource {
+    pub sampled_at: String,
+    pub database_available: bool,
+    pub nats_available: bool,
+    pub database: Option<DatabaseMonitorResource>,
+    pub pipeline: Option<PipelineMonitorResource>,
+    pub instance: InstanceMonitorResource,
+}
+
+/// Aggregate PostgreSQL database size and this API instance's pool usage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct DatabaseMonitorResource {
+    pub size_bytes: u64,
+    pub connections: u64,
+    pub pool_connections: u32,
+    pub pool_idle_connections: u32,
+    pub pool_max_connections: u32,
+}
+
+/// Durable scheduler, outbox, Run, and worker counts from PostgreSQL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct PipelineMonitorResource {
+    pub enabled_schedules: u64,
+    pub due_schedules: u64,
+    pub earliest_next_run_at: Option<String>,
+    pub outbox_pending: u64,
+    pub outbox_oldest_seconds: u64,
+    pub runs_queued: u64,
+    pub runs_running: u64,
+    pub active_worker_leases: u64,
+    pub online_workers: u64,
+}
+
+/// Local scheduler and publisher polling signals; not cluster-wide counters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct InstanceMonitorResource {
+    pub scheduler_last_poll_at: Option<String>,
+    pub publisher_last_poll_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -641,6 +695,9 @@ pub struct ExecutionSnapshot {
     pub queue_id: Uuid,
     pub queue: String,
     pub idempotent: bool,
+    /// Copied from the Job when the Run was created; older snapshots execute normally.
+    #[serde(default)]
+    pub dry_run: bool,
     pub retry_initial_seconds: u32,
     pub retry_max_seconds: u32,
     pub retry_multiplier: f64,
@@ -717,8 +774,78 @@ pub struct CompletionRequest {
     pub attempt_id: Uuid,
     pub worker_id: String,
     pub succeeded: bool,
+    /// A non-executed dry run. Defaults to false for older workers.
+    /// Skips also set `succeeded` for compatibility with older servers.
+    #[serde(default)]
+    pub skipped: bool,
     pub exit_code: Option<i32>,
     pub stdout_tail: String,
     pub stderr_tail: String,
     pub error: Option<String>,
+}
+
+#[cfg(test)]
+mod dry_run_compatibility_tests {
+    use super::{CompletionRequest, CreateJobRequest, ExecutionSnapshot, UpdateJobRequest};
+    use serde_json::json;
+    use uuid::Uuid;
+
+    #[test]
+    fn older_job_requests_and_run_snapshots_default_to_execution() -> Result<(), serde_json::Error>
+    {
+        let job: CreateJobRequest = serde_json::from_value(json!({
+            "name": "example",
+            "queue_id": Uuid::now_v7(),
+            "executable": null
+        }))?;
+        assert!(!job.dry_run);
+
+        let update: UpdateJobRequest = serde_json::from_value(json!({
+            "name": "example",
+            "queue_id": Uuid::now_v7(),
+            "executor": "noop",
+            "executable": null,
+            "arguments": [],
+            "inputs": {},
+            "idempotent": false,
+            "max_attempts": 1,
+            "retry_initial_seconds": 1,
+            "retry_max_seconds": 60,
+            "retry_multiplier": 2.0,
+            "retry_jitter": 0.2
+        }))?;
+        assert!(!update.dry_run);
+
+        let snapshot: ExecutionSnapshot = serde_json::from_value(json!({
+            "executor": "noop",
+            "executable": null,
+            "arguments": [],
+            "inputs": {},
+            "idempotency_key": Uuid::now_v7(),
+            "queue_id": Uuid::now_v7(),
+            "queue": "default",
+            "idempotent": false,
+            "retry_initial_seconds": 1,
+            "retry_max_seconds": 60,
+            "retry_multiplier": 2.0,
+            "retry_jitter": 0.2
+        }))?;
+        assert!(!snapshot.dry_run);
+        Ok(())
+    }
+
+    #[test]
+    fn older_worker_completions_default_to_not_skipped() -> Result<(), serde_json::Error> {
+        let completion: CompletionRequest = serde_json::from_value(json!({
+            "attempt_id": Uuid::now_v7(),
+            "worker_id": "worker-1",
+            "succeeded": true,
+            "exit_code": 0,
+            "stdout_tail": "",
+            "stderr_tail": "",
+            "error": null
+        }))?;
+        assert!(!completion.skipped);
+        Ok(())
+    }
 }

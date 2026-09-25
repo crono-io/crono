@@ -1,10 +1,11 @@
 //! Routed page content for the initial Crono information architecture.
 //!
-//! Pages compose shared visual primitives and intentionally render empty states
-//! instead of fabricated resources. They contain no transport code; a future
-//! API client boundary will own HTTPS communication with `crono-server`.
+//! Pages compose shared visual primitives and render explicit loading, empty,
+//! and failure states. All HTTP transport stays in the browser API client so
+//! routed components remain focused on user workflows.
 
 mod jobs;
+mod monitor;
 mod namespaces;
 mod overview;
 mod queues;
@@ -17,6 +18,7 @@ mod targets;
 mod workers;
 
 pub use jobs::{CreateJobPage, EditJobPage, JobsPage};
+pub use monitor::MonitorPage;
 pub use namespaces::NamespacesPage;
 pub use overview::OverviewPage;
 pub use queues::QueuesPage;

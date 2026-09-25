@@ -41,6 +41,9 @@ pub async fn run_scheduler(store: Arc<dyn ControlPlaneStore>, cancellation: Canc
                         continue;
                     }
                 };
+                crate::metrics::global()
+                    .scheduler_last_poll_unix_seconds
+                    .set(OffsetDateTime::now_utc().unix_timestamp());
                 for schedule in schedules {
                     match plan(&schedule, owner, OffsetDateTime::now_utc()) {
                         Ok(plan) => {

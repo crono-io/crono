@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# The fake checkout already contains its executable.
+set -euo pipefail
+[[ "${1-}" == build ]] || exit 2

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Exercise the development stack against an isolated fake checkout and recipes.
+# Exercise the development stack against an isolated fake checkout and tools.
 # No real Crono process or Podman container is touched.
 set -euo pipefail
 
@@ -20,11 +20,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$sandbox/checkout/scripts" "$sandbox/checkout/public" "$sandbox/bin"
+mkdir -p "$sandbox/checkout/scripts" "$sandbox/checkout/public" \
+  "$sandbox/checkout/apps/web" "$sandbox/checkout/target/debug" "$sandbox/bin"
 cp "$source_root/scripts/dev-stack.sh" "$sandbox/checkout/scripts/dev-stack.sh"
 cp "$source_root/tests/fixtures/dev-stack/just" "$sandbox/bin/just"
+cp "$source_root/tests/fixtures/dev-stack/cargo" "$sandbox/bin/cargo"
 cp "$source_root/tests/fixtures/dev-stack/podman" "$sandbox/bin/podman"
-chmod +x "$sandbox/bin/just" "$sandbox/bin/podman"
+cp "$source_root/tests/fixtures/dev-stack/app" "$sandbox/bin/trunk"
+cp "$source_root/tests/fixtures/dev-stack/app" "$sandbox/checkout/target/debug/crono-server"
+chmod +x "$sandbox/bin/just" "$sandbox/bin/cargo" "$sandbox/bin/podman" \
+  "$sandbox/bin/trunk" "$sandbox/checkout/target/debug/crono-server"
 touch "$sandbox/checkout/public/ready"
 export PATH="$sandbox/bin:$PATH"
 
@@ -71,6 +76,10 @@ for ((attempt = 1; attempt <= 50; attempt++)); do
 done
 if kill -0 "$first_pid" 2>/dev/null; then
   echo "Second start did not replace the first stack" >&2
+  exit 1
+fi
+if ! wait "$first_pid"; then
+  echo "Replaced development stack reported an error instead of stopping cleanly" >&2
   exit 1
 fi
 wait_for_ready
@@ -160,3 +169,19 @@ if kill -0 "$stale_pid" 2>/dev/null; then
   exit 1
 fi
 echo "Rebuilt-binary regression check passed"
+
+# An independently launched worker from this checkout remains part of the
+# established dev-stop scope, even though dev-start does not launch workers.
+cp "$(command -v sleep)" "$sandbox/checkout/target/debug/crono-worker"
+(
+  cd "$sandbox/checkout"
+  exec "$sandbox/checkout/target/debug/crono-worker" 60
+) &
+worker_pid=$!
+outsiders+=("$worker_pid")
+bash "$sandbox/checkout/scripts/dev-stack.sh" stop
+if kill -0 "$worker_pid" 2>/dev/null; then
+  echo "Checkout worker survived independent stop" >&2
+  exit 1
+fi
+echo "Worker cleanup regression check passed"

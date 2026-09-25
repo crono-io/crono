@@ -337,7 +337,7 @@ async fn execute_claimed(
         scheduled_at: execution.scheduled_at,
     });
     timeline.emit(ExecutionEvent::RunStarted {
-        dry_run: args.dry_run,
+        dry_run: args.dry_run || execution.dry_run,
     });
     let redactor = Arc::new(Redactor::from_inputs_and_arguments(
         &execution.inputs,
@@ -357,6 +357,7 @@ async fn execute_claimed(
         Ok(result) => result,
         Err(error) => ExecutionResult {
             succeeded: false,
+            skipped: false,
             exit_code: None,
             stdout_tail: String::new(),
             stderr_tail: String::new(),
@@ -368,6 +369,7 @@ async fn execute_claimed(
         attempt_id: envelope.attempt_id,
         worker_id: args.worker_id.clone(),
         succeeded: result.succeeded,
+        skipped: result.skipped,
         exit_code: result.exit_code,
         stdout_tail: result.stdout_tail.clone(),
         stderr_tail: result.stderr_tail.clone(),
@@ -382,6 +384,7 @@ async fn execute_claimed(
             timeline.emit(ExecutionEvent::ResultReportingFailed {
                 error: "completion lost its worker lease".to_string(),
                 execution_succeeded: result.succeeded,
+                execution_skipped: result.skipped,
                 total_duration_ms: elapsed_ms(started),
             });
             warn!(attempt_id = %envelope.attempt_id, "completion lost its worker lease");
@@ -391,6 +394,7 @@ async fn execute_claimed(
             timeline.emit(ExecutionEvent::ResultReportingFailed {
                 error: "completion was not confirmed".to_string(),
                 execution_succeeded: result.succeeded,
+                execution_skipped: result.skipped,
                 total_duration_ms: elapsed_ms(started),
             });
             warn!(%error, attempt_id = %envelope.attempt_id, "completion was not confirmed");
@@ -408,7 +412,12 @@ fn emit_result(
     started: Instant,
     result: &ExecutionResult,
 ) {
-    if result.succeeded {
+    if result.skipped {
+        timeline.emit(ExecutionEvent::RunSkipped {
+            reason: "dry run".to_string(),
+            total_duration_ms: elapsed_ms(started),
+        });
+    } else if result.succeeded {
         timeline.emit(ExecutionEvent::RunCompleted {
             total_duration_ms: elapsed_ms(started),
         });
@@ -431,7 +440,8 @@ async fn run_with_heartbeat(
     redactor: Arc<Redactor>,
     message: &jetstream::Message,
 ) -> Result<ExecutionResult> {
-    let work = execute_snapshot(execution, args.dry_run, timeline, redactor);
+    let dry_run = args.dry_run || execution.dry_run;
+    let work = execute_snapshot(execution, dry_run, timeline, redactor);
     tokio::pin!(work);
     let mut heartbeat = time::interval(Duration::from_secs(20));
     heartbeat.set_missed_tick_behavior(time::MissedTickBehavior::Skip);

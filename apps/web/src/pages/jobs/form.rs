@@ -47,6 +47,7 @@ pub(super) fn JobForm(#[prop(optional)] initial_job: Option<JobResource>) -> imp
         arguments,
         inputs,
         idempotent,
+        dry_run,
         max_attempts,
         retry_initial,
         retry_max,
@@ -104,6 +105,7 @@ pub(super) fn JobForm(#[prop(optional)] initial_job: Option<JobResource>) -> imp
                         <label class="block text-sm font-medium text-crono-text">"Executor"<select class=FIELD_CLASS prop:value=move || match executor.get() { ExecutorKind::Noop => "noop", ExecutorKind::Process => "process" } on:change=move |event| executor.set(if event_target_value(&event) == "process" { ExecutorKind::Process } else { ExecutorKind::Noop })><option value="noop">"No-op"</option><option value="process">"Process"</option></select></label>
                         <label class="block text-sm font-medium text-crono-text">"Executable"<input class=FIELD_CLASS type="text" placeholder="/usr/bin/echo" disabled=move || executor.get() == ExecutorKind::Noop prop:value=move || executable.get() on:input=move |event| executable.set(event_target_value(&event))/><p class="mt-1 text-sm text-crono-failed">{move || executable_error.get().unwrap_or_default()}</p></label>
                     </div>
+                    <label class="flex items-start gap-3 rounded-lg border border-crono-border bg-zinc-50 p-4 text-sm text-crono-text"><input class="mt-0.5" type="checkbox" prop:checked=move || dry_run.get() on:change=move |event| dry_run.set(event_target_checked(&event))/><span><span class="font-medium">"Dry run"</span><span class="mt-1 block text-xs text-crono-muted">"Print the resolved command in Run output without executing it. Future Runs will be marked skipped, even when the worker was not started with --dry-run."</span></span></label>
                     <ArgumentListInput id="job-arguments" label="Arguments" values=arguments error=argument_error />
                     <p class="-mt-3 text-xs text-crono-muted">
                         "Process example: set executable to "<code>"/usr/bin/echo"</code>", add one argument "<code>"Hello, {{ name }}"</code>", and set default inputs to "<code>r#"{"name":"world"}"#</code>"."
@@ -148,6 +150,7 @@ struct JobState {
     arguments: RwSignal<Vec<String>>,
     inputs: RwSignal<String>,
     idempotent: RwSignal<bool>,
+    dry_run: RwSignal<bool>,
     max_attempts: RwSignal<String>,
     retry_initial: RwSignal<String>,
     retry_max: RwSignal<String>,
@@ -186,6 +189,7 @@ impl JobState {
                 initial.map_or_else(|| "{}".to_string(), |job| pretty_json(&job.inputs)),
             ),
             idempotent: RwSignal::new(initial.is_some_and(|job| job.idempotent)),
+            dry_run: RwSignal::new(initial.is_some_and(|job| job.dry_run)),
             max_attempts: RwSignal::new(
                 initial.map_or_else(|| "1".to_string(), |job| job.max_attempts.to_string()),
             ),
@@ -228,6 +232,7 @@ impl JobState {
             arguments: self.arguments,
             inputs: self.inputs,
             idempotent: self.idempotent,
+            dry_run: self.dry_run,
             max_attempts: self.max_attempts,
             retry_initial: self.retry_initial,
             retry_max: self.retry_max,
@@ -341,6 +346,7 @@ fn job_reset(state: &JobState) -> Callback<()> {
         state.arguments.set(Vec::new());
         state.inputs.set("{}".to_string());
         state.idempotent.set(false);
+        state.dry_run.set(false);
         state.max_attempts.set("1".to_string());
         state.retry_initial.set("1".to_string());
         state.retry_max.set("60".to_string());
@@ -403,6 +409,7 @@ struct JobFields {
     arguments: RwSignal<Vec<String>>,
     inputs: RwSignal<String>,
     idempotent: RwSignal<bool>,
+    dry_run: RwSignal<bool>,
     max_attempts: RwSignal<String>,
     retry_initial: RwSignal<String>,
     retry_max: RwSignal<String>,
@@ -432,6 +439,7 @@ fn job_request(fields: JobFields) -> Result<CreateJobRequest, ()> {
         arguments: fields.arguments.get(),
         inputs: parse_input_object(&fields.inputs.get()).map_err(|_| ())?,
         idempotent: fields.idempotent.get(),
+        dry_run: fields.dry_run.get(),
         max_attempts: fields.max_attempts.get().parse().map_err(|_| ())?,
         retry_initial_seconds: fields.retry_initial.get().parse().map_err(|_| ())?,
         retry_max_seconds: fields.retry_max.get().parse().map_err(|_| ())?,
@@ -449,6 +457,7 @@ fn update_job_request(value: CreateJobRequest) -> UpdateJobRequest {
         arguments: value.arguments,
         inputs: value.inputs,
         idempotent: value.idempotent,
+        dry_run: value.dry_run,
         max_attempts: value.max_attempts,
         retry_initial_seconds: value.retry_initial_seconds,
         retry_max_seconds: value.retry_max_seconds,

@@ -61,6 +61,11 @@ pub enum ExecutionEvent {
     RunCompleted {
         total_duration_ms: u64,
     },
+    /// The worker intentionally did not execute this Run.
+    RunSkipped {
+        reason: String,
+        total_duration_ms: u64,
+    },
     RunFailed {
         phase: ExecutionPhase,
         error: String,
@@ -72,6 +77,7 @@ pub enum ExecutionEvent {
     ResultReportingFailed {
         error: String,
         execution_succeeded: bool,
+        execution_skipped: bool,
         total_duration_ms: u64,
     },
 }
@@ -142,6 +148,7 @@ mod tests {
         let event = ExecutionEvent::ResultReportingFailed {
             error: "completion was not confirmed".to_string(),
             execution_succeeded: true,
+            execution_skipped: false,
             total_duration_ms: 12,
         };
         let json = serde_json::to_value(event)?;

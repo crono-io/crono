@@ -51,6 +51,7 @@ fn snapshot(
         queue_id: uuid::Uuid::now_v7(),
         queue: "default".to_string(),
         idempotent: false,
+        dry_run: false,
         retry_initial_seconds: 1,
         retry_max_seconds: 1,
         retry_multiplier: 1.0,
@@ -60,7 +61,7 @@ fn snapshot(
 
 async fn observed(
     execution: ExecutionSnapshot,
-    dry_run: bool,
+    worker_dry_run: bool,
 ) -> Result<(super::ExecutionResult, Vec<ExecutionEventEnvelope>)> {
     let capture = Arc::new(CaptureSink::default());
     let sink: Arc<dyn EventSink> = capture.clone();
@@ -82,6 +83,7 @@ async fn observed(
         trigger: execution.trigger,
         scheduled_at: execution.scheduled_at,
     });
+    let dry_run = worker_dry_run || execution.dry_run;
     timeline.emit(ExecutionEvent::RunStarted { dry_run });
     let result = execute_snapshot(
         execution,
@@ -111,6 +113,7 @@ async fn dry_run_prints_rendered_argv_without_spawning_a_process() -> Result<()>
     );
     let (result, events) = observed(execution, true).await?;
     assert!(result.succeeded);
+    assert!(result.skipped);
     assert_eq!(result.exit_code, None);
     assert_eq!(
         result.stdout_tail,
@@ -121,6 +124,52 @@ async fn dry_run_prints_rendered_argv_without_spawning_a_process() -> Result<()>
         events
             .iter()
             .any(|event| matches!(event.event, ExecutionEvent::ProcessSkipped { .. }))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event.event, ExecutionEvent::RunSkipped { .. }))
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.event, ExecutionEvent::ProcessStarted { .. }))
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn job_dry_run_skips_process_without_worker_flag_and_redacts_output() -> Result<()> {
+    let mut execution = snapshot(
+        ExecutorKind::Process,
+        Some("/definitely/missing/executable"),
+        &["hello {{token}}"],
+    );
+    execution.dry_run = true;
+    execution.inputs = serde_json::json!({"token": "very-secret"});
+    execution.arguments =
+        crono_execution::render_arguments(&execution.argument_templates, &execution.inputs)?;
+    let (result, events) = observed(execution, false).await?;
+    assert!(result.succeeded);
+    assert!(result.skipped);
+    assert_eq!(result.exit_code, None);
+    assert!(result.stdout_tail.contains("<redacted>"));
+    assert!(!result.stdout_tail.contains("very-secret"));
+    assert!(!serde_json::to_string(&events)?.contains("very-secret"));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event.event, ExecutionEvent::RunStarted { dry_run: true }))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event.event, ExecutionEvent::RunSkipped { .. }))
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.event, ExecutionEvent::ProcessStarted { .. }))
     );
     Ok(())
 }
@@ -134,6 +183,7 @@ async fn normal_process_execution_still_spawns() -> Result<()> {
     );
     let (result, _) = observed(execution, false).await?;
     assert!(result.succeeded);
+    assert!(!result.skipped);
     assert_eq!(result.exit_code, Some(0));
     assert_eq!(result.stdout_tail, "normal");
     Ok(())

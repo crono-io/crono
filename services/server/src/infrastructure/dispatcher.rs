@@ -115,6 +115,9 @@ async fn dispatch_batch(
             return;
         }
     };
+    crate::metrics::global()
+        .outbox_last_poll_unix_seconds
+        .set(OffsetDateTime::now_utc().unix_timestamp());
     stream::iter(records)
         .for_each_concurrent(config.max_in_flight, |record| {
             publish_one(Arc::clone(&store), publisher.clone(), owner, record, config)

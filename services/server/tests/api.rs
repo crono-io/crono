@@ -9,13 +9,14 @@ fn openapi_contains_health_and_control_plane_contracts() -> Result<()> {
     let document = crono_server::api::openapi();
     assert_eq!(document.info.title, "crono-server");
     assert_eq!(document.info.version, env!("CARGO_PKG_VERSION"));
-    assert_eq!(document.paths.paths.len(), 21);
+    assert_eq!(document.paths.paths.len(), 22);
     for path in [
         "/live",
         "/ready",
         "/health",
         "/metrics",
         "/api/overview",
+        "/api/monitor",
         "/api/namespaces",
         "/api/namespaces/{namespace_id}",
         "/api/queues",
@@ -40,6 +41,12 @@ fn openapi_contains_health_and_control_plane_contracts() -> Result<()> {
             .components
             .as_ref()
             .is_some_and(|components| components.schemas.contains_key("Health"))
+    );
+    assert!(
+        document
+            .components
+            .as_ref()
+            .is_some_and(|components| components.schemas.contains_key("MonitorResource"))
     );
     let value = serde_json::to_value(&document)?;
     assert!(

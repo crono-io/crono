@@ -2,9 +2,9 @@
 
 use super::{
     ApplicationError, Authorizer, Capability, ControlPlaneStore, CreateJobInput, CreateQueueInput,
-    CreateScheduleInput, JobDefinition, JobRecord, NewSchedule, Overview, Page, RequestContext,
-    ResourceScope, RunAttemptRecord, RunRecord, ScheduleRecord, StoreError, TargetDefinition,
-    TargetRecord, TargetSetRecord, UpdateQueueInput, WorkerRecord,
+    CreateScheduleInput, JobDefinition, JobRecord, MonitorSnapshot, NewSchedule, Overview, Page,
+    RequestContext, ResourceScope, RunAttemptRecord, RunRecord, ScheduleRecord, StoreError,
+    TargetDefinition, TargetRecord, TargetSetRecord, UpdateQueueInput, WorkerRecord,
 };
 use crate::{
     domain::{
@@ -276,6 +276,7 @@ impl Application {
             arguments: input.arguments,
             inputs: input.inputs,
             idempotent: input.idempotent,
+            dry_run: input.dry_run,
             max_attempts: input.max_attempts,
             retry_initial_seconds: input.retry_initial_seconds,
             retry_max_seconds: input.retry_max_seconds,
@@ -337,6 +338,7 @@ impl Application {
             arguments: input.arguments,
             inputs: input.inputs,
             idempotent: input.idempotent,
+            dry_run: input.dry_run,
             max_attempts: input.max_attempts,
             retry_initial_seconds: input.retry_initial_seconds,
             retry_max_seconds: input.retry_max_seconds,
@@ -976,6 +978,34 @@ impl Application {
             .visibility(context, Capability::NamespaceRead)
             .await?;
         Ok(self.store.overview(&visibility).await?)
+    }
+
+    /// Authorize operator monitoring before reading aggregate database state.
+    ///
+    /// A failed sample is returned as absent so the monitor can still report
+    /// independently probed dependency health without leaking database errors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an authorization failure before sampling when monitor access is denied.
+    pub async fn monitor_snapshot(
+        &self,
+        context: &RequestContext,
+    ) -> Result<Option<MonitorSnapshot>, ApplicationError> {
+        self.authorizer
+            .authorize(
+                context,
+                Capability::MonitorRead,
+                &ResourceScope::ControlPlane,
+            )
+            .await?;
+        match self.store.monitor_snapshot().await {
+            Ok(snapshot) => Ok(Some(snapshot)),
+            Err(error) => {
+                tracing::warn!(%error, "operator monitor database sample unavailable");
+                Ok(None)
+            }
+        }
     }
 
     async fn validate_target_members(

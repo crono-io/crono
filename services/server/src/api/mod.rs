@@ -141,7 +141,11 @@ fn bind_socket(domain: Domain, address: SocketAddr) -> Result<TcpListener> {
     bind_configured_socket(socket, address)
 }
 
+/// Reuse a recently closed address without permitting two live API listeners.
 fn bind_configured_socket(socket: Socket, address: SocketAddr) -> Result<TcpListener> {
+    socket
+        .set_reuse_address(true)
+        .context("failed to configure API address reuse")?;
     socket.bind(&address.into())?;
     socket.listen(1024)?;
     socket.set_nonblocking(true)?;
@@ -199,6 +203,30 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn listener_rebinds_immediately_after_a_completed_connection() -> Result<()> {
+        let (first, address) = bind_listener(0)?;
+        let client = std::net::TcpStream::connect((Ipv4Addr::LOCALHOST, address.port()))?;
+        let (accepted, _) = first.accept()?;
+        drop(accepted);
+        drop(client);
+        drop(first);
+
+        let (replacement, replacement_address) = bind_listener(address.port())?;
+        assert_eq!(replacement_address.port(), address.port());
+        drop(replacement);
+        Ok(())
+    }
+
+    #[test]
+    fn listener_does_not_share_a_port_with_an_active_listener() -> Result<()> {
+        let (first, address) = bind_listener(0)?;
+        let duplicate = bind_listener(address.port());
+        assert!(duplicate.is_err());
+        drop(first);
+        Ok(())
+    }
 
     #[test]
     fn permission_denied_ipv6_socket_uses_ipv4_fallback() {
