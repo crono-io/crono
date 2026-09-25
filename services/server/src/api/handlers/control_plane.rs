@@ -9,8 +9,8 @@ use crate::{
     api::{error::ApiError, state::AppState},
     application::{
         CreateJobInput, CreateQueueInput, CreateScheduleInput, JobRecord, Page as ApplicationPage,
-        RequestContext, RunRecord, ScheduleRecord, TargetRecord, TargetSetRecord, UpdateQueueInput,
-        WorkerRecord,
+        RequestContext, RunAttemptRecord, RunRecord, ScheduleRecord, TargetRecord, TargetSetRecord,
+        UpdateQueueInput, WorkerRecord,
     },
     domain::{
         CatchupPolicy as DomainCatchup, ExecutorKind as DomainExecutor,
@@ -24,13 +24,13 @@ use axum::{
     http::StatusCode,
 };
 use crono_api::{
-    CatchupPolicy, CreateJobRequest, CreateNamespaceRequest, CreateQueueRequest, CreateRunRequest,
-    CreateScheduleRequest, CreateTargetRequest, CreateTargetSetRequest, ExecutionTarget,
-    ExecutionTargetResource, ExecutorKind, JobResource, MisfirePolicy, NamespaceResource,
-    OverviewResource, Page, QueueResource, RunBatchResource, RunResource, RunStatus,
-    ScheduleResource, TargetReference, TargetResource, TargetSetResource, UpdateJobRequest,
-    UpdateQueueRequest, UpdateScheduleRequest, UpdateTargetRequest, UpdateTargetSetRequest,
-    WorkerResource, WorkerStatus,
+    AttemptStatus, CatchupPolicy, CreateJobRequest, CreateNamespaceRequest, CreateQueueRequest,
+    CreateRunRequest, CreateScheduleRequest, CreateTargetRequest, CreateTargetSetRequest,
+    ExecutionTarget, ExecutionTargetResource, ExecutorKind, JobResource, MisfirePolicy,
+    NamespaceResource, OverviewResource, Page, QueueResource, RunAttemptResource, RunBatchResource,
+    RunResource, RunStatus, ScheduleResource, TargetReference, TargetResource, TargetSetResource,
+    UpdateJobRequest, UpdateQueueRequest, UpdateScheduleRequest, UpdateTargetRequest,
+    UpdateTargetSetRequest, WorkerResource, WorkerStatus,
 };
 use serde::Deserialize;
 use time::format_description::well_known::Rfc3339;
@@ -708,6 +708,31 @@ pub async fn get_run(
 
 #[utoipa::path(
     get,
+    path = "/api/runs/{run_id}/attempts",
+    params(("run_id" = Uuid, Path)),
+    responses((status = 200, body = Vec<RunAttemptResource>), (status = 404, body = crono_api::ErrorEnvelope)),
+    tag = "control-plane"
+)]
+/// Read bounded Attempt output only when the caller can read its Run.
+pub async fn list_run_attempts(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    Path(run_id): Path<Uuid>,
+) -> Result<Json<Vec<RunAttemptResource>>, ApiError> {
+    let attempts = state
+        .application()
+        .list_run_attempts(&context, run_id)
+        .await?;
+    Ok(Json(
+        attempts
+            .iter()
+            .map(run_attempt_resource)
+            .collect::<Result<Vec<_>, _>>()?,
+    ))
+}
+
+#[utoipa::path(
+    get,
     path = "/api/workers",
     params(PageQuery),
     responses((status = 200, body = Page<WorkerResource>)),
@@ -957,6 +982,33 @@ fn run_resource(record: &RunRecord) -> Result<RunResource, ApiError> {
         max_attempts: record.run.max_attempts(),
         lateness_seconds: record.run.lateness_seconds(),
         terminal_reason: record.run.terminal_reason().map(str::to_string),
+    })
+}
+
+fn run_attempt_resource(record: &RunAttemptRecord) -> Result<RunAttemptResource, ApiError> {
+    let status = match record.status.as_str() {
+        "pending_dispatch" => AttemptStatus::PendingDispatch,
+        "queued" => AttemptStatus::Queued,
+        "running" => AttemptStatus::Running,
+        "succeeded" => AttemptStatus::Succeeded,
+        "failed" => AttemptStatus::Failed,
+        "dead" => AttemptStatus::Dead,
+        "unknown" => AttemptStatus::Unknown,
+        value => {
+            tracing::error!(status = value, "unsupported persisted Attempt status");
+            return Err(crate::application::ApplicationError::Internal.into());
+        }
+    };
+    Ok(RunAttemptResource {
+        id: record.id,
+        attempt: record.attempt,
+        status,
+        started_at: record.started_at.map(timestamp).transpose()?,
+        completed_at: record.completed_at.map(timestamp).transpose()?,
+        exit_code: record.exit_code,
+        stdout_tail: record.stdout_tail.clone(),
+        stderr_tail: record.stderr_tail.clone(),
+        error: record.error.clone(),
     })
 }
 

@@ -89,8 +89,57 @@ fn verbosity_and_run_dispatch_are_consistent() -> Result<()> {
                 queue: "default".to_string(),
                 worker_id: "worker-01".to_string(),
                 concurrency: 8,
+                dry_run: false,
+                log_format: crono_worker::execution::LogFormat::Pretty,
             })
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn dry_run_is_independent_of_log_verbosity() -> Result<()> {
+    for args in [
+        [
+            "crono-worker",
+            "--dry-run",
+            "run",
+            "--worker-id",
+            "worker-01",
+        ],
+        [
+            "crono-worker",
+            "run",
+            "--worker-id",
+            "worker-01",
+            "--dry-run",
+        ],
+    ] {
+        let matches = commands::new().try_get_matches_from(args)?;
+        assert_eq!(matches.get_count("verbose"), 0);
+        assert!(matches.get_flag("dry-run"));
+        assert!(matches!(
+            dispatch::handler(&matches)?,
+            Action::Run(run::Args { dry_run: true, .. })
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn log_format_selects_event_renderer_without_changing_dispatch() -> Result<()> {
+    for args in [
+        ["crono-worker", "--log-format", "json", "run"],
+        ["crono-worker", "run", "--log-format", "json"],
+    ] {
+        let matches = commands::new().try_get_matches_from(args)?;
+        assert!(matches!(
+            dispatch::handler(&matches)?,
+            Action::Run(run::Args {
+                log_format: crono_worker::execution::LogFormat::Json,
+                ..
+            })
+        ));
     }
     Ok(())
 }

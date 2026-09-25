@@ -10,9 +10,9 @@ use crono_api::{
     CreateJobRequest, CreateNamespaceRequest, CreateQueueRequest, CreateRunRequest,
     CreateScheduleRequest, CreateTargetRequest, CreateTargetSetRequest, ErrorEnvelope,
     ExecutionTarget, JobResource, NamespaceResource, OverviewResource, Page, QueueResource,
-    RunBatchResource, RunResource, ScheduleResource, TargetResource, TargetSetResource,
-    UpdateJobRequest, UpdateQueueRequest, UpdateScheduleRequest, UpdateTargetRequest,
-    UpdateTargetSetRequest, WorkerResource,
+    RunAttemptResource, RunBatchResource, RunResource, ScheduleResource, TargetResource,
+    TargetSetResource, UpdateJobRequest, UpdateQueueRequest, UpdateScheduleRequest,
+    UpdateTargetRequest, UpdateTargetSetRequest, WorkerResource,
 };
 use gloo_net::http::{Request, Response};
 use serde::{Serialize, de::DeserializeOwned};
@@ -94,6 +94,11 @@ pub async fn list_jobs(namespace_id: Uuid) -> ApiResult<Page<JobResource>> {
 
 pub async fn all_jobs(namespace_id: Uuid) -> ApiResult<Vec<JobResource>> {
     get_all(&jobs_path(namespace_id)).await
+}
+
+/// Fetch one authorized Job so an edit URL works without prior list state.
+pub async fn get_job(id: Uuid) -> ApiResult<JobResource> {
+    get(&format!("{API_ROOT}/jobs/{id}")).await
 }
 
 pub async fn create_job(namespace_id: Uuid, request: &CreateJobRequest) -> ApiResult<JobResource> {
@@ -179,6 +184,11 @@ pub async fn update_schedule(
 
 pub async fn list_runs() -> ApiResult<Page<RunResource>> {
     get(&format!("{API_ROOT}/runs?limit=100")).await
+}
+
+/// Fetch the bounded output of every Attempt on one authorized Run.
+pub async fn list_run_attempts(run_id: Uuid) -> ApiResult<Vec<RunAttemptResource>> {
+    get(&format!("{API_ROOT}/runs/{run_id}/attempts")).await
 }
 
 pub async fn create_run(

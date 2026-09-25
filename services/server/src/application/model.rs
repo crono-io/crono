@@ -84,6 +84,20 @@ pub struct RunRecord {
     pub target_name: crate::domain::ResourceName,
 }
 
+/// One Attempt's bounded output, returned only through a `RunRead` decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunAttemptRecord {
+    pub id: Uuid,
+    pub attempt: u16,
+    pub status: String,
+    pub started_at: Option<time::OffsetDateTime>,
+    pub completed_at: Option<time::OffsetDateTime>,
+    pub exit_code: Option<i32>,
+    pub stdout_tail: Option<String>,
+    pub stderr_tail: Option<String>,
+    pub error: Option<String>,
+}
+
 /// Authoritative presence and current execution count for one worker.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkerRecord {

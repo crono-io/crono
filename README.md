@@ -134,6 +134,12 @@ for a currently leased Attempt does not create a concurrent execution.
 
 While a process runs, the worker refreshes its PostgreSQL lease and sends JetStream in-progress acknowledgements. Completion is committed to PostgreSQL before the dispatch is ACKed. The process executor uses an absolute executable directly without a shell, clears the environment except for a small allowlist, appends Target arguments to Job arguments, supplies inputs through `CRONO_INPUTS_FILE`, and retains bounded stdout/stderr tails.
 
+After a successful claim, the worker builds a typed, serializable execution timeline for that Attempt. Events carry timestamps, an observation ID and per-observation sequence, Run/Attempt/Job/worker/Queue identity, and structured milestones: receipt, start, sanitized context and command, process start, stdout/stderr lines, exit, and terminal outcome. The observation ID distinguishes a later redelivery of the same Attempt; `(observation_id, sequence)` can serve as a future persistence key. A separate result-reporting failure event records an unconfirmed completion without falsely claiming that the process failed. The server has already merged inputs and rendered argv; the worker observes those immutable values rather than re-rendering them. The two child pipes are drained concurrently, with one event per line or final partial line. Non-UTF-8 output is decoded lossily; lines exceeding 64 KiB are drained but represented by an omission marker to bound memory and event size. Monotonic clocks measure process and total worker-observed duration. The timeline currently starts after claim, so it does not claim to measure queue wait. New snapshots carry the server-known manual or schedule trigger and the scheduled occurrence instant when applicable; older snapshots leave those details unknown.
+
+`crono-worker run --log-format pretty` writes compact, run-attributed execution events to stderr; `--log-format json` writes one serialized event envelope per line. Worker-internal diagnostics remain separate `tracing` JSON logs. The event type lives in the shared `crono-execution` crate while the worker owns the sink and renderer, allowing a future NATS/API sink to forward the same envelopes to the server for a web timeline. The current server does not persist these events; it still stores only bounded Attempt output tails. Synchronous emission provides bounded-memory backpressure rather than an unbounded output queue. A child producing output faster than stderr can accept it may slow down, but cannot exhaust the worker's memory through timeline buffering.
+
+Start a worker with `crono-worker run --dry-run` to inspect its rendered commands. It still claims and acknowledges work, reports each Run as succeeded, and prints a sanitized command to worker stdout and the Attempt's bounded stdout record, but it never starts the process or creates an inputs file. The Runs page loads Attempt output through `GET /api/runs/{run_id}/attempts` under the existing Run-read authorization. Known sensitive input keys and credential-like argv switches are redacted before events, dry-run output, and Attempt tails are emitted. This is a fallback, not a secret-management boundary: literal credentials, transformed secrets, and values under unrecognized keys may escape detection. Do not place credentials in Crono inputs or command arguments.
+
 ## Commands, templates, and inputs
 
 A Job defines what runs: `noop` or `process`, an absolute executable for process Jobs, ordered argument templates, default inputs, and retry behavior. A Target defines where or with what destination-specific argument suffixes and inputs. A Target Set is an explicit collection of Targets plus inputs shared by every member; selecting one fans out to one Run per Target. Schedules and manual Runs can add a final invocation input layer.
@@ -154,7 +160,7 @@ Before dispatch, the server merges inputs, renders argv, and stores the result i
 jq -r '.deployment.region' "$CRONO_INPUTS_FILE"
 ```
 
-Changing a Job, Target, or Target Set affects only future snapshots. Existing Runs retain the exact executable, rendered arguments, merged inputs, Queue identity, and retry settings they were created with.
+Changing a Job, Target, or Target Set affects only future snapshots. Existing Runs retain the exact executable, argument templates, rendered arguments, merged inputs, Job and Queue identity, and retry settings they were created with. Older snapshots without the added template and Job fields remain readable; their timeline omits those details.
 
 Every worker session also sends a presence heartbeat through the server-mediated `crono.worker.presence.*` NATS boundary. Keeping presence separate from execution control prevents older control subscribers from consuming new heartbeat operations during rolling deployments. PostgreSQL records the stable worker ID, process session, Queue UUID, concurrency, version, start time, and last-seen time; API responses join the current Queue name for display. `GET /api/workers` classifies a worker as online for 30 seconds after its last heartbeat, stale through two minutes, and offline afterward. Offline records remain useful for short incident review and are removed after seven days by bounded reconciliation. Presence is operational metadata only: it does not replace Attempt leases or make a NATS connection authoritative execution state.
 
@@ -215,7 +221,7 @@ sequenceDiagram
 
 ## Reviewing locally
 
-The GUI exercises Namespace, Queue, Job, Target, Target Set, Schedule, and manual Run workflows. Queue administration supports rename, enable/disable, and guarded deletion. Existing relationships are searchable name selectors backed by UUIDs. Job, Target, and Target Set definitions can be edited without replacing their immutable IDs, and the Job editor can preview rendered argv against a selected Target or Target Set.
+The GUI exercises Namespace, Queue, Job, Target, Target Set, Schedule, and manual Run workflows. Queue administration supports rename, enable/disable, and guarded deletion. Existing relationships are searchable name selectors backed by UUIDs. `/jobs` browses Jobs within a selected Namespace; its sidebar submenu and page action lead to `/jobs/new`, while each Job's Edit link opens `/jobs/{id}/edit`. Creation is never the default Jobs view, and a direct edit URL reloads the Job from the API. Job, Target, and Target Set definitions can be edited without replacing their immutable IDs. The Job editor previews rendered argv and merged inputs against a selected Target or Target Set without creating a Run; later invocation inputs are not part of that preview. Recent Runs expose each Attempt's bounded output on demand.
 
 ```mermaid
 flowchart TD
@@ -260,10 +266,17 @@ When reviewing failure behavior, stop NATS after creating the definitions but be
 Public routes use `/api` directly; there is no `/api/v1` or draft compatibility layer. `crono-server-openapi` emits the route-derived OpenAPI document.
 
 Run `just dev-start` to launch the API and live-reloading web application
-together. The recipe waits for API readiness before starting the web proxy,
-stops the sibling process when either application exits, and reports occupied
-API or web ports before starting. Pressing Ctrl-C therefore leaves no
-half-running development stack.
+together. It stops stale server and web processes from this checkout before
+starting, waits for API readiness before starting the web proxy, and stops the
+sibling process when either application exits. Running it again replaces the
+previous stack. Ports occupied by unrelated processes are reported rather than
+forcibly cleared. `just dev-stop` works from another shell, even if the
+original launcher is gone: it stops this checkout's server, web, and worker
+processes plus the named `crono-postgres` and `crono-nats` containers. Container
+volumes are preserved. The process cleanup uses Linux `/proc` and `flock` to
+scope and coordinate these commands, including binaries replaced by a rebuild.
+Startup uses `ss` to check listeners on every IPv4 and IPv6 address before the
+API binds `[::]`; an unrelated port owner is shown but never killed.
 
 The common development workflow is:
 
@@ -273,9 +286,11 @@ cargo run --locked -p crono-server --bin crono-server -- --port 8080
 just worker
 ```
 
-`just worker` starts `worker-01` on the `default` Queue with concurrency `3`
-and verbose logging. Queue, worker ID, concurrency, and verbosity remain
-positional overrides, for example `just worker priority worker-02 6 -vv`.
+`just worker` starts `worker-01` on the `default` Queue with concurrency `3`,
+verbose diagnostics, and a pretty execution timeline on stderr. Queue, worker
+ID, concurrency, verbosity, and timeline format are positional overrides, for
+example `just worker priority worker-02 6 -vv json`. Use
+`just worker default worker-01 3 -v json` to inspect JSON event envelopes.
 
 To discard all local Crono PostgreSQL and JetStream state and recreate both
 services from empty named volumes, run `just dev-reset`. The command requires
@@ -284,7 +299,7 @@ containers and their named volumes. The canonical bootstrap upgrades the
 preceding local draft schema in place, so the reset is optional when a truly
 empty environment is useful rather than a requirement for `just dev-start`.
 
-PostgreSQL uses `CRONO_DATABASE_URL`, NATS uses `CRONO_NATS_URL`, and the worker accepts `--nats-url`, `--queue`, `--worker-id`, and `--concurrency`. Local defaults target loopback development services. Deployed public HTTP must sit behind TLS termination; clients do not receive NATS or PostgreSQL credentials.
+PostgreSQL uses `CRONO_DATABASE_URL`, NATS uses `CRONO_NATS_URL`, and the worker accepts `--nats-url`, `--queue`, `--worker-id`, `--concurrency`, `--dry-run`, and `--log-format pretty|json`. Local defaults target loopback development services. Deployed public HTTP must sit behind TLS termination; clients do not receive NATS or PostgreSQL credentials.
 
 Before review, run:
 

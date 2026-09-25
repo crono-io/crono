@@ -17,8 +17,9 @@ pub use auth::{
 };
 pub use error::ApplicationError;
 pub use model::{
-    CreateJobInput, CreateQueueInput, CreateScheduleInput, JobRecord, Overview, Page, RunRecord,
-    ScheduleRecord, TargetRecord, TargetSetRecord, UpdateQueueInput, WorkerRecord,
+    CreateJobInput, CreateQueueInput, CreateScheduleInput, JobRecord, Overview, Page,
+    RunAttemptRecord, RunRecord, ScheduleRecord, TargetRecord, TargetSetRecord, UpdateQueueInput,
+    WorkerRecord,
 };
 pub use service::{Application, CreateRunOutcome};
 pub use store::{

@@ -10,8 +10,8 @@
 use crate::{
     application::{
         ControlPlaneStore, JobDefinition, JobRecord, MetricsSnapshot, NewSchedule, OutboxRecord,
-        Overview, Page, RunRecord, SchedulePlan, ScheduleRecord, StoreError, TargetDefinition,
-        TargetRecord, TargetSetRecord, VisibilityScope, WorkerRecord,
+        Overview, Page, RunAttemptRecord, RunRecord, SchedulePlan, ScheduleRecord, StoreError,
+        TargetDefinition, TargetRecord, TargetSetRecord, VisibilityScope, WorkerRecord,
     },
     domain::{
         AttemptId, CatchupPolicy, DispatchId, ExecutorKind, Job, JobData, JobId, MisfirePolicy,
@@ -23,7 +23,7 @@ use crate::{
 use async_trait::async_trait;
 use crono_api::{
     ClaimRequest, ClaimResponse, CompletionRequest, DispatchEnvelope, ExecutionSnapshot,
-    ExecutorKind as ApiExecutor, LeaseRequest, WorkerHeartbeatRequest,
+    ExecutionTrigger, ExecutorKind as ApiExecutor, LeaseRequest, WorkerHeartbeatRequest,
 };
 use crono_execution::{merge_inputs, render_arguments};
 use sqlx::{PgPool, Postgres, Transaction, postgres::PgPoolOptions};
@@ -138,6 +138,19 @@ struct RunRow {
     job_name: String,
     target_namespace: String,
     target_name: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct RunAttemptRow {
+    id: Uuid,
+    attempt: i32,
+    status: String,
+    started_at: Option<OffsetDateTime>,
+    completed_at: Option<OffsetDateTime>,
+    exit_code: Option<i32>,
+    stdout_tail: Option<String>,
+    stderr_tail: Option<String>,
+    error: Option<String>,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -976,6 +989,8 @@ impl ControlPlaneStore for PostgresStore {
                     execution,
                     target_set_inputs.as_ref(),
                     inputs,
+                    ExecutionTrigger::Manual,
+                    None,
                 )
                 .map(|snapshot| (run_id, snapshot))
             })
@@ -1109,6 +1124,46 @@ impl ControlPlaneStore for PostgresStore {
         .map_err(store_error)?
         .ok_or(StoreError::NotFound)?;
         run_from_row(row)
+    }
+
+    async fn list_run_attempts(
+        &self,
+        id: RunId,
+        visibility: &VisibilityScope,
+    ) -> Result<Vec<RunAttemptRecord>, StoreError> {
+        self.get_run(id, visibility).await?;
+        let ids = Self::namespace_ids(visibility);
+        let restrict = matches!(visibility, VisibilityScope::Namespaces(_));
+        let rows = sqlx::query_as::<_, RunAttemptRow>(
+            "SELECT a.id, a.attempt, a.status, a.started_at, a.completed_at,
+                    a.exit_code, a.stdout_tail, a.stderr_tail, a.error
+               FROM crono.run_attempts a
+               JOIN crono.runs r ON r.id = a.run_id
+               JOIN crono.jobs j ON j.id = r.job_id
+              WHERE a.run_id = $1 AND (NOT $2 OR j.namespace_id = ANY($3::uuid[]))
+              ORDER BY a.attempt DESC LIMIT 100",
+        )
+        .bind(id.get())
+        .bind(restrict)
+        .bind(&ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(store_error)?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(RunAttemptRecord {
+                    id: row.id,
+                    attempt: u16::try_from(row.attempt).map_err(|_| StoreError::Internal)?,
+                    status: row.status,
+                    started_at: row.started_at,
+                    completed_at: row.completed_at,
+                    exit_code: row.exit_code,
+                    stdout_tail: row.stdout_tail,
+                    stderr_tail: row.stderr_tail,
+                    error: row.error,
+                })
+            })
+            .collect()
     }
 
     async fn record_worker_heartbeat(
@@ -1920,6 +1975,8 @@ fn execution_snapshot_with_inputs(
     execution: &ExecutionRow,
     target_set_inputs: Option<&serde_json::Value>,
     invocation_inputs: &serde_json::Value,
+    trigger: ExecutionTrigger,
+    scheduled_at: Option<OffsetDateTime>,
 ) -> Result<serde_json::Value, String> {
     let mut arguments: Vec<String> = serde_json::from_value(execution.job_arguments.clone())
         .map_err(|error| error.to_string())?;
@@ -1934,7 +1991,8 @@ fn execution_snapshot_with_inputs(
         invocation_inputs,
     ])
     .map_err(|error| error.to_string())?;
-    let arguments = render_arguments(&arguments, &inputs).map_err(|error| error.to_string())?;
+    let rendered_arguments =
+        render_arguments(&arguments, &inputs).map_err(|error| error.to_string())?;
     let executor = match execution.executor.as_str() {
         "noop" => ApiExecutor::Noop,
         "process" => ApiExecutor::Process,
@@ -1946,8 +2004,12 @@ fn execution_snapshot_with_inputs(
     serde_json::to_value(ExecutionSnapshot {
         executor,
         executable: execution.executable.clone(),
-        arguments,
+        argument_templates: arguments,
+        arguments: rendered_arguments,
         inputs,
+        job_id: Some(execution.job_id),
+        trigger: Some(trigger),
+        scheduled_at,
         idempotency_key: run_id,
         queue_id: execution.queue_id,
         queue: execution.queue_name.clone(),
@@ -2015,8 +2077,14 @@ async fn insert_scheduled_occurrence(
 ) -> Result<(), StoreError> {
     let run_id = Uuid::now_v7();
     let empty_inputs = serde_json::json!({});
-    let rendered =
-        execution_snapshot_with_inputs(run_id, execution, target_set_inputs, schedule_inputs);
+    let scheduled_at = occurrence.scheduled_at;
+    let rendered = scheduled_snapshot(
+        run_id,
+        execution,
+        target_set_inputs,
+        schedule_inputs,
+        scheduled_at,
+    );
     let (snapshot, status, reason) = match (occurrence.execute, rendered) {
         (true, Ok(snapshot)) => (snapshot, "pending_dispatch", None),
         (false, Ok(snapshot)) => (snapshot, "skipped", occurrence.reason.clone()),
@@ -2069,14 +2137,8 @@ async fn insert_scheduled_occurrence(
         return Ok(());
     }
     if status == "pending_dispatch" {
-        create_attempt_and_outbox(
-            transaction,
-            run_id,
-            1,
-            execution.queue_id,
-            occurrence.dispatch_deadline,
-        )
-        .await?;
+        let deadline = occurrence.dispatch_deadline;
+        create_attempt_and_outbox(transaction, run_id, 1, execution.queue_id, deadline).await?;
     }
     let event = match status {
         "pending_dispatch" => "created",
@@ -2108,6 +2170,24 @@ async fn insert_scheduled_occurrence(
     .await
     .map_err(store_error)?;
     Ok(())
+}
+
+/// Preserve the schedule origin in an immutable execution snapshot.
+fn scheduled_snapshot(
+    run_id: Uuid,
+    execution: &ExecutionRow,
+    target_set_inputs: Option<&serde_json::Value>,
+    schedule_inputs: &serde_json::Value,
+    scheduled_at: OffsetDateTime,
+) -> Result<serde_json::Value, String> {
+    execution_snapshot_with_inputs(
+        run_id,
+        execution,
+        target_set_inputs,
+        schedule_inputs,
+        ExecutionTrigger::Schedule,
+        Some(scheduled_at),
+    )
 }
 
 async fn insert_run_event(

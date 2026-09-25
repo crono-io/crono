@@ -39,6 +39,21 @@ pub fn new() -> Command {
                 .action(ArgAction::Count)
                 .help("Increase logging verbosity: -v info, -vv debug, -vvv trace"),
         )
+        .arg(
+            Arg::new("dry-run")
+                .long("dry-run")
+                .global(true)
+                .action(ArgAction::SetTrue)
+                .help("Print claimed commands without executing them; Runs still succeed"),
+        )
+        .arg(
+            Arg::new("log-format")
+                .long("log-format")
+                .global(true)
+                .value_parser(["pretty", "json"])
+                .default_value("pretty")
+                .help("Execution timeline format on stderr (worker diagnostics remain JSON)"),
+        )
         .subcommand(
             Command::new("run")
                 .about("Start the JetStream execution worker")

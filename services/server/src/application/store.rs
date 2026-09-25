@@ -5,8 +5,8 @@
 //! process-local coordination.
 
 use super::{
-    JobRecord, Overview, Page, RunRecord, ScheduleRecord, TargetRecord, TargetSetRecord,
-    VisibilityScope, WorkerRecord,
+    JobRecord, Overview, Page, RunAttemptRecord, RunRecord, ScheduleRecord, TargetRecord,
+    TargetSetRecord, VisibilityScope, WorkerRecord,
 };
 use crate::domain::{
     AttemptId, CatchupPolicy, DispatchId, ExecutorKind, JobId, MisfirePolicy, Namespace,
@@ -268,6 +268,11 @@ pub trait ControlPlaneStore: Send + Sync {
         id: RunId,
         visibility: &VisibilityScope,
     ) -> Result<RunRecord, StoreError>;
+    async fn list_run_attempts(
+        &self,
+        id: RunId,
+        visibility: &VisibilityScope,
+    ) -> Result<Vec<RunAttemptRecord>, StoreError>;
     async fn record_worker_heartbeat(
         &self,
         request: &WorkerHeartbeatRequest,

@@ -1,4 +1,8 @@
 //! Live Run creation through UUID-backed Job and Target selection.
+//!
+//! Recent Runs expose their authorized Attempt output on demand, including
+//! commands recorded by dry-run workers. Output stays behind the server's
+//! `RunRead` decision rather than being included in the list response.
 
 use super::resource_options;
 use crate::{
@@ -169,10 +173,23 @@ fn runs_view(state: &RunsViewState) -> impl IntoView + use<> {
                     Ok(page) if page.items.is_empty() => view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"No Runs yet."</p> }.into_any(),
                     Ok(page) => view! { <ul class="divide-y divide-crono-border">{page.items.iter().map(|run| {
                         let status = run_status(run.status);
+                        let run_id = run.id;
+                        let output_open = RwSignal::new(false);
                         view! {
                             <li class="grid gap-2 px-5 py-4 sm:grid-cols-[1fr_auto] sm:px-6">
                                 <div><p class="font-medium text-crono-text">{format!("{} → {}", run.job, run.target)}</p><code class="text-xs text-crono-muted">{run.id.to_string()}</code></div>
                                 <span class="self-center rounded-full bg-crono-primary-soft px-2.5 py-1 text-xs font-medium text-crono-primary">{status}</span>
+                                <div class="sm:col-span-2">
+                                    <button
+                                        type="button"
+                                        class="text-sm font-medium text-crono-primary hover:text-crono-primary-hover"
+                                        aria-expanded=move || output_open.get().to_string()
+                                        on:click=move |_| output_open.update(|open| *open = !*open)
+                                    >{move || if output_open.get() { "Hide output" } else { "View output" }}</button>
+                                    <Show when=move || output_open.get()>
+                                        <RunAttemptOutput run_id=run_id />
+                                    </Show>
+                                </div>
                             </li>
                         }
                     }).collect_view()}</ul> }.into_any(),
@@ -180,6 +197,51 @@ fn runs_view(state: &RunsViewState) -> impl IntoView + use<> {
                 }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Runs…"</p> }.into_any())}
             </section>
         </div>
+    }
+}
+
+/// Fetch Attempt output only while a Run's disclosure is open.
+#[component]
+fn RunAttemptOutput(run_id: uuid::Uuid) -> impl IntoView {
+    let attempts = LocalResource::new(move || api::list_run_attempts(run_id));
+    view! {
+        <div class="mt-3 rounded-md border border-crono-border bg-zinc-50 p-3">
+            <button type="button" class="text-xs font-medium text-crono-primary" on:click=move |_| attempts.refetch()>"Refresh output"</button>
+            {move || attempts.map(|result| match result {
+                Ok(items) if items.is_empty() => view! { <p class="mt-2 text-sm text-crono-muted">"No attempts yet."</p> }.into_any(),
+                Ok(items) => view! { <div class="mt-2 space-y-3">{items.iter().cloned().map(|attempt| {
+                    let status = attempt_status(attempt.status);
+                    let stdout = attempt.stdout_tail.filter(|value| !value.is_empty());
+                    let stderr = attempt.stderr_tail.filter(|value| !value.is_empty());
+                    let error = attempt.error;
+                    let no_output = stdout.is_none() && stderr.is_none() && error.is_none();
+                    view! {
+                        <section class="rounded-md border border-crono-border bg-white p-3">
+                            <h3 class="text-sm font-medium text-crono-text">{format!("Attempt {} · {}", attempt.attempt, status)}</h3>
+                            <p class="text-xs text-crono-muted">{format!("Started: {} · Completed: {}", attempt.started_at.as_deref().unwrap_or("—"), attempt.completed_at.as_deref().unwrap_or("—"))}</p>
+                            {attempt.exit_code.map(|code| view! { <p class="text-xs text-crono-muted">{format!("Exit code: {code}")}</p> })}
+                            {stdout.map(|value| view! { <div class="mt-2"><p class="text-xs font-medium text-crono-muted">"stdout"</p><pre class="overflow-auto whitespace-pre-wrap break-all text-xs text-crono-text">{value}</pre></div> })}
+                            {stderr.map(|value| view! { <div class="mt-2"><p class="text-xs font-medium text-crono-muted">"stderr"</p><pre class="overflow-auto whitespace-pre-wrap break-all text-xs text-crono-text">{value}</pre></div> })}
+                            {error.map(|value| view! { <p class="mt-2 text-xs text-crono-failed">{value}</p> })}
+                            {no_output.then(|| view! { <p class="mt-2 text-xs text-crono-muted">"No output captured."</p> })}
+                        </section>
+                    }
+                }).collect_view()}</div> }.into_any(),
+                Err(error) => view! { <p class="mt-2 text-sm text-crono-failed" role="alert">{error.message.clone()}</p> }.into_any(),
+            }).unwrap_or_else(|| view! { <p class="mt-2 text-sm text-crono-muted">"Loading output…"</p> }.into_any())}
+        </div>
+    }
+}
+
+const fn attempt_status(status: crono_api::AttemptStatus) -> &'static str {
+    match status {
+        crono_api::AttemptStatus::PendingDispatch => "pending dispatch",
+        crono_api::AttemptStatus::Queued => "queued",
+        crono_api::AttemptStatus::Running => "running",
+        crono_api::AttemptStatus::Succeeded => "succeeded",
+        crono_api::AttemptStatus::Failed => "failed",
+        crono_api::AttemptStatus::Dead => "dead",
+        crono_api::AttemptStatus::Unknown => "unknown",
     }
 }
 

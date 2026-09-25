@@ -1,11 +1,28 @@
-//! Bounded `JetStream` pull-consumer and process executor.
+//! Bounded `JetStream` pull-consumer and server-mediated Attempt coordinator.
 //!
 //! Every worker session reports bounded presence metadata to the server, and
 //! every delivery is claimed before execution. Long-running work refreshes both
 //! the PostgreSQL lease and `JetStream` acknowledgement deadline. Completion is
 //! persisted before the message is acknowledged, so a crash may redeliver but
 //! cannot create another logical Attempt.
+//!
+//! # Flow Overview
+//!
+//! Decode a Queue dispatch, claim its immutable snapshot, emit a sanitized
+//! per-Attempt execution timeline while the runner drains both process pipes,
+//! then report completion before acknowledging the delivery. Malformed or
+//! misrouted dispatches are terminated, while transient control failures are
+//! returned for redelivery. The worker never accesses PostgreSQL directly.
+//!
+//! Dry-run sessions consume and complete claimed Attempts successfully while
+//! printing their already-rendered command instead of starting a process.
+//! The printed argv is sanitized using known sensitive input keys and argument
+//! switches; unknown literal credentials remain outside this fallback's scope.
 
+use crate::execution::{
+    ConsoleSink, EventSink, ExecutionEvent, ExecutionPhase, ExecutionTimeline, LogFormat, Redactor,
+    runner::{ExecutionResult, elapsed_ms, execute_snapshot},
+};
 use anyhow::{Context, Result, bail};
 use async_nats::jetstream::{
     self,
@@ -14,23 +31,19 @@ use async_nats::jetstream::{
 };
 use crono_api::{
     ClaimRequest, ClaimResponse, CompletionRequest, DispatchEnvelope, ExecutionSnapshot,
-    ExecutorKind, LeaseRequest, QueueReference, QueueResolutionRequest, QueueResolutionResponse,
+    LeaseRequest, QueueReference, QueueResolutionRequest, QueueResolutionResponse,
     QueueResolutionStatus, WorkerHeartbeatRequest,
 };
-use crono_execution::MAX_INPUT_BYTES;
 use futures_util::StreamExt;
-use std::{env, io::Write, process::Stdio, sync::Arc, time::Duration};
-use tempfile::NamedTempFile;
-use tokio::{
-    io::{AsyncRead, AsyncReadExt},
-    process::Command,
-    time,
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
 };
+use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 const STREAM_NAME: &str = "CRONO_DISPATCH";
-const OUTPUT_LIMIT: usize = 65_536;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const QUEUE_RESOLUTION_ATTEMPTS: u8 = 30;
 const QUEUE_RESOLUTION_RETRY: Duration = Duration::from_secs(1);
@@ -41,15 +54,8 @@ pub struct Args {
     pub queue: String,
     pub worker_id: String,
     pub concurrency: u16,
-}
-
-#[derive(Debug)]
-struct ExecutionResult {
-    succeeded: bool,
-    exit_code: Option<i32>,
-    stdout_tail: String,
-    stderr_tail: String,
-    error: Option<String>,
+    pub dry_run: bool,
+    pub log_format: LogFormat,
 }
 
 /// Run a durable pull consumer until an operating-system shutdown signal.
@@ -97,6 +103,7 @@ pub async fn execute(args: Args) -> Result<()> {
         }
     });
     let args = Arc::new(args);
+    let event_sink: Arc<dyn EventSink> = Arc::new(ConsoleSink::new(args.log_format));
     let heartbeat = tokio::spawn(run_presence_heartbeat(
         client.clone(),
         Arc::clone(&args),
@@ -108,6 +115,7 @@ pub async fn execute(args: Args) -> Result<()> {
         worker_id = args.worker_id,
         queue = args.queue,
         concurrency = args.concurrency,
+        dry_run = args.dry_run,
         "Crono worker started"
     );
     while !cancellation.is_cancelled() {
@@ -138,7 +146,13 @@ pub async fn execute(args: Args) -> Result<()> {
         }
         futures_util::stream::iter(batch)
             .for_each_concurrent(usize::from(args.concurrency), |message| {
-                handle_message(client.clone(), Arc::clone(&args), queue.id, message)
+                handle_message(
+                    client.clone(),
+                    Arc::clone(&args),
+                    Arc::clone(&event_sink),
+                    queue.id,
+                    message,
+                )
             })
             .await;
     }
@@ -253,6 +267,7 @@ async fn presence_request(
 async fn handle_message(
     client: async_nats::Client,
     args: Arc<Args>,
+    event_sink: Arc<dyn EventSink>,
     queue_id: uuid::Uuid,
     message: jetstream::Message,
 ) {
@@ -294,12 +309,48 @@ async fn handle_message(
         let _ = message.double_ack().await;
         return;
     };
-    let result = run_with_heartbeat(
-        &client,
-        &args.worker_id,
+    execute_claimed(&client, &args, &message, &envelope, execution, event_sink).await;
+}
+
+/// Observe and report an already-claimed Attempt, preserving the server-first
+/// completion and `JetStream` acknowledgement ordering.
+async fn execute_claimed(
+    client: &async_nats::Client,
+    args: &Args,
+    message: &jetstream::Message,
+    envelope: &DispatchEnvelope,
+    execution: ExecutionSnapshot,
+    event_sink: Arc<dyn EventSink>,
+) {
+    let timeline = Arc::new(ExecutionTimeline::new(
+        envelope.run_id,
         envelope.attempt_id,
+        execution.job_id,
+        args.worker_id.clone(),
+        execution.queue.clone(),
+        event_sink,
+    ));
+    let started = Instant::now();
+    timeline.emit(ExecutionEvent::RunReceived {
+        dispatch_id: envelope.dispatch_id,
+        trigger: execution.trigger,
+        scheduled_at: execution.scheduled_at,
+    });
+    timeline.emit(ExecutionEvent::RunStarted {
+        dry_run: args.dry_run,
+    });
+    let redactor = Arc::new(Redactor::from_inputs_and_arguments(
+        &execution.inputs,
+        &execution.arguments,
+    ));
+    let result = run_with_heartbeat(
+        client,
+        args,
+        envelope,
         execution,
-        &message,
+        Arc::clone(&timeline),
+        Arc::clone(&redactor),
+        message,
     )
     .await;
     let result = match result {
@@ -310,6 +361,7 @@ async fn handle_message(
             stdout_tail: String::new(),
             stderr_tail: String::new(),
             error: Some(error.to_string()),
+            failure_phase: Some(ExecutionPhase::Execution),
         },
     };
     let completion = CompletionRequest {
@@ -317,19 +369,30 @@ async fn handle_message(
         worker_id: args.worker_id.clone(),
         succeeded: result.succeeded,
         exit_code: result.exit_code,
-        stdout_tail: result.stdout_tail,
-        stderr_tail: result.stderr_tail,
-        error: result.error,
+        stdout_tail: result.stdout_tail.clone(),
+        stderr_tail: result.stderr_tail.clone(),
+        error: result.error.as_deref().map(|error| redactor.text(error)),
     };
-    match control_request::<_, bool>(&client, "complete", &args.worker_id, &completion).await {
+    match control_request::<_, bool>(client, "complete", &args.worker_id, &completion).await {
         Ok(true) => {
+            emit_result(&timeline, &redactor, started, &result);
             let _ = message.double_ack().await;
         }
         Ok(false) => {
+            timeline.emit(ExecutionEvent::ResultReportingFailed {
+                error: "completion lost its worker lease".to_string(),
+                execution_succeeded: result.succeeded,
+                total_duration_ms: elapsed_ms(started),
+            });
             warn!(attempt_id = %envelope.attempt_id, "completion lost its worker lease");
             let _ = message.ack_with(AckKind::Term).await;
         }
         Err(error) => {
+            timeline.emit(ExecutionEvent::ResultReportingFailed {
+                error: "completion was not confirmed".to_string(),
+                execution_succeeded: result.succeeded,
+                total_duration_ms: elapsed_ms(started),
+            });
             warn!(%error, attempt_id = %envelope.attempt_id, "completion was not confirmed");
             let _ = message
                 .ack_with(AckKind::Nak(Some(Duration::from_secs(5))))
@@ -338,14 +401,37 @@ async fn handle_message(
     }
 }
 
+/// Record the terminal worker outcome only after the server confirms completion.
+fn emit_result(
+    timeline: &ExecutionTimeline,
+    redactor: &Redactor,
+    started: Instant,
+    result: &ExecutionResult,
+) {
+    if result.succeeded {
+        timeline.emit(ExecutionEvent::RunCompleted {
+            total_duration_ms: elapsed_ms(started),
+        });
+    } else {
+        timeline.emit(ExecutionEvent::RunFailed {
+            phase: result.failure_phase.unwrap_or(ExecutionPhase::Execution),
+            error: redactor.text(result.error.as_deref().unwrap_or("execution failed")),
+            exit_code: result.exit_code,
+            total_duration_ms: elapsed_ms(started),
+        });
+    }
+}
+
 async fn run_with_heartbeat(
     client: &async_nats::Client,
-    worker_id: &str,
-    attempt_id: uuid::Uuid,
+    args: &Args,
+    envelope: &DispatchEnvelope,
     execution: ExecutionSnapshot,
+    timeline: Arc<ExecutionTimeline>,
+    redactor: Arc<Redactor>,
     message: &jetstream::Message,
 ) -> Result<ExecutionResult> {
-    let work = execute_snapshot(execution);
+    let work = execute_snapshot(execution, args.dry_run, timeline, redactor);
     tokio::pin!(work);
     let mut heartbeat = time::interval(Duration::from_secs(20));
     heartbeat.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
@@ -356,10 +442,10 @@ async fn run_with_heartbeat(
                 let renewed: bool = control_request(
                     client,
                     "renew",
-                    worker_id,
+                    &args.worker_id,
                     &LeaseRequest {
-                        attempt_id,
-                        worker_id: worker_id.to_string(),
+                        attempt_id: envelope.attempt_id,
+                        worker_id: args.worker_id.clone(),
                     },
                 )
                 .await?;
@@ -377,110 +463,6 @@ async fn run_with_heartbeat(
             }
         }
     }
-}
-
-async fn execute_snapshot(execution: ExecutionSnapshot) -> Result<ExecutionResult> {
-    match execution.executor {
-        ExecutorKind::Noop => Ok(ExecutionResult {
-            succeeded: true,
-            exit_code: Some(0),
-            stdout_tail: String::new(),
-            stderr_tail: String::new(),
-            error: None,
-        }),
-        ExecutorKind::Process => execute_process(execution).await,
-    }
-}
-
-async fn execute_process(execution: ExecutionSnapshot) -> Result<ExecutionResult> {
-    let executable = execution
-        .executable
-        .as_deref()
-        .context("process snapshot has no executable")?;
-    if !executable.starts_with('/') {
-        bail!("process executable is not absolute");
-    }
-    let inputs = serde_json::to_vec(&execution.inputs)?;
-    if inputs.len() > MAX_INPUT_BYTES {
-        bail!("execution inputs exceed the worker limit");
-    }
-    let mut input_file = NamedTempFile::new().context("failed to create execution input file")?;
-    input_file
-        .write_all(&inputs)
-        .context("failed to write execution input file")?;
-    input_file
-        .flush()
-        .context("failed to flush execution input file")?;
-
-    let mut command = Command::new(executable);
-    command
-        .args(&execution.arguments)
-        .env_clear()
-        .env("CRONO_INPUTS_FILE", input_file.path())
-        .env("CRONO_RUN_ID", execution.idempotency_key.to_string())
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    for name in ["LANG", "LC_ALL", "TZ"] {
-        if let Some(value) = env::var_os(name) {
-            command.env(name, value);
-        }
-    }
-    let mut child = command
-        .spawn()
-        .context("failed to spawn process executor")?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("process stdout pipe is missing")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("process stderr pipe is missing")?;
-    let stdout_task = tokio::spawn(read_tail(stdout));
-    let stderr_task = tokio::spawn(read_tail(stderr));
-    let status = child.wait().await.context("failed to wait for process")?;
-    let stdout_tail = stdout_task.await.context("stdout reader task failed")??;
-    let stderr_tail = stderr_task.await.context("stderr reader task failed")??;
-    Ok(ExecutionResult {
-        succeeded: status.success(),
-        exit_code: status.code(),
-        stdout_tail,
-        stderr_tail,
-        error: (!status.success()).then(|| "process exited unsuccessfully".to_string()),
-    })
-}
-
-async fn read_tail(mut reader: impl AsyncRead + Unpin) -> Result<String> {
-    let mut tail = Vec::with_capacity(OUTPUT_LIMIT);
-    let mut chunk = vec![0_u8; 8192];
-    loop {
-        let read = reader.read(&mut chunk).await?;
-        if read == 0 {
-            break;
-        }
-        tail.extend_from_slice(chunk.get(..read).context("invalid output read size")?);
-        if tail.len() > OUTPUT_LIMIT {
-            let excess = tail.len() - OUTPUT_LIMIT;
-            tail.drain(..excess);
-        }
-    }
-    Ok(bounded_utf8_tail(&tail))
-}
-
-/// Decode a byte tail while retaining the database's byte-size invariant even
-/// when invalid UTF-8 expands into multi-byte replacement characters.
-fn bounded_utf8_tail(bytes: &[u8]) -> String {
-    let value = String::from_utf8_lossy(bytes);
-    if value.len() <= OUTPUT_LIMIT {
-        return value.into_owned();
-    }
-    let mut start = value.len() - OUTPUT_LIMIT;
-    while !value.is_char_boundary(start) {
-        start = start.saturating_add(1);
-    }
-    value.get(start..).unwrap_or_default().to_owned()
 }
 
 async fn control_request<T, R>(
@@ -507,23 +489,4 @@ fn validate_token(value: &str, label: &str) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{OUTPUT_LIMIT, read_tail, validate_token};
-    use anyhow::Result;
-
-    #[test]
-    fn validates_subject_tokens() {
-        assert!(validate_token("worker-01", "worker").is_ok());
-        assert!(validate_token("Worker.01", "worker").is_err());
-        assert!(validate_token("-worker", "worker").is_err());
-        assert!(validate_token("worker-", "worker").is_err());
-    }
-
-    #[tokio::test]
-    async fn output_capture_retains_only_the_tail() -> Result<()> {
-        let input = vec![b'x'; OUTPUT_LIMIT + 10];
-        let output = read_tail(input.as_slice()).await?;
-        assert_eq!(output.len(), OUTPUT_LIMIT);
-        Ok(())
-    }
-}
+mod tests;

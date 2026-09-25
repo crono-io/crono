@@ -481,6 +481,35 @@ pub struct RunResource {
     pub terminal_reason: Option<String>,
 }
 
+/// State of one execution Attempt within a durable Run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub enum AttemptStatus {
+    PendingDispatch,
+    Queued,
+    Running,
+    Succeeded,
+    Failed,
+    Dead,
+    Unknown,
+}
+
+/// Bounded process output and completion metadata for an authorized Run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct RunAttemptResource {
+    pub id: Uuid,
+    pub attempt: u16,
+    pub status: AttemptStatus,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub exit_code: Option<i32>,
+    pub stdout_tail: Option<String>,
+    pub stderr_tail: Option<String>,
+    pub error: Option<String>,
+}
+
 /// All per-Target Runs created by one idempotent manual request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -581,13 +610,33 @@ pub struct DispatchEnvelope {
     pub queue_id: Uuid,
 }
 
+/// Source known when the server creates the immutable Run snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionTrigger {
+    Manual,
+    Schedule,
+}
+
 /// Immutable executable configuration returned only after a successful claim.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionSnapshot {
     pub executor: ExecutorKind,
     pub executable: Option<String>,
+    /// Original argv templates; absent in snapshots created before timeline support.
+    #[serde(default)]
+    pub argument_templates: Vec<String>,
     pub arguments: Vec<String>,
     pub inputs: serde_json::Value,
+    /// Job identity; absent in older immutable snapshots.
+    #[serde(default)]
+    pub job_id: Option<Uuid>,
+    /// Origin known when the server creates the Run; absent in older snapshots.
+    #[serde(default)]
+    pub trigger: Option<ExecutionTrigger>,
+    /// Scheduled occurrence instant, when this Run came from a Schedule.
+    #[serde(default)]
+    pub scheduled_at: Option<time::OffsetDateTime>,
     pub idempotency_key: Uuid,
     pub queue_id: Uuid,
     pub queue: String,

@@ -1,11 +1,12 @@
 //! Canonical sidebar rendering and active-route presentation.
 //!
-//! The current URL is the only active-state source. All links remain semantic
-//! anchors enhanced by Leptos Router, and visible text accompanies every icon.
+//! The current URL determines active links and initially opens the matching
+//! resource submenu. Children are static navigation actions, not resource data;
+//! the same metadata can support other resource types later.
 
 use crate::{
     components::Icon,
-    navigation::{NAVIGATION_GROUPS, is_active_path},
+    navigation::{NAVIGATION_GROUPS, is_active_path, is_section_active_path},
 };
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_location};
@@ -50,20 +51,56 @@ pub fn Sidebar() -> impl IntoView {
                                 <ul class="space-y-1">
                                     {group.routes.iter().copied().map(|route| {
                                         let pathname = location.pathname;
-                                        let active = move || is_active_path(&pathname.get(), route);
+                                        let children = route.children();
+                                        let submenu_id = route.submenu_id();
+                                        let section_active = move || is_section_active_path(&pathname.get(), route);
+                                        let expanded = RwSignal::new(section_active());
+                                        Effect::new(move |_| {
+                                            if section_active() {
+                                                expanded.set(true);
+                                            }
+                                        });
                                         view! {
                                             <li>
-                                                <A
-                                                    href=route.path()
-                                                    attr:class=move || format!(
-                                                        "group flex items-center gap-3 rounded-r-md border-l-2 px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-crono-sidebar {}",
-                                                        item_classes(active())
-                                                    )
-                                                    attr:aria-current=move || active().then_some("page")
-                                                >
-                                                    <Icon symbol=route.symbol() class="text-xl" />
-                                                    <span>{route.label()}</span>
-                                                </A>
+                                                <div class="flex items-center">
+                                                    <A
+                                                        href=route.path()
+                                                        on:click=move |_| expanded.set(true)
+                                                        attr:class=move || format!(
+                                                            "group flex min-w-0 flex-1 items-center gap-3 rounded-r-md border-l-2 px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-crono-sidebar {}",
+                                                            item_classes(section_active())
+                                                        )
+                                                        attr:aria-current=move || is_active_path(&pathname.get(), route).then_some("page")
+                                                    >
+                                                        <Icon symbol=route.symbol() class="text-xl" />
+                                                        <span>{route.label()}</span>
+                                                    </A>
+                                                    {(!children.is_empty()).then(|| view! {
+                                                        <button
+                                                            type="button"
+                                                            aria-label=format!("Toggle {} submenu", route.label())
+                                                            aria-controls=submenu_id
+                                                            aria-expanded=move || expanded.get().to_string()
+                                                            on:click=move |_| expanded.update(|value| *value = !*value)
+                                                            class="ml-1 rounded-md p-2 text-zinc-400 hover:bg-crono-sidebar-surface hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+                                                        ><span class=move || if expanded.get() { "inline-flex" } else { "inline-flex -rotate-90" }><Icon symbol=crate::navigation::MaterialSymbol::ExpandMore class="text-lg" /></span></button>
+                                                    })}
+                                                </div>
+                                                <Show when=move || !children.is_empty() && expanded.get()>
+                                                    <ul id=submenu_id class="ml-5 mt-1 space-y-1 border-l border-zinc-700 pl-2">
+                                                        {children.iter().copied().map(|child| {
+                                                            view! {
+                                                                <li>
+                                                                    <A
+                                                                        href=child.route.path()
+                                                                        attr:class=move || format!("block rounded-md px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 {}", if is_active_path(&pathname.get(), child.route) { "bg-crono-sidebar-surface font-medium text-white" } else { "text-zinc-400 hover:bg-crono-sidebar-surface hover:text-zinc-100" })
+                                                                        attr:aria-current=move || is_active_path(&pathname.get(), child.route).then_some("page")
+                                                                    >{child.label}</A>
+                                                                </li>
+                                                            }
+                                                        }).collect_view()}
+                                                    </ul>
+                                                </Show>
                                             </li>
                                         }
                                     }).collect_view()}

@@ -1,10 +1,14 @@
-//! Deterministic execution-input merging and narrow argument templates.
+//! Deterministic execution-input merging, narrow argument templates, and the
+//! internal serializable worker execution-event vocabulary.
 //!
 //! Job, Target Set, Target, and invocation inputs are JSON objects merged from
 //! least to most specific. Argument templates can read scalar leaves through
 //! dot-separated paths, but cannot execute expressions or alter argv shape.
-//! This module is shared by the server and browser so previews match the
-//! authoritative snapshot produced before dispatch.
+//! The input functions are shared by the server and browser so previews match
+//! the authoritative snapshot produced before dispatch. The event module is
+//! shared with the worker; it carries data but no renderer or transport.
+
+pub mod event;
 
 use serde_json::{Map, Value};
 use std::{error::Error, fmt};

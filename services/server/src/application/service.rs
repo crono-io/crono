@@ -3,8 +3,8 @@
 use super::{
     ApplicationError, Authorizer, Capability, ControlPlaneStore, CreateJobInput, CreateQueueInput,
     CreateScheduleInput, JobDefinition, JobRecord, NewSchedule, Overview, Page, RequestContext,
-    ResourceScope, RunRecord, ScheduleRecord, StoreError, TargetDefinition, TargetRecord,
-    TargetSetRecord, UpdateQueueInput, WorkerRecord,
+    ResourceScope, RunAttemptRecord, RunRecord, ScheduleRecord, StoreError, TargetDefinition,
+    TargetRecord, TargetSetRecord, UpdateQueueInput, WorkerRecord,
 };
 use crate::{
     domain::{
@@ -915,6 +915,30 @@ impl Application {
             .visibility(context, Capability::RunRead)
             .await?;
         Ok(self.store.get_run(RunId::new(id), &visibility).await?)
+    }
+
+    /// Read bounded Attempt output after authorizing the Run and applying its
+    /// Namespace visibility inside the persistence query.
+    ///
+    /// # Errors
+    ///
+    /// Returns authorization, not-found, or dependency failures.
+    pub async fn list_run_attempts(
+        &self,
+        context: &RequestContext,
+        id: Uuid,
+    ) -> Result<Vec<RunAttemptRecord>, ApplicationError> {
+        self.authorizer
+            .authorize(context, Capability::RunRead, &ResourceScope::Run(id))
+            .await?;
+        let visibility = self
+            .authorizer
+            .visibility(context, Capability::RunRead)
+            .await?;
+        Ok(self
+            .store
+            .list_run_attempts(RunId::new(id), &visibility)
+            .await?)
     }
 
     /// List recently observed workers after a control-plane authorization decision.

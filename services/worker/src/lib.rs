@@ -5,6 +5,7 @@
 //! hold no database credentials.
 
 pub mod cli;
+pub mod execution;
 
 /// Metadata captured at compilation; Git fields may be absent in source archives.
 pub mod built_info {

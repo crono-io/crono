@@ -34,6 +34,11 @@ services/server/src/
 
 The worker retains the same CLI directories with `actions/run.rs`; its `run` command maintains
 presence heartbeats while consuming bounded JetStream batches and executing claimed work.
+The global `--dry-run` flag is separate from logging verbosity and works before or after `run`.
+It consumes claimed Attempts, prints a sanitized command to worker stdout, stores a bounded
+copy in Attempt stdout, and completes them successfully without starting a process. The global
+`--log-format pretty|json` selects the execution-event renderer without changing diagnostic
+`tracing` logs or execution semantics.
 
 `commands::new()` contains clap definitions only. For the server it defines `--port` (also read from
 `CRONO_SERVER_PORT`, default `8080`) and repeatable `-v`; invoking `crono-server` directly starts the
@@ -49,7 +54,12 @@ routing and any validation that spans multiple arguments. The server produces
 `actions::server::execute()` starts the HTTP application and reports listener failures through
 structured logging. `actions::run::execute()` connects to NATS, reports worker presence, and runs
 the durable pull consumer until shutdown. Command definitions and startup orchestration stay free
-of application logic.
+of application logic. Shared `crono-execution::event` defines the serializable event vocabulary;
+worker `execution::event` supplies a per-Attempt timeline and sink contract. Worker
+`execution::redaction` sanitizes observable values before emission, while `execution::output`
+renders events and `execution::runner` owns direct child execution and concurrent pipe draining.
+The action retains the existing server-mediated claim,
+renewal, completion, and acknowledgement sequence.
 
 `cli::start() -> Result<Action>` performs setup in order:
 

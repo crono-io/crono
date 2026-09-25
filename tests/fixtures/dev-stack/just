@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Minimal stand-in for the development recipes used by dev_stack.sh tests.
+set -euo pipefail
+
+case "${1-}" in
+  server) port="${2-}" ;;
+  web) port="${3-}" ;;
+  *) exit 2 ;;
+esac
+
+exec python3 -m http.server "$port" --bind 127.0.0.1 \
+  --directory "$CRONO_DEV_STACK_ROOT/public"

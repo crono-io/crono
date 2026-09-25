@@ -1,6 +1,7 @@
 //! Convert parsed arguments into the service's typed action contract.
 
 use crate::cli::actions::{Action, run};
+use crate::execution::LogFormat;
 use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 
@@ -28,6 +29,11 @@ pub fn handler(matches: &ArgMatches) -> Result<Action> {
                 .get_one::<u16>("concurrency")
                 .copied()
                 .context("missing worker concurrency")?,
+            dry_run: values.get_flag("dry-run"),
+            log_format: match values.get_one::<String>("log-format").map(String::as_str) {
+                Some("json") => LogFormat::Json,
+                _ => LogFormat::Pretty,
+            },
         })),
         _ => bail!("a supported subcommand is required"),
     }

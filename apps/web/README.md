@@ -23,6 +23,15 @@ selected UUID rather than a display name. Target Sets use the same pattern for
 multi-selection, and Job creation selects an enabled Queue by UUID. Loading,
 empty, stale-selection, API, and field validation
 states remain in the form so failed submissions do not discard entered values.
+The Resources sidebar's Jobs submenu links to All Jobs (`/jobs`) and Create Job
+(`/jobs/new`), never to individual Job records. Browsing requires a selected
+Namespace and offers a Create Job action and an actionable empty state. Each
+Job's Edit link opens `/jobs/{id}/edit`; the page reloads that Job by ID and
+retains the existing update API. The shared create/edit form includes an
+argument-template example and a preview of the command and merged inputs for a
+selected Target or Target Set. The preview does not create a Run or include
+later invocation inputs. Recent Runs load authorized Attempt stdout, stderr,
+and errors when an operator opens their output.
 
 ## Development
 
@@ -53,6 +62,12 @@ respectively. The server recipe also ensures the local PostgreSQL 18 and NATS
 JetStream containers are initialized and running. `Trunk.toml` proxies
 same-origin `/api` requests to `http://127.0.0.1:8080`, avoiding development
 CORS configuration while preserving the independently deployed client boundary.
+Running `just dev-start` again replaces stale API and web processes from the
+same checkout. `just dev-stop` can be run independently to stop those processes,
+any local worker from this checkout, and the two development containers without
+deleting their volumes. An unrelated listener on either port is not killed.
+The launcher requires Linux `/proc`, `flock`, and `ss`; `ss` catches IPv6-only
+listeners that would otherwise prevent the API's dual-stack bind.
 
 `trunk serve`, used by both `just web` and `just dev-start`, already watches the
 frontend's Rust, HTML, CSS, and asset inputs. Saving a change triggers a WASM

@@ -16,7 +16,7 @@ mod target_sets;
 mod targets;
 mod workers;
 
-pub use jobs::JobsPage;
+pub use jobs::{CreateJobPage, EditJobPage, JobsPage};
 pub use namespaces::NamespacesPage;
 pub use overview::OverviewPage;
 pub use queues::QueuesPage;

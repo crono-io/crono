@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# The isolated stack test has no development containers.
+[[ "${1-}" == container && "${2-}" == exists ]] || exit 2
+exit 1

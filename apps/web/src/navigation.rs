@@ -11,6 +11,7 @@ pub enum AppRoute {
     Namespaces,
     Queues,
     Jobs,
+    JobsNew,
     Targets,
     TargetSets,
     Schedules,
@@ -28,6 +29,7 @@ impl AppRoute {
             Self::Namespaces => "/namespaces",
             Self::Queues => "/queues",
             Self::Jobs => "/jobs",
+            Self::JobsNew => "/jobs/new",
             Self::Targets => "/targets",
             Self::TargetSets => "/target-sets",
             Self::Schedules => "/schedules",
@@ -45,6 +47,7 @@ impl AppRoute {
             Self::Namespaces => "Namespaces",
             Self::Queues => "Queues",
             Self::Jobs => "Jobs",
+            Self::JobsNew => "Create Job",
             Self::Targets => "Targets",
             Self::TargetSets => "Target Sets",
             Self::Schedules => "Schedules",
@@ -61,7 +64,7 @@ impl AppRoute {
             Self::Overview => MaterialSymbol::Dashboard,
             Self::Namespaces => MaterialSymbol::AccountTree,
             Self::Queues => MaterialSymbol::Queue,
-            Self::Jobs => MaterialSymbol::Work,
+            Self::Jobs | Self::JobsNew => MaterialSymbol::Work,
             Self::Targets => MaterialSymbol::Dns,
             Self::TargetSets => MaterialSymbol::Lan,
             Self::Schedules => MaterialSymbol::CalendarMonth,
@@ -79,7 +82,43 @@ impl AppRoute {
             .copied()
             .find(|route| route.path() == path)
     }
+
+    /// Static sidebar actions beneath a resource type, never resource records.
+    #[must_use]
+    pub const fn children(self) -> &'static [NavigationChild] {
+        match self {
+            Self::Jobs => JOB_CHILDREN,
+            _ => &[],
+        }
+    }
+
+    /// Stable accessible ID for a resource submenu; empty when none exists.
+    #[must_use]
+    pub const fn submenu_id(self) -> &'static str {
+        match self {
+            Self::Jobs => "jobs-submenu",
+            _ => "",
+        }
+    }
 }
+
+/// One navigable child in a resource-type submenu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NavigationChild {
+    pub route: AppRoute,
+    pub label: &'static str,
+}
+
+const JOB_CHILDREN: &[NavigationChild] = &[
+    NavigationChild {
+        route: AppRoute::Jobs,
+        label: "All Jobs",
+    },
+    NavigationChild {
+        route: AppRoute::JobsNew,
+        label: "Create Job",
+    },
+];
 
 /// Known symbols used by the Crono shell and empty states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,11 +181,12 @@ const EXECUTION_ROUTES: &[AppRoute] = &[AppRoute::Schedules, AppRoute::Runs, App
 const SYSTEM_ROUTES: &[AppRoute] = &[AppRoute::Settings];
 
 /// Complete route inventory used for exact matching and verification.
-pub const ALL_ROUTES: [AppRoute; 10] = [
+pub const ALL_ROUTES: [AppRoute; 11] = [
     AppRoute::Overview,
     AppRoute::Namespaces,
     AppRoute::Queues,
     AppRoute::Jobs,
+    AppRoute::JobsNew,
     AppRoute::Targets,
     AppRoute::TargetSets,
     AppRoute::Schedules,
@@ -181,9 +221,28 @@ pub fn is_active_path(path: &str, route: AppRoute) -> bool {
     AppRoute::from_path(path) == Some(route)
 }
 
+/// Treat deeper resource URLs as part of the parent section for expansion.
+#[must_use]
+pub fn is_section_active_path(path: &str, route: AppRoute) -> bool {
+    is_active_path(path, route)
+        || (!route.children().is_empty()
+            && path
+                .strip_prefix(route.path())
+                .is_some_and(|suffix| suffix.starts_with('/')))
+}
+
+/// Canonical edit URL for a Job; resource records never become sidebar items.
+#[must_use]
+pub fn job_edit_path(id: impl std::fmt::Display) -> String {
+    format!("/jobs/{id}/edit")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ALL_ROUTES, AppRoute, MaterialSymbol, NAVIGATION_GROUPS, is_active_path};
+    use super::{
+        ALL_ROUTES, AppRoute, MaterialSymbol, NAVIGATION_GROUPS, is_active_path,
+        is_section_active_path, job_edit_path,
+    };
 
     #[test]
     fn expected_routes_are_canonical_and_unique() {
@@ -192,6 +251,7 @@ mod tests {
             "/namespaces",
             "/queues",
             "/jobs",
+            "/jobs/new",
             "/targets",
             "/target-sets",
             "/runs",
@@ -217,12 +277,29 @@ mod tests {
     #[test]
     fn sidebar_defines_every_route_once() {
         for route in ALL_ROUTES {
-            let occurrences = NAVIGATION_GROUPS
+            let top_level = NAVIGATION_GROUPS
                 .iter()
                 .flat_map(|group| group.routes.iter())
                 .filter(|candidate| **candidate == route)
                 .count();
-            assert_eq!(occurrences, 1, "{}", route.path());
+            let child = NAVIGATION_GROUPS
+                .iter()
+                .flat_map(|group| group.routes.iter())
+                .flat_map(|parent| parent.children().iter())
+                .filter(|candidate| candidate.route == route)
+                .count();
+            assert_eq!(
+                top_level,
+                usize::from(route != AppRoute::JobsNew),
+                "{}",
+                route.path()
+            );
+            assert_eq!(
+                child,
+                usize::from(matches!(route, AppRoute::Jobs | AppRoute::JobsNew)),
+                "{}",
+                route.path()
+            );
             assert!(!route.label().is_empty());
             assert!(!route.symbol().as_str().is_empty());
         }
@@ -234,6 +311,27 @@ mod tests {
         assert!(!is_active_path("/targets/", AppRoute::Targets));
         assert!(!is_active_path("/target-sets", AppRoute::Targets));
         assert!(!is_active_path("/unknown", AppRoute::Overview));
+        assert!(is_active_path("/jobs/new", AppRoute::JobsNew));
+        assert!(!is_active_path("/jobs/new", AppRoute::Jobs));
+        assert!(is_section_active_path("/jobs/new", AppRoute::Jobs));
+        assert!(is_section_active_path("/jobs/123/edit", AppRoute::Jobs));
+        assert!(!is_section_active_path("/jobs-other", AppRoute::Jobs));
+    }
+
+    #[test]
+    fn job_submenu_contains_only_browse_and_create_actions() {
+        assert_eq!(AppRoute::Jobs.children().len(), 2);
+        assert_eq!(
+            AppRoute::Jobs.children().first().map(|child| child.label),
+            Some("All Jobs")
+        );
+        assert_eq!(
+            AppRoute::Jobs.children().get(1).map(|child| child.label),
+            Some("Create Job")
+        );
+        assert_eq!(AppRoute::Jobs.submenu_id(), "jobs-submenu");
+        let id = "00000000-0000-0000-0000-000000000000";
+        assert_eq!(job_edit_path(id), format!("/jobs/{id}/edit"));
     }
 
     #[test]

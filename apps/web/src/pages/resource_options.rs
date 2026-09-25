@@ -42,8 +42,8 @@ pub(super) fn namespaces() -> ResourceOptions {
     }
 }
 
-/// Load enabled Queues once for Job creation and expose name/UUID options.
-pub(super) fn queues() -> ResourceOptions {
+/// Load enabled Queues, retaining an edited Job's current Queue if disabled.
+pub(super) fn queues(current: Option<Uuid>) -> ResourceOptions {
     let resources = LocalResource::new(api::all_queues);
     ResourceOptions {
         options: Signal::derive(move || {
@@ -52,7 +52,7 @@ pub(super) fn queues() -> ResourceOptions {
                 .and_then(Result::ok)
                 .unwrap_or_default()
                 .into_iter()
-                .filter(|queue| queue.enabled)
+                .filter(|queue| queue.enabled || Some(queue.id) == current)
                 .map(|queue| ResourceOption {
                     id: queue.id,
                     label: queue.name,
