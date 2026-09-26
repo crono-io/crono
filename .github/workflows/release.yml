@@ -232,6 +232,10 @@ jobs:
       - name: Resolve image tags and labels
         id: meta
         uses: docker/metadata-action@v6
+        env:
+          # GHCR reads a multi-platform package's description from the index,
+          # so annotate it as well as each platform manifest.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
           images: ${{ env.IMAGE }}
           flavor: latest=false
