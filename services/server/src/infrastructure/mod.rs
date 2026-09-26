@@ -5,11 +5,14 @@
 //! independent from SQL, `JetStream`, environment variables, and process
 //! lifecycle concerns.
 
+mod database;
 mod dispatcher;
+mod environment;
 mod nats;
 mod postgres;
 mod worker_control;
 
+pub use database::DatabasePoolConfig;
 pub use dispatcher::{DispatcherConfig, run_dispatcher};
 pub use nats::NatsPublisher;
 pub use postgres::PostgresStore;

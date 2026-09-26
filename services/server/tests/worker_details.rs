@@ -10,7 +10,7 @@ use crono_server::{
         VisibilityScope,
     },
     domain::QueueName,
-    infrastructure::PostgresStore,
+    infrastructure::{DatabasePoolConfig, PostgresStore},
 };
 use sqlx::PgPool;
 use std::{env, sync::Arc};
@@ -42,7 +42,7 @@ impl Authorizer for DenyWorkerRead {
 #[ignore = "requires an initialized CRONO_TEST_DATABASE_URL"]
 async fn worker_details_are_authorized_and_legacy_heartbeats_remain_readable() -> Result<()> {
     let database_url = env::var("CRONO_TEST_DATABASE_URL")?;
-    let store = PostgresStore::connect(&database_url)
+    let store = PostgresStore::connect(&database_url, &DatabasePoolConfig::default())
         .await
         .context("connect store")?;
     let pool = PgPool::connect(&database_url)
@@ -76,7 +76,7 @@ async fn worker_details_are_authorized_and_legacy_heartbeats_remain_readable() -
         .record_worker_heartbeat(&heartbeat)
         .await
         .context("record first heartbeat")?;
-    let context = DevelopmentIdentity.context();
+    let context = DevelopmentIdentity.context(Uuid::now_v7());
     let allowed = Application::new(Arc::new(store.clone()), Arc::new(PermitAllAuthorizer));
     let details = allowed
         .get_worker(&context, &id)

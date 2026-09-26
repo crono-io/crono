@@ -7,6 +7,7 @@
 //! and conditional updates; uniqueness constraints remain the final duplicate
 //! boundary.
 
+use super::DatabasePoolConfig;
 use crate::{
     application::{
         ControlPlaneStore, JobDefinition, JobRecord, MetricsSnapshot, MonitorSnapshot, NewSchedule,
@@ -28,13 +29,14 @@ use crono_api::{
     WorkerHeartbeatRequest,
 };
 use crono_execution::{merge_inputs, render_arguments};
-use sqlx::{PgPool, Postgres, Transaction, postgres::PgPoolOptions};
-use std::time::Duration;
+use sqlx::{PgPool, Postgres, Transaction, postgres::PgConnectOptions};
+use std::{str::FromStr, time::Duration};
 use time::OffsetDateTime;
 use tracing::error;
 use uuid::Uuid;
 
-const MAX_POOL_CONNECTIONS: u32 = 20;
+/// Label reported in `pg_stat_activity` unless the URL or `PGAPPNAME` sets one.
+const APPLICATION_NAME: &str = "crono-server";
 
 #[derive(Debug, sqlx::FromRow)]
 struct JobRow {
@@ -246,17 +248,40 @@ pub struct PostgresStore {
 impl PostgresStore {
     /// Connect a bounded pool to an initialized Crono database.
     ///
+    /// The pool opens one connection eagerly so startup fails fast when
+    /// PostgreSQL is unreachable; sqlx then fills `min_connections` in the
+    /// background. Connections identify themselves as `crono-server` in
+    /// `pg_stat_activity` unless the URL or `PGAPPNAME` already names them.
+    /// The URL is never logged because it may carry credentials.
+    ///
     /// # Errors
     ///
-    /// Returns an availability error when the pool cannot connect.
-    pub async fn connect(database_url: &str) -> Result<Self, StoreError> {
-        let pool = PgPoolOptions::new()
-            .max_connections(MAX_POOL_CONNECTIONS)
-            .acquire_timeout(Duration::from_secs(3))
-            .connect(database_url)
+    /// Returns an availability error when the pool cannot connect, or an
+    /// internal error when the URL is malformed.
+    pub async fn connect(
+        database_url: &str,
+        config: &DatabasePoolConfig,
+    ) -> Result<Self, StoreError> {
+        let mut options = PgConnectOptions::from_str(database_url).map_err(store_error)?;
+        if options.get_application_name().is_none() {
+            options = options.application_name(APPLICATION_NAME);
+        }
+        let pool = config
+            .pool_options()
+            .connect_with(options)
             .await
             .map_err(store_error)?;
         Ok(Self { pool })
+    }
+
+    /// Close every pooled connection with a PostgreSQL terminate message.
+    ///
+    /// New acquires fail with `Unavailable` once closing starts, and the
+    /// returned future waits for checked-out connections to be released, so
+    /// call it only after the API and background loops have stopped. Every
+    /// clone shares the pool, so closing one handle closes them all.
+    pub async fn close(&self) {
+        self.pool.close().await;
     }
 
     fn namespace_ids(visibility: &VisibilityScope) -> Vec<Uuid> {
@@ -1890,7 +1915,7 @@ impl ControlPlaneStore for PostgresStore {
                 database_connections: row.1,
                 pool_connections,
                 pool_idle_connections,
-                pool_max_connections: MAX_POOL_CONNECTIONS,
+                pool_max_connections: self.pool.options().get_max_connections(),
                 enabled_schedules: row.2,
                 due_schedules: row.3,
                 earliest_next_run_at: row.4,

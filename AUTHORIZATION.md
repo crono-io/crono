@@ -17,7 +17,8 @@ local development server behind a trusted network boundary.
 
 ```text
 HTTP request
-  -> identity middleware creates RequestContext
+  -> request-ID middleware issues the correlation UUID
+  -> identity middleware creates RequestContext with that UUID
   -> application parses canonical resource identity
   -> Authorizer checks Capability + ResourceScope
   -> Authorizer supplies Namespace visibility for reads
@@ -26,7 +27,9 @@ HTTP request
 ```
 
 The `RequestContext` holds an opaque principal and a per-request correlation
-UUID. `Capability` is the stable permission vocabulary: Namespace create/read,
+UUID. The server issues that UUID and returns it in the `x-request-id` response
+header; a client-supplied `x-request-id` is only logged, never adopted.
+`Capability` is the stable permission vocabulary: Namespace create/read,
 Job create/read/execute, Target create/read/use, and Run create/read.
 Schedule create/read/update and global Worker read complete the current
 vocabulary; worker presence is operational control-plane metadata rather than
@@ -48,7 +51,7 @@ required decision succeeds.
 
 A credential verifier should replace only the development identity middleware.
 It validates a session, token, or mTLS identity and constructs the same
-`RequestContext`; it must never copy roles or permissions directly from
+`RequestContext` from the server-issued request ID; it must never copy roles or permissions directly from
 unverified client input. A production `Authorizer` then replaces
 `PermitAllAuthorizer` and evaluates the existing capabilities and scopes using
 verified claims plus authoritative server-side policy data.

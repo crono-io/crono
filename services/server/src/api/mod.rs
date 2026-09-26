@@ -1,4 +1,17 @@
 //! HTTP API router and process lifecycle.
+//!
+//! Routes are wrapped in three transport layers. Request-ID assignment runs
+//! first and mints a server-owned `UUIDv7` correlation ID; the trace layer then
+//! opens a span carrying the method, matched route, and that ID; identity
+//! runs last and builds the trusted `RequestContext` from the same ID. The ID
+//! is returned to callers in `x-request-id`, and a client-supplied value is
+//! never adopted as the correlation ID (see [`request_id`]).
+//!
+//! `serve` also owns the background loops (NATS connection manager, worker
+//! control, outbox dispatcher, scheduler, and reconciler). They share one
+//! cancellation token, stop when the listener drains after a shutdown signal,
+//! and are joined before `serve` returns so the caller can release shared
+//! resources such as the PostgreSQL pool afterwards.
 
 use crate::{
     application::{Application, ControlPlaneStore},
@@ -23,6 +36,7 @@ mod error;
 pub(crate) mod handlers;
 mod identity;
 mod openapi;
+mod request_id;
 mod state;
 
 pub use openapi::openapi;
@@ -30,9 +44,21 @@ pub use openapi::openapi;
 /// Build the documented API router.
 #[must_use]
 fn router(state: state::AppState) -> OpenApiRouter {
-    openapi::api_router()
+    openapi::api_router().with_state(state)
+}
+
+/// Wrap routes in the correlation, tracing, and identity layers.
+///
+/// Axum runs the last-added layer first, so requests pass through
+/// [`request_id::assign`], then the trace span, then [`identity::establish`].
+/// Both inner layers read the ID the outer one inserted, so this order is
+/// required. Applying the layers after routing also exposes `MatchedPath` to
+/// the span.
+fn with_transport_layers(router: Router) -> Router {
+    router
         .layer(middleware::from_fn(identity::establish))
-        .with_state(state)
+        .layer(TraceLayer::new_for_http().make_span_with(request_id::make_span))
+        .layer(middleware::from_fn(request_id::assign))
 }
 
 /// Bind and serve the control-plane API until the process receives a shutdown signal.
@@ -52,7 +78,7 @@ pub async fn serve(
         .context("failed to create asynchronous API listener")?;
     let state = state::AppState::new(application, Arc::clone(&store), publisher.clone());
     let (router, _openapi) = router(state).split_for_parts();
-    let app: Router = router.layer(TraceLayer::new_for_http());
+    let app = with_transport_layers(router);
 
     let cancellation = CancellationToken::new();
     let connection_publisher = publisher.clone();
@@ -203,6 +229,73 @@ async fn shutdown_signal() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::RequestContext;
+    use axum::{
+        Extension,
+        body::{self, Body},
+        http::{Request, StatusCode},
+        routing::get,
+    };
+    use request_id::REQUEST_ID_HEADER;
+    use tower::ServiceExt;
+    use uuid::Uuid;
+
+    async fn echo_request_id(Extension(context): Extension<RequestContext>) -> String {
+        context.request_id().to_string()
+    }
+
+    fn probe_app() -> Router {
+        with_transport_layers(Router::new().route("/probe", get(echo_request_id)))
+    }
+
+    fn issued_request_id(response: &axum::response::Response) -> Result<Uuid> {
+        let header = response
+            .headers()
+            .get(REQUEST_ID_HEADER)
+            .context("response is missing x-request-id")?
+            .to_str()?;
+        Ok(Uuid::parse_str(header)?)
+    }
+
+    #[tokio::test]
+    async fn responses_carry_server_generated_request_id() -> Result<()> {
+        let request = Request::builder()
+            .uri("/probe")
+            .header(REQUEST_ID_HEADER, "client-chosen")
+            .body(Body::empty())?;
+        let response = probe_app().oneshot(request).await?;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let issued = issued_request_id(&response)?;
+        assert_eq!(issued.get_version_num(), 7);
+        let body = body::to_bytes(response.into_body(), 1024).await?;
+        assert_eq!(std::str::from_utf8(&body)?, issued.to_string());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn each_request_receives_a_distinct_request_id() -> Result<()> {
+        let app = probe_app();
+        let first = app
+            .clone()
+            .oneshot(Request::builder().uri("/probe").body(Body::empty())?)
+            .await?;
+        let second = app
+            .oneshot(Request::builder().uri("/probe").body(Body::empty())?)
+            .await?;
+        assert_ne!(issued_request_id(&first)?, issued_request_id(&second)?);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unmatched_routes_still_carry_request_id() -> Result<()> {
+        let response = probe_app()
+            .oneshot(Request::builder().uri("/missing").body(Body::empty())?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        issued_request_id(&response)?;
+        Ok(())
+    }
 
     #[test]
     fn listener_rebinds_immediately_after_a_completed_connection() -> Result<()> {

@@ -10,10 +10,11 @@ use crono_server::{
         Application, AuthorizationError, Authorizer, Capability, ControlPlaneStore,
         DevelopmentIdentity, RequestContext, ResourceScope, VisibilityScope,
     },
-    infrastructure::PostgresStore,
+    infrastructure::{DatabasePoolConfig, PostgresStore},
 };
 use sqlx::PgPool;
 use std::{env, sync::Arc};
+use uuid::Uuid;
 
 struct DenyMonitor;
 
@@ -41,7 +42,7 @@ impl Authorizer for DenyMonitor {
 #[ignore = "requires an isolated initialized CRONO_TEST_DATABASE_URL"]
 async fn monitor_samples_database_counts_and_rejects_unauthorized_readers() -> Result<()> {
     let database_url = env::var("CRONO_TEST_DATABASE_URL")?;
-    let store = PostgresStore::connect(&database_url).await?;
+    let store = PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?;
     let snapshot = store.monitor_snapshot().await?;
     let pool = PgPool::connect(&database_url).await?;
     let expected: (i64, i64, Option<::time::OffsetDateTime>, i64, i64) = sqlx::query_as(
@@ -64,7 +65,7 @@ async fn monitor_samples_database_counts_and_rejects_unauthorized_readers() -> R
 
     let application = Application::new(Arc::new(store), Arc::new(DenyMonitor));
     let denied = application
-        .monitor_snapshot(&DevelopmentIdentity.context())
+        .monitor_snapshot(&DevelopmentIdentity.context(Uuid::now_v7()))
         .await;
     assert!(matches!(
         denied,

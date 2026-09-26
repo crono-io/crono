@@ -10,7 +10,7 @@ use crono_server::{
         StoreError, TargetDefinition, VisibilityScope,
     },
     domain::{ExecutorKind, NamespaceId, NamespaceName, QueueName, ResourceName, RunId},
-    infrastructure::PostgresStore,
+    infrastructure::{DatabasePoolConfig, PostgresStore},
 };
 use sqlx::PgPool;
 use std::{collections::BTreeSet, env, sync::Arc};
@@ -164,7 +164,7 @@ async fn remove_run_fixture(
 #[ignore = "requires an initialized CRONO_TEST_DATABASE_URL"]
 async fn attempt_output_is_ordered_and_scoped_to_authorized_runs() -> Result<()> {
     let database_url = env::var("CRONO_TEST_DATABASE_URL")?;
-    let store = PostgresStore::connect(&database_url).await?;
+    let store = PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?;
     let pool = PgPool::connect(&database_url).await?;
     let (run_id, namespace_id) = create_run_with_attempts(&store, &pool).await?;
 
@@ -210,7 +210,7 @@ async fn attempt_output_is_ordered_and_scoped_to_authorized_runs() -> Result<()>
             visibility: visible.clone(),
         }),
     );
-    let context = DevelopmentIdentity.context();
+    let context = DevelopmentIdentity.context(Uuid::now_v7());
     assert_eq!(
         app.list_run_attempts(&context, run_id.get()).await?.len(),
         2
@@ -236,7 +236,7 @@ async fn attempt_output_is_ordered_and_scoped_to_authorized_runs() -> Result<()>
 #[ignore = "requires an initialized CRONO_TEST_DATABASE_URL"]
 async fn live_output_requires_lease_and_monotonic_sequence() -> Result<()> {
     let database_url = env::var("CRONO_TEST_DATABASE_URL")?;
-    let store = PostgresStore::connect(&database_url).await?;
+    let store = PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?;
     let pool = PgPool::connect(&database_url).await?;
     let (run_id, namespace_id) = create_run_with_attempts(&store, &pool).await?;
     let attempt_id: Uuid = sqlx::query_scalar(

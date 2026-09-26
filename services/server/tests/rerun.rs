@@ -15,7 +15,7 @@ use crono_server::{
         ExecutorKind, JobId, NamespaceId, NamespaceName, QueueId, QueueName, ResourceName, RunId,
         RunStatus, TargetId, TargetSelection, TargetSetId,
     },
-    infrastructure::PostgresStore,
+    infrastructure::{DatabasePoolConfig, PostgresStore},
 };
 use sqlx::PgPool;
 use std::{env, sync::Arc};
@@ -36,7 +36,7 @@ struct Fixture {
 #[ignore = "requires an initialized CRONO_TEST_DATABASE_URL"]
 async fn rerun_preserves_snapshot_and_repeats_only_selected_set_member() -> Result<()> {
     let database_url = env::var("CRONO_TEST_DATABASE_URL")?;
-    let store = PostgresStore::connect(&database_url).await?;
+    let store = PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?;
     let pool = PgPool::connect(&database_url).await?;
     let fixture = create_fixture(&store).await?;
     let source = fixture
@@ -51,7 +51,7 @@ async fn rerun_preserves_snapshot_and_repeats_only_selected_set_member() -> Resu
         vec!["hello invocation", "first"]
     );
     let app = Application::new(Arc::new(store.clone()), Arc::new(PermitAllAuthorizer));
-    let context = DevelopmentIdentity.context();
+    let context = DevelopmentIdentity.context(Uuid::now_v7());
     assert!(matches!(
         app.rerun_run(&context, source_id.get(), Uuid::now_v7())
             .await,
@@ -185,7 +185,11 @@ async fn verify_unrepeatable_runs(
         .update_queue(fixture.queue_id, &fixture.queue_name, None, false)
         .await?;
     let duplicate = app
-        .rerun_run(&DevelopmentIdentity.context(), source_id.get(), request_id)
+        .rerun_run(
+            &DevelopmentIdentity.context(Uuid::now_v7()),
+            source_id.get(),
+            request_id,
+        )
         .await?;
     assert!(!duplicate.created);
     assert_eq!(
@@ -194,7 +198,7 @@ async fn verify_unrepeatable_runs(
     );
     assert!(matches!(
         app.rerun_run(
-            &DevelopmentIdentity.context(),
+            &DevelopmentIdentity.context(Uuid::now_v7()),
             source_id.get(),
             Uuid::now_v7()
         )
@@ -210,7 +214,7 @@ async fn verify_unrepeatable_runs(
         .await?;
     assert!(matches!(
         app.rerun_run(
-            &DevelopmentIdentity.context(),
+            &DevelopmentIdentity.context(Uuid::now_v7()),
             source_id.get(),
             Uuid::now_v7()
         )

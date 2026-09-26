@@ -72,10 +72,14 @@ pub struct DevelopmentIdentity;
 
 impl DevelopmentIdentity {
     /// Build a server-owned development context for one HTTP request.
+    ///
+    /// `request_id` must be issued by the server, never read from the
+    /// request, because it is the correlation key shared with logs and the
+    /// `x-request-id` response header.
     #[must_use]
-    pub fn context(self) -> RequestContext {
+    pub fn context(self, request_id: Uuid) -> RequestContext {
         RequestContext::new(
-            Uuid::now_v7(),
+            request_id,
             Principal::new("development/local".to_string(), PrincipalKind::Development),
         )
     }
@@ -203,20 +207,21 @@ mod tests {
         ResourceScope, VisibilityScope,
     };
     use anyhow::Result;
+    use uuid::Uuid;
 
     #[test]
     fn development_identity_is_server_owned_and_request_scoped() {
-        let first = DevelopmentIdentity.context();
-        let second = DevelopmentIdentity.context();
+        let request_id = Uuid::now_v7();
+        let context = DevelopmentIdentity.context(request_id);
 
-        assert_eq!(first.principal().id(), "development/local");
-        assert_eq!(first.principal().kind(), PrincipalKind::Development);
-        assert_ne!(first.request_id(), second.request_id());
+        assert_eq!(context.principal().id(), "development/local");
+        assert_eq!(context.principal().kind(), PrincipalKind::Development);
+        assert_eq!(context.request_id(), request_id);
     }
 
     #[tokio::test]
     async fn permit_all_policy_exercises_typed_decisions() -> Result<()> {
-        let context = DevelopmentIdentity.context();
+        let context = DevelopmentIdentity.context(Uuid::now_v7());
         let policy = PermitAllAuthorizer;
         let capabilities = [
             Capability::NamespaceCreate,

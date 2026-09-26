@@ -9,7 +9,7 @@ use crono_api::{ClaimRequest, CompletionRequest, ExecutionSnapshot};
 use crono_server::{
     application::{ControlPlaneStore, JobDefinition},
     domain::{ExecutorKind, NamespaceName, QueueName, ResourceName},
-    infrastructure::PostgresStore,
+    infrastructure::{DatabasePoolConfig, PostgresStore},
 };
 use sqlx::PgPool;
 use std::env;
@@ -19,7 +19,7 @@ use uuid::Uuid;
 #[ignore = "requires an initialized CRONO_TEST_DATABASE_URL"]
 async fn job_dry_run_is_immutable_per_run_and_completes_as_skipped() -> Result<()> {
     let database_url = env::var("CRONO_TEST_DATABASE_URL")?;
-    let store = PostgresStore::connect(&database_url).await?;
+    let store = PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?;
     let pool = PgPool::connect(&database_url).await?;
     let suffix = Uuid::now_v7().simple().to_string();
     let namespace_name =

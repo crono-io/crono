@@ -5,11 +5,11 @@
 //! queued. Failures release claims with exponential backoff and deterministic
 //! jitter; they never consume an execution attempt.
 
-use super::NatsPublisher;
+use super::{NatsPublisher, environment::env_value};
 use crate::application::{ControlPlaneStore, OutboxRecord};
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use futures_util::{StreamExt, stream};
-use std::{env, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use time::{Duration as TimeDuration, OffsetDateTime};
 use tokio::time::{self as tokio_time, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
@@ -192,17 +192,6 @@ fn retry_delay(record: &OutboxRecord, config: DispatcherConfig) -> TimeDuration 
     let minimum = i64::try_from(config.retry_initial.as_millis()).unwrap_or(1_000) * 4 / 5;
     let maximum = i64::try_from(config.retry_max.as_millis()).unwrap_or(60_000);
     TimeDuration::milliseconds((millis + jitter).clamp(minimum, maximum))
-}
-
-fn env_value<T>(name: &str, default: T) -> Result<T>
-where
-    T: std::str::FromStr,
-    T::Err: std::error::Error + Send + Sync + 'static,
-{
-    env::var(name).map_or_else(
-        |_| Ok(default),
-        |value| value.parse().with_context(|| format!("invalid {name}")),
-    )
 }
 
 #[cfg(test)]

@@ -16,7 +16,8 @@ use crono_server::{
         ResourceName, TargetId, TargetSelection,
     },
     infrastructure::{
-        DispatcherConfig, NatsPublisher, PostgresStore, run_dispatcher, run_worker_control,
+        DatabasePoolConfig, DispatcherConfig, NatsPublisher, PostgresStore, run_dispatcher,
+        run_worker_control,
     },
     reconciliation::run_reconciler,
     scheduler::run_scheduler,
@@ -41,7 +42,7 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
     let nats_url = env::var("CRONO_TEST_NATS_URL").unwrap_or_else(|_| NATS_URL.into());
     container("start").await?;
 
-    let postgres = PostgresStore::connect(&database_url).await?;
+    let postgres = PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?;
     let store: Arc<dyn ControlPlaneStore> = Arc::new(postgres);
     let pool = PgPool::connect(&database_url).await?;
     let publisher = NatsPublisher::new(&nats_url);

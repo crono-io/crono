@@ -6,7 +6,9 @@
 
 use anyhow::{Context, Result, bail};
 use crono_server::{
-    application::ControlPlaneStore, infrastructure::PostgresStore, scheduler::run_scheduler,
+    application::ControlPlaneStore,
+    infrastructure::{DatabasePoolConfig, PostgresStore},
+    scheduler::run_scheduler,
 };
 use sqlx::PgPool;
 use std::{env, sync::Arc, time::Duration};
@@ -64,7 +66,8 @@ async fn creates_bounded_due_backlog() -> Result<()> {
     .execute(&pool)
     .await?;
 
-    let store: Arc<dyn ControlPlaneStore> = Arc::new(PostgresStore::connect(&database_url).await?);
+    let store: Arc<dyn ControlPlaneStore> =
+        Arc::new(PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?);
     let cancellation = CancellationToken::new();
     let schedulers = (0..4)
         .map(|_| {
