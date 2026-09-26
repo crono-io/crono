@@ -47,6 +47,7 @@ Use stable Rust, rustfmt, Clippy, Just, Trunk, and the `wasm32-unknown-unknown` 
 - `just clippy`: default/all-feature native linting plus WASM.
 - `just test`: default/all-feature workspace tests.
 - `just openapi`: regenerate the committed `docs/openapi/crono-server.json` contract after any API change; `just test` fails while it is stale.
+- `just api-breaking`: compare the contract with `origin/main` using oasdiff before pushing; it fails on breaking changes that no `API-Breaking:` commit trailer acknowledges.
 - In `apps/web`, run `trunk serve` or `trunk build --release`.
 
 ## Coding Style & Strict Coding Rules
@@ -73,7 +74,7 @@ For web UI, label measurements and units explicitly rather than making users inf
 
 ## Commit & Pull Request Guidelines
 
-Use plain imperative subjects, e.g. `Refine messaging and execution architecture`. Never use prefixes such as `feat:`, `fix:`, `chore:`, or `docs:`. PRs explain behavior, validation, and relevant issues; include GUI screenshots. Update affected documentation.
+Use plain imperative subjects, e.g. `Refine messaging and execution architecture`. Never use prefixes such as `feat:`, `fix:`, `chore:`, or `docs:`. A commit that intentionally breaks the HTTP API contract must carry an `API-Breaking: <reason>` trailer explaining the break. PRs explain behavior, validation, and relevant issues; include GUI screenshots. Update affected documentation.
 
 ## Versioning & Configuration
 

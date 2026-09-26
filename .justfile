@@ -19,6 +19,11 @@ openapi:
   mv "$staged" "$spec"
   echo "Wrote $spec"
 
+# Fail on breaking API changes between a base (default origin/main) and HEAD.
+[positional-arguments]
+api-breaking base="origin/main":
+  bash scripts/api-breaking.sh "$1" HEAD
+
 # Run real failure-mode checks. This intentionally stops and restarts crono-nats.
 integration-test: dev-infra
   CRONO_TEST_DATABASE_URL=postgres://crono_runtime:change-me@127.0.0.1:5432/crono \

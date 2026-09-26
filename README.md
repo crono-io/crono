@@ -284,6 +284,8 @@ The document lists every status an operation can return. Shared failures are dec
 
 Regenerate the file with `just openapi` whenever a handler, request or response type, or the crate version changes; the version is part of the document, so a release bump also changes it. The `committed_openapi_document_matches_generated_output` test fails `just test` when the committed file differs from the generated output, which keeps the file trustworthy for every tool that reads it.
 
+Breaking changes are checked with [oasdiff](https://github.com/oasdiff/oasdiff), pinned as a container image. Run `just api-breaking` before pushing: it compares the contract at `HEAD` with `origin/main`, prints the changelog, and fails on definite (ERR-level) breaking changes such as a removed field, a new required parameter, or a tightened constraint. When a break is intentional, record why in the commit message with a trailer, for example `API-Breaking: rename Run status values to match the lifecycle`; any such trailer in the compared range turns the failure into a report. The `API Contract` workflow runs the same `scripts/api-breaking.sh` on every push to `main` against the previous tip and writes the changelog to the job summary. A red run after a push cannot block anything, so the local check is the real gate.
+
 ## Workspace
 
 | Package | Responsibility |
@@ -347,6 +349,7 @@ cargo fmt --all -- --check
 just clippy
 just openapi
 just test
+just api-breaking
 cd apps/web && trunk build --release
 ```
 

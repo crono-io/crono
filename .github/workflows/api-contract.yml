@@ -1,0 +1,39 @@
+---
+name: API Contract
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Commit to compare the current contract against
+        required: true
+        default: HEAD~1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-contract-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  breaking-changes:
+    name: Breaking API Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The comparison base and commit trailers need the pushed history.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Compare OpenAPI contract with oasdiff
+        env:
+          # A push compares the previous tip with the new one; a manual run
+          # compares the chosen base with the checked-out commit.
+          BASE: ${{ github.event_name == 'push' && github.event.before || inputs.base }}
+          HEAD_SHA: ${{ github.sha }}
+        run: bash scripts/api-breaking.sh "$BASE" "$HEAD_SHA"
