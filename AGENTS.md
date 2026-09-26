@@ -46,6 +46,7 @@ Use stable Rust, rustfmt, Clippy, Just, Trunk, and the `wasm32-unknown-unknown` 
 - `cargo fmt --all -- --check`: check formatting.
 - `just clippy`: default/all-feature native linting plus WASM.
 - `just test`: default/all-feature workspace tests.
+- `just openapi`: regenerate the committed `docs/openapi/crono-server.json` contract after any API change; `just test` fails while it is stale.
 - In `apps/web`, run `trunk serve` or `trunk build --release`.
 
 ## Coding Style & Strict Coding Rules

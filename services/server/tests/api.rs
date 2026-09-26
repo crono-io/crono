@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use serde_json::Value;
-use std::process::Command;
+use std::{path::Path, process::Command};
 
 #[test]
 fn openapi_contains_health_and_control_plane_contracts() -> Result<()> {
@@ -62,6 +62,22 @@ fn openapi_contains_health_and_control_plane_contracts() -> Result<()> {
             .and_then(|response| response.get("headers"))
             .and_then(|headers| headers.get("X-App"))
             .is_some()
+    );
+    Ok(())
+}
+
+/// The committed contract is what docs, oasdiff, and Schemathesis consume, so
+/// it must be byte-identical to the document generated from the routes.
+#[test]
+fn committed_openapi_document_matches_generated_output() -> Result<()> {
+    let output = Command::new(env!("CARGO_BIN_EXE_crono-server-openapi")).output()?;
+    assert!(output.status.success());
+    let committed = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/openapi/crono-server.json"),
+    )?;
+    assert!(
+        output.stdout == committed,
+        "docs/openapi/crono-server.json is out of date; run `just openapi` and commit the result"
     );
     Ok(())
 }

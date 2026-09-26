@@ -274,6 +274,12 @@ Every HTTP response carries an `x-request-id` header holding a server-issued UUI
 
 The System → Monitor page (`/monitor`) calls operator-authorized `GET /api/monitor` for a live, read-only snapshot. It refreshes every 30 seconds while open and can be refreshed manually; it does not retain history. PostgreSQL-backed counts show enabled and due Schedules, the earliest pending occurrence, unpublished outbox depth and age, queued and running Runs, and online worker presence. Database size covers the entire connected PostgreSQL database, not just the `crono` schema. Database connection count is database-wide, while connection-pool usage, JetStream availability, and the scheduler/publisher last successful database-poll times describe only the API instance answering the request. A missing database sample is shown as unavailable rather than reusing stale values. `MonitorRead` is a separate control-plane capability for a future operator policy; the current server-owned development identity grants it. The page does not expose credentials or execution payloads, and `/metrics` remains the source for Prometheus counters and long-term external monitoring.
 
+## API contract
+
+The OpenAPI document is generated from the same routes the server registers, and a copy is committed at `docs/openapi/crono-server.json` as the versioned HTTP contract. Committing it keeps every API change visible in review, gives each release tag an exact record of the contract it shipped, and lets documentation and contract tooling work without building or running the server. The running server does not serve the document or a documentation UI, so the API exposes no route beyond its real operations.
+
+Regenerate the file with `just openapi` whenever a handler, request or response type, or the crate version changes; the version is part of the document, so a release bump also changes it. The `committed_openapi_document_matches_generated_output` test fails `just test` when the committed file differs from the generated output, which keeps the file trustworthy for every tool that reads it.
+
 ## Workspace
 
 | Package | Responsibility |
@@ -286,7 +292,7 @@ The System → Monitor page (`/monitor`) calls operator-authorized `GET /api/mon
 | `crates/execution` | Deterministic JSON input validation, merging, and argv template rendering |
 | `crates/telemetry` | Structured logging and optional OTLP export |
 
-Public routes use `/api` directly; there is no `/api/v1` or draft compatibility layer. `crono-server-openapi` emits the route-derived OpenAPI document.
+Public routes use `/api` directly; there is no `/api/v1` or draft compatibility layer. `crono-server-openapi` prints the route-derived OpenAPI document; the committed copy and its checks are described in [API contract](#api-contract).
 
 Run `just dev-start` to launch the API and live-reloading web application
 together. It stops stale server and web processes from this checkout, prepares
@@ -335,6 +341,7 @@ Before review, run:
 ```sh
 cargo fmt --all -- --check
 just clippy
+just openapi
 just test
 cd apps/web && trunk build --release
 ```

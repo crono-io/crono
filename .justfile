@@ -7,6 +7,18 @@ test:
   cargo test --locked --workspace
   cargo test --locked --workspace --all-features
 
+# Regenerate the committed OpenAPI contract from the server's routes.
+openapi:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  readonly spec="docs/openapi/crono-server.json"
+  readonly staged="${spec}.tmp"
+  trap 'rm -f "$staged"' EXIT
+  mkdir -p "$(dirname "$spec")"
+  cargo run --locked --quiet -p crono-server --bin crono-server-openapi > "$staged"
+  mv "$staged" "$spec"
+  echo "Wrote $spec"
+
 # Run real failure-mode checks. This intentionally stops and restarts crono-nats.
 integration-test: dev-infra
   CRONO_TEST_DATABASE_URL=postgres://crono_runtime:change-me@127.0.0.1:5432/crono \

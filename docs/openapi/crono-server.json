@@ -1,0 +1,4160 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "crono-server",
+    "description": "API-driven control plane for Crono",
+    "license": {
+      "name": "BSD-3-Clause",
+      "identifier": "BSD-3-Clause"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "get_job",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResource"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "update_job",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateJobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/monitor": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "summary": "Return an operator-authorized snapshot without disclosing execution data.",
+        "operationId": "monitor",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitorResource"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/namespaces": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "list_namespaces",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum resources to return, from 1 through 100.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Opaque continuation cursor returned by a previous request.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_NamespaceResource"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "create_namespace",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNamespaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamespaceResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/namespaces/{namespace_id}": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "get_namespace",
+        "parameters": [
+          {
+            "name": "namespace_id",
+            "in": "path",
+            "description": "Immutable Namespace ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamespaceResource"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/namespaces/{namespace_id}/jobs": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "list_jobs",
+        "parameters": [
+          {
+            "name": "namespace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum resources to return, from 1 through 100.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Opaque continuation cursor returned by a previous request.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_JobResource"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "create_job",
+        "parameters": [
+          {
+            "name": "namespace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateJobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/namespaces/{namespace_id}/schedules": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "list_schedules",
+        "parameters": [
+          {
+            "name": "namespace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum resources to return, from 1 through 100.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Opaque continuation cursor returned by a previous request.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ScheduleResource"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "create_schedule",
+        "parameters": [
+          {
+            "name": "namespace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateScheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/namespaces/{namespace_id}/target-sets": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "list_target_sets",
+        "parameters": [
+          {
+            "name": "namespace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum resources to return, from 1 through 100.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Opaque continuation cursor returned by a previous request.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_TargetSetResource"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "create_target_set",
+        "parameters": [
+          {
+            "name": "namespace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTargetSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetSetResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/namespaces/{namespace_id}/targets": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "list_targets",
+        "parameters": [
+          {
+            "name": "namespace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum resources to return, from 1 through 100.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Opaque continuation cursor returned by a previous request.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_TargetResource"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "create_target",
+        "parameters": [
+          {
+            "name": "namespace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTargetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/overview": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "overview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverviewResource"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/queues": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "list_queues",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum resources to return, from 1 through 100.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Opaque continuation cursor returned by a previous request.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_QueueResource"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "create_queue",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateQueueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/queues/{queue_id}": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "get_queue",
+        "parameters": [
+          {
+            "name": "queue_id",
+            "in": "path",
+            "description": "Immutable Queue ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueResource"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "update_queue",
+        "parameters": [
+          {
+            "name": "queue_id",
+            "in": "path",
+            "description": "Immutable Queue ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateQueueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "delete_queue",
+        "parameters": [
+          {
+            "name": "queue_id",
+            "in": "path",
+            "description": "Immutable Queue ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "list_runs",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum resources to return, from 1 through 100.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "UUID cursor returned by a previous Run request.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "namespace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/RunStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "target_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "target_set_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_RunResource"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "create_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunBatchResource"
+                }
+              }
+            }
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunBatchResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "get_run",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResource"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/attempts": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "summary": "Read bounded Attempt output only when the caller can read its Run.",
+        "operationId": "list_run_attempts",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RunAttemptResource"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/events": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "summary": "Return server-observed lifecycle timestamps after the same `RunRead` decision.",
+        "operationId": "list_run_events",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RunEventResource"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/rerun": {
+      "post": {
+        "tags": [
+          "control-plane"
+        ],
+        "summary": "Repeat one terminal Run's stored execution snapshot after authorization checks.",
+        "operationId": "rerun_run",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RerunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResource"
+                }
+              }
+            }
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunResource"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/schedules/{schedule_id}": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "get_schedule",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleResource"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "update_schedule",
+        "parameters": [
+          {
+            "name": "schedule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateScheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleResource"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/target-sets/{target_set_id}": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "get_target_set",
+        "parameters": [
+          {
+            "name": "target_set_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetSetResource"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "update_target_set",
+        "parameters": [
+          {
+            "name": "target_set_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTargetSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetSetResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/targets/{target_id}": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "get_target",
+        "parameters": [
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetResource"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "update_target",
+        "parameters": [
+          {
+            "name": "target_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTargetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workers": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "operationId": "list_workers",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum resources to return, from 1 through 100.",
+            "required": false,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Opaque continuation cursor returned by a previous request.",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_WorkerResource"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workers/{worker_id}": {
+      "get": {
+        "tags": [
+          "control-plane"
+        ],
+        "summary": "Read a single worker's safe heartbeat diagnostics under `WorkerRead`.",
+        "operationId": "get_worker",
+        "parameters": [
+          {
+            "name": "worker_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerDetailsResource"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Return detailed process health and build identity.",
+        "description": "The JSON body contains only public package metadata. `X-App` repeats a\ncompact identity for proxies and operational tooling without exposing\nruntime configuration.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "headers": {
+              "X-App": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Service name, version, and short commit"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/live": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Report process liveness without checking external dependencies.",
+        "description": "Orchestrators can use this probe for restart decisions without turning a\ntransient future PostgreSQL or NATS outage into a restart loop.",
+        "operationId": "live",
+        "responses": {
+          "200": {
+            "description": "Process is alive"
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Expose bounded-cardinality operational metrics.",
+        "operationId": "metrics",
+        "responses": {
+          "200": {
+            "description": "Prometheus OpenMetrics exposition"
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Report whether PostgreSQL and `JetStream` can serve control-plane traffic.",
+        "operationId": "ready",
+        "responses": {
+          "200": {
+            "description": "Service is ready to receive traffic"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AttemptStatus": {
+        "type": "string",
+        "description": "State of one execution Attempt within a durable Run.",
+        "enum": [
+          "pending_dispatch",
+          "queued",
+          "running",
+          "succeeded",
+          "skipped",
+          "failed",
+          "dead",
+          "unknown"
+        ]
+      },
+      "CatchupPolicy": {
+        "type": "string",
+        "enum": [
+          "skip",
+          "run_once",
+          "catch_up"
+        ]
+      },
+      "CreateJobRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "queue_id"
+        ],
+        "properties": {
+          "arguments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "Preview future Runs without starting the configured executable."
+          },
+          "executable": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "executor": {
+            "$ref": "#/components/schemas/ExecutorKind"
+          },
+          "idempotent": {
+            "type": "boolean"
+          },
+          "inputs": {},
+          "max_attempts": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "queue_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "retry_initial_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "retry_jitter": {
+            "type": "number",
+            "format": "double"
+          },
+          "retry_max_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "retry_multiplier": {
+            "type": "number",
+            "format": "double"
+          },
+          "shell_command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Literal shell source; input templates belong in positional arguments."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateNamespaceRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateQueueRequest": {
+        "type": "object",
+        "description": "Create a global worker Queue used by Jobs and worker processes.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateRunRequest": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "job_id",
+          "target"
+        ],
+        "properties": {
+          "inputs": {},
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ExecutionTarget"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateScheduleRequest": {
+        "type": "object",
+        "description": "Request for either a cron schedule or a one-shot UTC execution.",
+        "required": [
+          "name",
+          "job_id",
+          "target",
+          "misfire_policy"
+        ],
+        "properties": {
+          "catchup_policy": {
+            "$ref": "#/components/schemas/CatchupPolicy"
+          },
+          "cron_expression": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "execute_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inputs": {},
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "max_catchup_age_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_catchup_runs": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "misfire_grace_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "misfire_policy": {
+            "$ref": "#/components/schemas/MisfirePolicy"
+          },
+          "name": {
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ExecutionTarget"
+          },
+          "timezone": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateTargetRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "arguments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "inputs": {},
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateTargetSetRequest": {
+        "type": "object",
+        "description": "Create a named, explicit selection of Targets in one Namespace.",
+        "required": [
+          "name",
+          "target_ids"
+        ],
+        "properties": {
+          "inputs": {},
+          "name": {
+            "type": "string"
+          },
+          "target_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "DatabaseMonitorResource": {
+        "type": "object",
+        "description": "Aggregate PostgreSQL database size and this API instance's pool usage.",
+        "required": [
+          "size_bytes",
+          "connections",
+          "pool_connections",
+          "pool_idle_connections",
+          "pool_max_connections"
+        ],
+        "properties": {
+          "connections": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "pool_connections": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "pool_idle_connections": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "pool_max_connections": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "ErrorBody": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "field": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        }
+      },
+      "ExecutionTarget": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "target"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "target_set"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "One explicit execution destination selected by immutable UUID."
+      },
+      "ExecutionTargetResource": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "target"
+                ]
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "target_set"
+                ]
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "Display form of an execution destination."
+      },
+      "ExecutorKind": {
+        "type": "string",
+        "description": "Executor selected by a Job and copied into every Run snapshot.",
+        "enum": [
+          "noop",
+          "process",
+          "shell"
+        ]
+      },
+      "Health": {
+        "type": "object",
+        "description": "Build identity returned by the detailed health endpoint.",
+        "required": [
+          "commit",
+          "name",
+          "version",
+          "database",
+          "nats"
+        ],
+        "properties": {
+          "commit": {
+            "type": "string",
+            "description": "Full source commit hash, or `unknown` for builds without Git metadata."
+          },
+          "database": {
+            "type": "string",
+            "description": "PostgreSQL must be available for readiness."
+          },
+          "name": {
+            "type": "string",
+            "description": "Cargo package name."
+          },
+          "nats": {
+            "type": "string",
+            "description": "NATS outages degrade dispatch without losing execution intent."
+          },
+          "version": {
+            "type": "string",
+            "description": "Cargo package version."
+          }
+        }
+      },
+      "InstanceMonitorResource": {
+        "type": "object",
+        "description": "Local scheduler and publisher polling signals; not cluster-wide counters.",
+        "properties": {
+          "publisher_last_poll_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scheduler_last_poll_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "JobResource": {
+        "type": "object",
+        "required": [
+          "id",
+          "namespace_id",
+          "namespace",
+          "name",
+          "qualified_name",
+          "executor",
+          "queue_id",
+          "queue",
+          "arguments",
+          "inputs",
+          "idempotent",
+          "dry_run",
+          "max_attempts",
+          "retry_initial_seconds",
+          "retry_max_seconds",
+          "retry_multiplier",
+          "retry_jitter",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "arguments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "executable": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "executor": {
+            "$ref": "#/components/schemas/ExecutorKind"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "idempotent": {
+            "type": "boolean"
+          },
+          "inputs": {},
+          "max_attempts": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "namespace_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "qualified_name": {
+            "type": "string"
+          },
+          "queue": {
+            "type": "string"
+          },
+          "queue_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "retry_initial_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "retry_jitter": {
+            "type": "number",
+            "format": "double"
+          },
+          "retry_max_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "retry_multiplier": {
+            "type": "number",
+            "format": "double"
+          },
+          "shell_command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "MisfirePolicy": {
+        "type": "string",
+        "enum": [
+          "run_late",
+          "skip",
+          "grace_period"
+        ]
+      },
+      "MonitorResource": {
+        "type": "object",
+        "description": "Read-only operator snapshot; database values cover the connected database,\nwhile instance poll times and transport availability describe one API process.",
+        "required": [
+          "sampled_at",
+          "database_available",
+          "nats_available",
+          "instance"
+        ],
+        "properties": {
+          "database": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DatabaseMonitorResource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "database_available": {
+            "type": "boolean"
+          },
+          "instance": {
+            "$ref": "#/components/schemas/InstanceMonitorResource"
+          },
+          "nats_available": {
+            "type": "boolean"
+          },
+          "pipeline": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PipelineMonitorResource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sampled_at": {
+            "type": "string"
+          }
+        }
+      },
+      "NamespaceResource": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "OverviewResource": {
+        "type": "object",
+        "required": [
+          "namespaces",
+          "jobs",
+          "targets",
+          "target_sets",
+          "schedules",
+          "runs"
+        ],
+        "properties": {
+          "jobs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "namespaces": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "runs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "schedules": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "target_sets": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "targets": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "Page_JobResource": {
+        "type": "object",
+        "description": "One bounded page of public API resources.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "namespace_id",
+                "namespace",
+                "name",
+                "qualified_name",
+                "executor",
+                "queue_id",
+                "queue",
+                "arguments",
+                "inputs",
+                "idempotent",
+                "dry_run",
+                "max_attempts",
+                "retry_initial_seconds",
+                "retry_max_seconds",
+                "retry_multiplier",
+                "retry_jitter",
+                "created_at",
+                "updated_at"
+              ],
+              "properties": {
+                "arguments": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "dry_run": {
+                  "type": "boolean"
+                },
+                "executable": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "executor": {
+                  "$ref": "#/components/schemas/ExecutorKind"
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "idempotent": {
+                  "type": "boolean"
+                },
+                "inputs": {},
+                "max_attempts": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "namespace_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "qualified_name": {
+                  "type": "string"
+                },
+                "queue": {
+                  "type": "string"
+                },
+                "queue_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "retry_initial_seconds": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "retry_jitter": {
+                  "type": "number",
+                  "format": "double"
+                },
+                "retry_max_seconds": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "retry_multiplier": {
+                  "type": "number",
+                  "format": "double"
+                },
+                "shell_command": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_NamespaceResource": {
+        "type": "object",
+        "description": "One bounded page of public API resources.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "created_at"
+              ],
+              "properties": {
+                "created_at": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_QueueResource": {
+        "type": "object",
+        "description": "One bounded page of public API resources.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "Public Queue metadata; the UUID remains authoritative across renames.",
+              "required": [
+                "id",
+                "name",
+                "enabled",
+                "system",
+                "created_at",
+                "updated_at"
+              ],
+              "properties": {
+                "created_at": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "system": {
+                  "type": "boolean"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_RunResource": {
+        "type": "object",
+        "description": "One bounded page of public API resources.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "job_id",
+                "job",
+                "target_id",
+                "target",
+                "status",
+                "scheduled_at",
+                "created_at",
+                "attempt_count",
+                "max_attempts",
+                "lateness_seconds"
+              ],
+              "properties": {
+                "attempt_count": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "completed_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "duration_ms": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int64",
+                  "description": "Database-observed elapsed time from Run start to completion.",
+                  "minimum": 0
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "job": {
+                  "type": "string"
+                },
+                "job_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "job_name": {
+                  "type": "string"
+                },
+                "lateness_seconds": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "max_attempts": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "queue": {
+                  "type": "string"
+                },
+                "queued_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "request_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "rerun_of_run_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "rerunnable": {
+                  "type": "boolean",
+                  "description": "Whether a terminal Run has a stored executable snapshot to repeat."
+                },
+                "schedule_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "scheduled_at": {
+                  "type": "string"
+                },
+                "started_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "$ref": "#/components/schemas/RunStatus"
+                },
+                "target": {
+                  "type": "string"
+                },
+                "target_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "target_name": {
+                  "type": "string"
+                },
+                "target_set": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Original Target Set label when this Run was one member of a batch."
+                },
+                "terminal_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "trigger_actor": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Reserved for a future verified identity; never inferred from client input."
+                },
+                "trigger_source": {
+                  "$ref": "#/components/schemas/RunTriggerSource"
+                },
+                "triggered_at": {
+                  "type": "string",
+                  "description": "Time the Run record was materialized; scheduled occurrence stays separate."
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_ScheduleResource": {
+        "type": "object",
+        "description": "One bounded page of public API resources.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "namespace_id",
+                "namespace",
+                "name",
+                "job_id",
+                "job",
+                "target",
+                "inputs",
+                "timezone",
+                "enabled",
+                "misfire_policy",
+                "catchup_policy",
+                "max_catchup_runs",
+                "max_catchup_age_seconds",
+                "revision",
+                "created_at",
+                "updated_at"
+              ],
+              "properties": {
+                "catchup_policy": {
+                  "$ref": "#/components/schemas/CatchupPolicy"
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "cron_expression": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "execute_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "inputs": {},
+                "job": {
+                  "type": "string"
+                },
+                "job_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "last_run_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "max_catchup_age_seconds": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "max_catchup_runs": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "misfire_grace_seconds": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "misfire_policy": {
+                  "$ref": "#/components/schemas/MisfirePolicy"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "namespace_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "next_run_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "revision": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "target": {
+                  "$ref": "#/components/schemas/ExecutionTargetResource"
+                },
+                "timezone": {
+                  "type": "string"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_TargetResource": {
+        "type": "object",
+        "description": "One bounded page of public API resources.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "namespace_id",
+                "namespace",
+                "name",
+                "qualified_name",
+                "arguments",
+                "inputs",
+                "created_at",
+                "updated_at"
+              ],
+              "properties": {
+                "arguments": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "created_at": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "inputs": {},
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "namespace_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "qualified_name": {
+                  "type": "string"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_TargetSetResource": {
+        "type": "object",
+        "description": "One bounded page of public API resources.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "namespace_id",
+                "namespace",
+                "name",
+                "qualified_name",
+                "targets",
+                "inputs",
+                "created_at",
+                "updated_at"
+              ],
+              "properties": {
+                "created_at": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "inputs": {},
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                },
+                "namespace_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "qualified_name": {
+                  "type": "string"
+                },
+                "targets": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TargetReference"
+                  }
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_WorkerResource": {
+        "type": "object",
+        "description": "One bounded page of public API resources.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "Public worker presence without NATS credentials or execution payloads.",
+              "required": [
+                "worker_id",
+                "queue_id",
+                "queue",
+                "concurrency",
+                "version",
+                "status",
+                "started_at",
+                "last_seen_at",
+                "active_executions"
+              ],
+              "properties": {
+                "active_executions": {
+                  "type": "integer",
+                  "format": "int64",
+                  "minimum": 0
+                },
+                "concurrency": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                },
+                "last_seen_at": {
+                  "type": "string"
+                },
+                "queue": {
+                  "type": "string"
+                },
+                "queue_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "started_at": {
+                  "type": "string"
+                },
+                "status": {
+                  "$ref": "#/components/schemas/WorkerStatus"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "worker_id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PipelineMonitorResource": {
+        "type": "object",
+        "description": "Durable scheduler, outbox, Run, and worker counts from PostgreSQL.",
+        "required": [
+          "enabled_schedules",
+          "due_schedules",
+          "outbox_pending",
+          "outbox_oldest_seconds",
+          "runs_queued",
+          "runs_running",
+          "active_worker_leases",
+          "online_workers"
+        ],
+        "properties": {
+          "active_worker_leases": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "due_schedules": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "earliest_next_run_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled_schedules": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "online_workers": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "outbox_oldest_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "outbox_pending": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "runs_queued": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "runs_running": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "QueueResource": {
+        "type": "object",
+        "description": "Public Queue metadata; the UUID remains authoritative across renames.",
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "system",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "system": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "RerunRequest": {
+        "type": "object",
+        "description": "Idempotent request to repeat one historical Run's immutable execution.",
+        "required": [
+          "request_id"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RunAttemptResource": {
+        "type": "object",
+        "description": "Bounded process output and completion metadata for an authorized Run.",
+        "required": [
+          "id",
+          "attempt",
+          "status"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "exit_code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/AttemptStatus"
+          },
+          "stderr_tail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stdout_tail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "worker_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "RunBatchResource": {
+        "type": "object",
+        "description": "All per-Target Runs created by one idempotent manual request.",
+        "required": [
+          "request_id",
+          "runs"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunResource"
+            }
+          }
+        }
+      },
+      "RunEventResource": {
+        "type": "object",
+        "description": "One durable server-side lifecycle event, without execution payloads.",
+        "required": [
+          "event_type",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          }
+        }
+      },
+      "RunResource": {
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "job",
+          "target_id",
+          "target",
+          "status",
+          "scheduled_at",
+          "created_at",
+          "attempt_count",
+          "max_attempts",
+          "lateness_seconds"
+        ],
+        "properties": {
+          "attempt_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "duration_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Database-observed elapsed time from Run start to completion.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "job": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "job_name": {
+            "type": "string"
+          },
+          "lateness_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "max_attempts": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "queue": {
+            "type": "string"
+          },
+          "queued_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "rerun_of_run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "rerunnable": {
+            "type": "boolean",
+            "description": "Whether a terminal Run has a stored executable snapshot to repeat."
+          },
+          "schedule_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "scheduled_at": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "target": {
+            "type": "string"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_name": {
+            "type": "string"
+          },
+          "target_set": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Original Target Set label when this Run was one member of a batch."
+          },
+          "terminal_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trigger_actor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reserved for a future verified identity; never inferred from client input."
+          },
+          "trigger_source": {
+            "$ref": "#/components/schemas/RunTriggerSource"
+          },
+          "triggered_at": {
+            "type": "string",
+            "description": "Time the Run record was materialized; scheduled occurrence stays separate."
+          }
+        }
+      },
+      "RunStatus": {
+        "type": "string",
+        "description": "Durable logical execution state.",
+        "enum": [
+          "pending_dispatch",
+          "queued",
+          "running",
+          "retry_wait",
+          "succeeded",
+          "failed",
+          "dead",
+          "skipped",
+          "cancelled",
+          "unknown"
+        ]
+      },
+      "RunTriggerSource": {
+        "type": "string",
+        "description": "Server-established origin; a manual HTTP request cannot claim to be a CLI user.",
+        "enum": [
+          "unknown",
+          "api",
+          "scheduler",
+          "rerun"
+        ]
+      },
+      "ScheduleResource": {
+        "type": "object",
+        "required": [
+          "id",
+          "namespace_id",
+          "namespace",
+          "name",
+          "job_id",
+          "job",
+          "target",
+          "inputs",
+          "timezone",
+          "enabled",
+          "misfire_policy",
+          "catchup_policy",
+          "max_catchup_runs",
+          "max_catchup_age_seconds",
+          "revision",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "catchup_policy": {
+            "$ref": "#/components/schemas/CatchupPolicy"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "cron_expression": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "execute_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "inputs": {},
+          "job": {
+            "type": "string"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_run_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_catchup_age_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_catchup_runs": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "misfire_grace_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "misfire_policy": {
+            "$ref": "#/components/schemas/MisfirePolicy"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "namespace_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "next_run_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "target": {
+            "$ref": "#/components/schemas/ExecutionTargetResource"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "TargetReference": {
+        "type": "object",
+        "description": "Display metadata for one Target selected by a Target Set.",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "TargetResource": {
+        "type": "object",
+        "required": [
+          "id",
+          "namespace_id",
+          "namespace",
+          "name",
+          "qualified_name",
+          "arguments",
+          "inputs",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "arguments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "inputs": {},
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "namespace_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "qualified_name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "TargetSetResource": {
+        "type": "object",
+        "required": [
+          "id",
+          "namespace_id",
+          "namespace",
+          "name",
+          "qualified_name",
+          "targets",
+          "inputs",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "inputs": {},
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "namespace_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "qualified_name": {
+            "type": "string"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TargetReference"
+            }
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateJobRequest": {
+        "type": "object",
+        "description": "Replace an existing Job definition while preserving its UUID and Namespace.",
+        "required": [
+          "name",
+          "queue_id",
+          "executor",
+          "arguments",
+          "inputs",
+          "idempotent",
+          "max_attempts",
+          "retry_initial_seconds",
+          "retry_max_seconds",
+          "retry_multiplier",
+          "retry_jitter"
+        ],
+        "properties": {
+          "arguments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "executable": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "executor": {
+            "$ref": "#/components/schemas/ExecutorKind"
+          },
+          "idempotent": {
+            "type": "boolean"
+          },
+          "inputs": {},
+          "max_attempts": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "queue_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "retry_initial_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "retry_jitter": {
+            "type": "number",
+            "format": "double"
+          },
+          "retry_max_seconds": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "retry_multiplier": {
+            "type": "number",
+            "format": "double"
+          },
+          "shell_command": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateQueueRequest": {
+        "type": "object",
+        "description": "Replace the editable metadata of an existing Queue.",
+        "required": [
+          "name",
+          "enabled"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateScheduleRequest": {
+        "type": "object",
+        "required": [
+          "revision",
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateTargetRequest": {
+        "type": "object",
+        "description": "Replace editable Target metadata while preserving identity and Namespace.",
+        "required": [
+          "name",
+          "arguments",
+          "inputs"
+        ],
+        "properties": {
+          "arguments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "inputs": {},
+          "name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateTargetSetRequest": {
+        "type": "object",
+        "description": "Replace a Target Set's name, explicit membership, and shared inputs.",
+        "required": [
+          "name",
+          "target_ids",
+          "inputs"
+        ],
+        "properties": {
+          "inputs": {},
+          "name": {
+            "type": "string"
+          },
+          "target_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorkerDetailsResource": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WorkerResource"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "diagnostics": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkerDiagnostics"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Authorized detail view of one worker presence record."
+      },
+      "WorkerDiagnostics": {
+        "type": "object",
+        "description": "Bounded, allowlisted worker facts; arbitrary process environment is never sent.",
+        "required": [
+          "hostname",
+          "os",
+          "architecture",
+          "default_shell_path",
+          "default_shell_present",
+          "dry_run"
+        ],
+        "properties": {
+          "architecture": {
+            "type": "string"
+          },
+          "default_shell_path": {
+            "type": "string"
+          },
+          "default_shell_present": {
+            "type": "boolean"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "lang": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lc_all": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "os": {
+            "type": "string"
+          },
+          "tz": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorkerResource": {
+        "type": "object",
+        "description": "Public worker presence without NATS credentials or execution payloads.",
+        "required": [
+          "worker_id",
+          "queue_id",
+          "queue",
+          "concurrency",
+          "version",
+          "status",
+          "started_at",
+          "last_seen_at",
+          "active_executions"
+        ],
+        "properties": {
+          "active_executions": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "concurrency": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "last_seen_at": {
+            "type": "string"
+          },
+          "queue": {
+            "type": "string"
+          },
+          "queue_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkerStatus"
+          },
+          "version": {
+            "type": "string"
+          },
+          "worker_id": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkerStatus": {
+        "type": "string",
+        "description": "Server-derived liveness of a worker's presence heartbeat.",
+        "enum": [
+          "online",
+          "stale",
+          "offline"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "health",
+      "description": "Process liveness, readiness, and health"
+    },
+    {
+      "name": "control-plane",
+      "description": "Authorization-checked resources, Runs, and worker presence"
+    }
+  ]
+}

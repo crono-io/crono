@@ -1,0 +1,2 @@
+# The committed OpenAPI contract is compared byte for byte with generated output.
+docs/openapi/*.json text eol=lf
