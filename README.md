@@ -82,7 +82,7 @@ sequenceDiagram
 
 The scheduler queries the indexed `next_run_at` cursor in bounded batches. PostgreSQL claims allow multiple server instances to operate concurrently without process-local locks, while `UNIQUE (schedule_id, scheduled_at, target_id)` prevents duplicate per-Target occurrences. There is no sleeping Tokio task per Schedule and no periodic full-table scan. A Schedule aimed at a Target Set creates one independent Run for every current member in the same planning transaction.
 
-Cron expressions have five fields, use an IANA timezone for wall-clock calculation, and persist UTC instants. Nonexistent spring-forward times are skipped. Repeated fall-back local times produce both distinct UTC occurrences. One-shot timestamps are UTC.
+Cron expressions have five fields, use an IANA timezone for wall-clock calculation, and persist UTC instants. Field syntax is strict: list items cannot be empty (`1,,2`, `,5`, `5,`), numbers are unsigned ASCII digits (no `+5`), and weekday names such as `Mon` are accepted only in the day-of-week field. A Schedule stored before this rule tightened whose expression no longer parses logs "failed to calculate Schedule recurrence" and stops firing until it is updated. Nonexistent spring-forward times are skipped. Repeated fall-back local times produce both distinct UTC occurrences. One-shot timestamps are UTC.
 
 Five-field expressions are parsed with `cron-parser`; supported field syntax
 includes wildcards, lists, ranges, steps, and `Sun` through `Sat` weekday

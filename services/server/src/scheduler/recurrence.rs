@@ -164,6 +164,40 @@ mod tests {
         assert!(validate_cron("0 0 31 2 *", "UTC").is_err());
     }
 
+    /// cron-parser 0.12 tightened list and number syntax; stored expressions
+    /// using these forms stop recurring, so the rejection is pinned here.
+    #[test]
+    fn cron_rejects_empty_list_items_and_signed_numbers() {
+        for expression in [
+            "1,,2 * * * *",
+            ",5 * * * *",
+            "5, * * * *",
+            "+5 * * * *",
+            "\u{ff15} * * * *",
+            "0 0 * Mon *",
+        ] {
+            assert!(
+                validate_cron(expression, "UTC").is_err(),
+                "{expression:?} must be rejected"
+            );
+        }
+        assert!(validate_cron("1,2 * * * *", "UTC").is_ok());
+    }
+
+    /// Before cron-parser 0.12, a day-of-week schedule evaluated mid-day
+    /// skipped earlier matching times on the next matching day.
+    #[test]
+    fn weekday_schedule_does_not_skip_earlier_times_on_matching_day() -> Result<()> {
+        // 2026-09-29 is a Tuesday; the next Friday starts at 2026-10-02 00:00.
+        let next = next_cron_occurrence(
+            "* * * * fri",
+            "UTC",
+            utc(2026, Month::September, 29, 10, 7)?,
+        )?;
+        assert_eq!(next, utc(2026, Month::October, 2, 0, 0)?);
+        Ok(())
+    }
+
     #[test]
     fn calculates_in_the_stored_timezone() -> Result<()> {
         let next = next_cron_occurrence(
