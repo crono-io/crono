@@ -288,6 +288,8 @@ Breaking changes are checked with [oasdiff](https://github.com/oasdiff/oasdiff),
 
 Each `X.Y.Z` release tag publishes `docs/openapi/` to GitHub Pages through the `API Docs` workflow, so the hosted reference always matches a released contract rather than whatever is deployed. The page renders the committed JSON with a pinned Redoc bundle guarded by a Subresource Integrity hash. Run `just api-docs` to preview it locally at `http://127.0.0.1:8088`. Publishing requires Pages to use "GitHub Actions" as its source and the `github-pages` environment to allow tag deployments.
 
+[Schemathesis](https://schemathesis.readthedocs.io/) fuzzes the running server against the committed contract. It generates valid and invalid requests for every operation, chains create, read, and delete calls through inferred links, and checks that no request causes a server error, that invalid input is rejected with a documented `4xx`, and that every status, content type, and body matches the document. `schemathesis.toml` holds the tuning, and `scripts/schemathesis.sh` builds and starts the server, waits for `/ready`, and writes JUnit reports and the server log to `target/schemathesis/`. Run `just schemathesis` locally: it starts a disposable PostgreSQL container on port 55432 and the server on port 18080, points NATS at a closed port so no local worker executes fuzzed Jobs, and never touches the development database. The `API Fuzzing` workflow runs nightly with a fresh seed, and a manual run accepts `max-examples` and a `seed` from a previous report to reproduce its failures. Because every endpoint is open under the development authorizer, never point the fuzzer at a shared server.
+
 ## Workspace
 
 | Package | Responsibility |

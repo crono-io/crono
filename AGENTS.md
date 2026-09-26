@@ -48,6 +48,7 @@ Use stable Rust, rustfmt, Clippy, Just, Trunk, and the `wasm32-unknown-unknown` 
 - `just test`: default/all-feature workspace tests.
 - `just openapi`: regenerate the committed `docs/openapi/crono-server.json` contract after any API change; `just test` fails while it is stale.
 - `just api-breaking`: compare the contract with `origin/main` using oasdiff before pushing; it fails on breaking changes that no `API-Breaking:` commit trailer acknowledges.
+- `just schemathesis`: fuzz the API with Schemathesis against an isolated throwaway PostgreSQL and server; run it after changing handlers, validation, or the contract.
 - In `apps/web`, run `trunk serve` or `trunk build --release`.
 
 ## Coding Style & Strict Coding Rules

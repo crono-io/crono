@@ -19,6 +19,52 @@ openapi:
   mv "$staged" "$spec"
   echo "Wrote $spec"
 
+# PostgreSQL runs in a disposable tmpfs container on port 55432 and the server
+# on port 18080, so the development database is never touched. NATS points at
+# a closed port: the fuzzer creates Shell Jobs and Runs, and a local worker on
+# the development NATS would otherwise execute them.
+[doc("Fuzz the API contract with Schemathesis against an isolated throwaway stack.")]
+[positional-arguments]
+schemathesis max-examples="":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  readonly container="crono-contract-postgres"
+  readonly version="4.28.0"
+
+  if podman container exists "$container"; then
+    podman rm --force "$container" >/dev/null
+  fi
+  trap 'podman rm --force "$container" >/dev/null 2>&1 || true' EXIT
+  podman run --detach --rm \
+    --name "$container" \
+    --env POSTGRES_HOST_AUTH_METHOD=trust \
+    --publish 127.0.0.1:55432:5432 \
+    --tmpfs /var/lib/postgresql \
+    --volume "$PWD/db/sql:/db/sql:ro,z" \
+    docker.io/library/postgres:18 >/dev/null
+
+  initialized=false
+  for ((attempt = 1; attempt <= 30; attempt++)); do
+    if podman exec --env PGOPTIONS=--client-min-messages=warning "$container" psql \
+      --host 127.0.0.1 --username postgres --dbname postgres \
+      --set ON_ERROR_STOP=1 --file /db/sql/00_init.sql >/dev/null 2>&1; then
+      initialized=true
+      break
+    fi
+    sleep 1
+  done
+  if [[ "$initialized" != true ]]; then
+    podman logs --tail 50 "$container"
+    echo "contract PostgreSQL did not initialize within 30 seconds" >&2
+    exit 1
+  fi
+
+  CRONO_DATABASE_URL="postgres://crono_runtime:change-me@127.0.0.1:55432/crono" \
+    CRONO_NATS_URL="nats://127.0.0.1:1" \
+    SCHEMATHESIS="uvx --from schemathesis==${version} st" \
+    SCHEMATHESIS_MAX_EXAMPLES="$1" \
+    bash scripts/schemathesis.sh
+
 # Preview the rendered API reference at http://127.0.0.1:8088.
 [positional-arguments]
 api-docs port="8088":

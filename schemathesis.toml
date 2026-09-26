@@ -1,0 +1,30 @@
+# Schemathesis contract fuzzing against the committed OpenAPI document.
+#
+# Run it through `just schemathesis` (an isolated throwaway stack) or the
+# nightly `API Fuzzing` workflow; both use scripts/schemathesis.sh, which
+# supplies the base URL. Never point it at a shared or production server:
+# every endpoint is open under the development authorizer, including deletes.
+
+workers = 4
+request-timeout = 10.0
+max-failures = 50
+
+[generation]
+# Positive and negative data: valid requests must be accepted or rejected for
+# a documented domain reason, and invalid requests must be rejected with 4xx.
+mode = "all"
+max-examples = 50
+
+[phases]
+examples.enabled = true
+coverage.enabled = true
+fuzzing.enabled = true
+# Links between operations are inferred from response schemas and path
+# parameters, so create-then-read and delete-then-read sequences are tested.
+stateful.enabled = true
+
+[checks]
+# A request that is valid by schema can still break a domain rule the schema
+# cannot express: cron and template syntax, executor/executable pairing,
+# page cursors, references to unknown resources, or names that already exist.
+positive_data_acceptance.expected-statuses = ["2xx", "400", "404", "409"]

@@ -3,3 +3,4 @@
 /apps/web/dist-dev/
 /db/data/
 /db/log/
+/.schemathesis/

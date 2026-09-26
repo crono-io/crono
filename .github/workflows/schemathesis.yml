@@ -1,0 +1,59 @@
+---
+name: API Fuzzing
+
+on:
+  schedule:
+    # Nightly, after the security audit, with a fresh random seed each run.
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+    inputs:
+      max-examples:
+        description: Examples per operation (empty uses schemathesis.toml)
+        required: false
+        default: ''
+      seed:
+        description: Seed from a previous report, to reproduce its failures
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-fuzzing-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  schemathesis:
+    name: Schemathesis Contract Fuzzing
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # A fresh PostgreSQL and NATS per run; no worker runs, so fuzzed Jobs
+      # and Runs are stored and dispatched but never executed.
+      - uses: ./.github/actions/setup-test-infrastructure
+
+      - name: Install Schemathesis
+        run: pipx install schemathesis==4.28.0
+
+      - name: Fuzz the committed contract
+        env:
+          CRONO_DATABASE_URL: postgres://crono_runtime:change-me@127.0.0.1:5432/crono
+          CRONO_NATS_URL: nats://127.0.0.1:4222
+          SCHEMATHESIS_MAX_EXAMPLES: ${{ inputs.max-examples }}
+          SCHEMATHESIS_SEED: ${{ inputs.seed }}
+        run: bash scripts/schemathesis.sh
+
+      - name: Upload reports and server log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: schemathesis-report
+          path: target/schemathesis/
+          if-no-files-found: ignore
