@@ -59,7 +59,7 @@ pub struct Args {
     pub log_format: LogFormat,
 }
 
-/// Run a durable pull consumer until an operating-system shutdown signal.
+/// Run a durable pull consumer until SIGINT or SIGTERM.
 ///
 /// # Errors
 ///
@@ -99,9 +99,8 @@ pub async fn execute(args: Args) -> Result<()> {
     let cancellation = CancellationToken::new();
     let signal = cancellation.clone();
     tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            signal.cancel();
-        }
+        shutdown_signal().await;
+        signal.cancel();
     });
     let args = Arc::new(args);
     let event_sink: Arc<dyn EventSink> = Arc::new(ConsoleSink::new(args.log_format));
@@ -161,6 +160,37 @@ pub async fn execute(args: Args) -> Result<()> {
     heartbeat.await.context("worker heartbeat task failed")?;
     info!("Crono worker stopped");
     Ok(())
+}
+
+/// Resolve when the process receives SIGINT or SIGTERM.
+///
+/// systemd and container runtimes stop services with SIGTERM, so both signals
+/// start the same drain: the current batch of executions finishes and results
+/// are reported before the worker exits. If one handler cannot be installed,
+/// only the other signal can stop the worker.
+async fn shutdown_signal() {
+    let interrupt = async {
+        if let Err(error) = tokio::signal::ctrl_c().await {
+            warn!(%error, "failed to listen for interrupt signal");
+            std::future::pending::<()>().await;
+        }
+    };
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                let _ = signal.recv().await;
+            }
+            Err(error) => {
+                warn!(%error, "failed to listen for termination signal");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    tokio::select! {
+        () = interrupt => {}
+        () = terminate => {}
+    }
+    info!("shutdown signal received; finishing in-flight executions");
 }
 
 /// Refresh worker presence independently of execution traffic.
