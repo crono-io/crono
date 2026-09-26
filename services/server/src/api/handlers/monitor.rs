@@ -23,7 +23,10 @@ use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 #[utoipa::path(
     get,
     path = "/api/monitor",
-    responses((status = 200, body = MonitorResource), (status = 403, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "Operator monitoring snapshot for this API instance.", body = MonitorResource),
+        (status = 403, description = "The caller lacks the MonitorRead capability.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 /// Return an operator-authorized snapshot without disclosing execution data.

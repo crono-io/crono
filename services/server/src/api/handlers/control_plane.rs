@@ -46,6 +46,7 @@ use uuid::Uuid;
 #[into_params(parameter_in = Query)]
 pub struct PageQuery {
     /// Maximum resources to return, from 1 through 100.
+    #[param(minimum = 1, maximum = 100)]
     limit: Option<u16>,
     /// Opaque continuation cursor returned by a previous request.
     after: Option<String>,
@@ -55,6 +56,7 @@ pub struct PageQuery {
 #[into_params(parameter_in = Query)]
 pub struct RunPageQuery {
     /// Maximum resources to return, from 1 through 100.
+    #[param(minimum = 1, maximum = 100)]
     limit: Option<u16>,
     /// UUID cursor returned by a previous Run request.
     before: Option<Uuid>,
@@ -69,7 +71,11 @@ pub struct RunPageQuery {
     post,
     path = "/api/namespaces",
     request_body = CreateNamespaceRequest,
-    responses((status = 201, body = NamespaceResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 201, description = "The Namespace was created.", body = NamespaceResource),
+        (status = 400, description = "The request is invalid; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "A Namespace with this name already exists.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn create_namespace(
@@ -88,7 +94,9 @@ pub async fn create_namespace(
     get,
     path = "/api/namespaces",
     params(PageQuery),
-    responses((status = 200, body = Page<NamespaceResource>)),
+    responses(
+        (status = 200, description = "One page of Namespaces.", body = Page<NamespaceResource>),
+    ),
     tag = "control-plane"
 )]
 pub async fn list_namespaces(
@@ -107,7 +115,10 @@ pub async fn list_namespaces(
     get,
     path = "/api/namespaces/{namespace_id}",
     params(("namespace_id" = Uuid, Path, description = "Immutable Namespace ID")),
-    responses((status = 200, body = NamespaceResource), (status = 404, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The requested Namespace.", body = NamespaceResource),
+        (status = 404, description = "The Namespace was not found.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn get_namespace(
@@ -126,7 +137,11 @@ pub async fn get_namespace(
     post,
     path = "/api/queues",
     request_body = CreateQueueRequest,
-    responses((status = 201, body = QueueResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 201, description = "The Queue was created.", body = QueueResource),
+        (status = 400, description = "The request is invalid; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "A Queue with this name already exists.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn create_queue(
@@ -151,7 +166,9 @@ pub async fn create_queue(
     get,
     path = "/api/queues",
     params(PageQuery),
-    responses((status = 200, body = Page<QueueResource>)),
+    responses(
+        (status = 200, description = "One page of Queues.", body = Page<QueueResource>),
+    ),
     tag = "control-plane"
 )]
 pub async fn list_queues(
@@ -170,7 +187,10 @@ pub async fn list_queues(
     get,
     path = "/api/queues/{queue_id}",
     params(("queue_id" = Uuid, Path, description = "Immutable Queue ID")),
-    responses((status = 200, body = QueueResource), (status = 404, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The requested Queue.", body = QueueResource),
+        (status = 404, description = "The Queue was not found.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn get_queue(
@@ -187,7 +207,12 @@ pub async fn get_queue(
     path = "/api/queues/{queue_id}",
     params(("queue_id" = Uuid, Path, description = "Immutable Queue ID")),
     request_body = UpdateQueueRequest,
-    responses((status = 200, body = QueueResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The updated Queue.", body = QueueResource),
+        (status = 400, description = "The request is invalid; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The Queue was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "The change conflicts with another Queue name or a newer revision.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn update_queue(
@@ -215,7 +240,12 @@ pub async fn update_queue(
     delete,
     path = "/api/queues/{queue_id}",
     params(("queue_id" = Uuid, Path, description = "Immutable Queue ID")),
-    responses((status = 204), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 204, description = "The Queue was deleted."),
+        (status = 400, description = "The system Queue cannot be deleted.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The Queue was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "The Queue is still referenced by Jobs, Runs, or worker presence records.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn delete_queue(
@@ -232,7 +262,12 @@ pub async fn delete_queue(
     path = "/api/namespaces/{namespace_id}/jobs",
     params(("namespace_id" = Uuid, Path)),
     request_body = CreateJobRequest,
-    responses((status = 201, body = JobResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 201, description = "The Job was created.", body = JobResource),
+        (status = 400, description = "The request is invalid; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The Namespace was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "A Job with this name already exists.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn create_job(
@@ -275,7 +310,9 @@ pub async fn create_job(
     get,
     path = "/api/namespaces/{namespace_id}/jobs",
     params(("namespace_id" = Uuid, Path), PageQuery),
-    responses((status = 200, body = Page<JobResource>)),
+    responses(
+        (status = 200, description = "One page of Jobs.", body = Page<JobResource>),
+    ),
     tag = "control-plane"
 )]
 pub async fn list_jobs(
@@ -295,7 +332,10 @@ pub async fn list_jobs(
     get,
     path = "/api/jobs/{job_id}",
     params(("job_id" = Uuid, Path)),
-    responses((status = 200, body = JobResource), (status = 404, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The requested Job.", body = JobResource),
+        (status = 404, description = "The Job was not found.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn get_job(
@@ -312,7 +352,12 @@ pub async fn get_job(
     path = "/api/jobs/{job_id}",
     params(("job_id" = Uuid, Path)),
     request_body = UpdateJobRequest,
-    responses((status = 200, body = JobResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The updated Job.", body = JobResource),
+        (status = 400, description = "The request is invalid; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The Job was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "The change conflicts with another Job name or a newer revision.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn update_job(
@@ -352,7 +397,12 @@ pub async fn update_job(
     path = "/api/namespaces/{namespace_id}/targets",
     params(("namespace_id" = Uuid, Path)),
     request_body = CreateTargetRequest,
-    responses((status = 201, body = TargetResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 201, description = "The Target was created.", body = TargetResource),
+        (status = 400, description = "The request is invalid; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The Namespace was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "A Target with this name already exists.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn create_target(
@@ -378,7 +428,9 @@ pub async fn create_target(
     get,
     path = "/api/namespaces/{namespace_id}/targets",
     params(("namespace_id" = Uuid, Path), PageQuery),
-    responses((status = 200, body = Page<TargetResource>)),
+    responses(
+        (status = 200, description = "One page of Targets.", body = Page<TargetResource>),
+    ),
     tag = "control-plane"
 )]
 pub async fn list_targets(
@@ -398,7 +450,10 @@ pub async fn list_targets(
     get,
     path = "/api/targets/{target_id}",
     params(("target_id" = Uuid, Path)),
-    responses((status = 200, body = TargetResource), (status = 404, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The requested Target.", body = TargetResource),
+        (status = 404, description = "The Target was not found.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn get_target(
@@ -415,7 +470,12 @@ pub async fn get_target(
     path = "/api/targets/{target_id}",
     params(("target_id" = Uuid, Path)),
     request_body = UpdateTargetRequest,
-    responses((status = 200, body = TargetResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The updated Target.", body = TargetResource),
+        (status = 400, description = "The request is invalid; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The Target was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "The change conflicts with another Target name or a newer revision.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn update_target(
@@ -442,7 +502,12 @@ pub async fn update_target(
     path = "/api/namespaces/{namespace_id}/target-sets",
     params(("namespace_id" = Uuid, Path)),
     request_body = CreateTargetSetRequest,
-    responses((status = 201, body = TargetSetResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 201, description = "The Target Set was created.", body = TargetSetResource),
+        (status = 400, description = "The request is invalid; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The Namespace was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "A Target Set with this name already exists.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn create_target_set(
@@ -468,7 +533,9 @@ pub async fn create_target_set(
     get,
     path = "/api/namespaces/{namespace_id}/target-sets",
     params(("namespace_id" = Uuid, Path), PageQuery),
-    responses((status = 200, body = Page<TargetSetResource>)),
+    responses(
+        (status = 200, description = "One page of Target Sets.", body = Page<TargetSetResource>),
+    ),
     tag = "control-plane"
 )]
 pub async fn list_target_sets(
@@ -488,7 +555,10 @@ pub async fn list_target_sets(
     get,
     path = "/api/target-sets/{target_set_id}",
     params(("target_set_id" = Uuid, Path)),
-    responses((status = 200, body = TargetSetResource), (status = 404, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The requested Target Set.", body = TargetSetResource),
+        (status = 404, description = "The Target Set was not found.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn get_target_set(
@@ -508,7 +578,12 @@ pub async fn get_target_set(
     path = "/api/target-sets/{target_set_id}",
     params(("target_set_id" = Uuid, Path)),
     request_body = UpdateTargetSetRequest,
-    responses((status = 200, body = TargetSetResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The updated Target Set.", body = TargetSetResource),
+        (status = 400, description = "The request is invalid; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The Target Set was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "The change conflicts with another Target Set name or a newer revision.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn update_target_set(
@@ -535,7 +610,12 @@ pub async fn update_target_set(
     path = "/api/namespaces/{namespace_id}/schedules",
     params(("namespace_id" = Uuid, Path)),
     request_body = CreateScheduleRequest,
-    responses((status = 201, body = ScheduleResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 201, description = "The Schedule was created.", body = ScheduleResource),
+        (status = 400, description = "The request is invalid; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The Namespace was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "A Schedule with this name already exists.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn create_schedule(
@@ -591,7 +671,9 @@ pub async fn create_schedule(
     get,
     path = "/api/namespaces/{namespace_id}/schedules",
     params(("namespace_id" = Uuid, Path), PageQuery),
-    responses((status = 200, body = Page<ScheduleResource>)),
+    responses(
+        (status = 200, description = "One page of Schedules.", body = Page<ScheduleResource>),
+    ),
     tag = "control-plane"
 )]
 pub async fn list_schedules(
@@ -611,7 +693,10 @@ pub async fn list_schedules(
     get,
     path = "/api/schedules/{schedule_id}",
     params(("schedule_id" = Uuid, Path)),
-    responses((status = 200, body = ScheduleResource), (status = 404, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The requested Schedule.", body = ScheduleResource),
+        (status = 404, description = "The Schedule was not found.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn get_schedule(
@@ -631,7 +716,12 @@ pub async fn get_schedule(
     path = "/api/schedules/{schedule_id}",
     params(("schedule_id" = Uuid, Path)),
     request_body = UpdateScheduleRequest,
-    responses((status = 200, body = ScheduleResource), (status = 404, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The updated Schedule.", body = ScheduleResource),
+        (status = 400, description = "The Schedule cannot be enabled because its recurrence is invalid.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The Schedule was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "The revision is stale; reload the Schedule and retry.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn update_schedule(
@@ -651,7 +741,13 @@ pub async fn update_schedule(
     post,
     path = "/api/runs",
     request_body = CreateRunRequest,
-    responses((status = 201, body = RunBatchResource), (status = 200, body = RunBatchResource), (status = 400, body = crono_api::ErrorEnvelope), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "Runs already created for this request ID; the request was an idempotent replay.", body = RunBatchResource),
+        (status = 201, description = "Runs created for a new request ID.", body = RunBatchResource),
+        (status = 400, description = "The request is invalid; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The Job, Target, or Target Set was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "The request ID was already used with different inputs.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn create_run(
@@ -692,7 +788,9 @@ pub async fn create_run(
     get,
     path = "/api/runs",
     params(RunPageQuery),
-    responses((status = 200, body = Page<RunResource>)),
+    responses(
+        (status = 200, description = "One page of Runs.", body = Page<RunResource>),
+    ),
     tag = "control-plane"
 )]
 pub async fn list_runs(
@@ -722,7 +820,10 @@ pub async fn list_runs(
     get,
     path = "/api/runs/{run_id}",
     params(("run_id" = Uuid, Path)),
-    responses((status = 200, body = RunResource), (status = 404, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The requested Run.", body = RunResource),
+        (status = 404, description = "The Run was not found.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 pub async fn get_run(
@@ -739,7 +840,13 @@ pub async fn get_run(
     path = "/api/runs/{run_id}/rerun",
     params(("run_id" = Uuid, Path)),
     request_body = RerunRequest,
-    responses((status = 201, body = RunResource), (status = 200, body = RunResource), (status = 409, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The Run already created for this request ID; the request was an idempotent replay.", body = RunResource),
+        (status = 201, description = "A new Run repeating the source Run was created.", body = RunResource),
+        (status = 400, description = "The source Run cannot be repeated: its outcome is not a confirmed terminal state, it has no stored snapshot, or its Queue is disabled.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The source Run was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "The request ID was already used for a different Run.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 /// Repeat one terminal Run's stored execution snapshot after authorization checks.
@@ -769,7 +876,10 @@ pub async fn rerun_run(
     get,
     path = "/api/runs/{run_id}/events",
     params(("run_id" = Uuid, Path)),
-    responses((status = 200, body = Vec<RunEventResource>)),
+    responses(
+        (status = 200, description = "Server-observed lifecycle events for the Run, oldest first.", body = Vec<RunEventResource>),
+        (status = 404, description = "The Run was not found.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 /// Return server-observed lifecycle timestamps after the same `RunRead` decision.
@@ -794,7 +904,10 @@ pub async fn list_run_events(
     get,
     path = "/api/runs/{run_id}/attempts",
     params(("run_id" = Uuid, Path)),
-    responses((status = 200, body = Vec<RunAttemptResource>), (status = 404, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "Attempts for the Run with bounded output.", body = Vec<RunAttemptResource>),
+        (status = 404, description = "The Run was not found.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 /// Read bounded Attempt output only when the caller can read its Run.
@@ -819,7 +932,9 @@ pub async fn list_run_attempts(
     get,
     path = "/api/workers",
     params(PageQuery),
-    responses((status = 200, body = Page<WorkerResource>)),
+    responses(
+        (status = 200, description = "One page of workers.", body = Page<WorkerResource>),
+    ),
     tag = "control-plane"
 )]
 pub async fn list_workers(
@@ -841,7 +956,10 @@ pub async fn list_workers(
     get,
     path = "/api/workers/{worker_id}",
     params(("worker_id" = String, Path)),
-    responses((status = 200, body = WorkerDetailsResource), (status = 404, body = crono_api::ErrorEnvelope)),
+    responses(
+        (status = 200, description = "The worker and its allowlisted diagnostics.", body = WorkerDetailsResource),
+        (status = 404, description = "The worker was not found.", body = crono_api::ErrorEnvelope),
+    ),
     tag = "control-plane"
 )]
 /// Read a single worker's safe heartbeat diagnostics under `WorkerRead`.
@@ -860,7 +978,9 @@ pub async fn get_worker(
 #[utoipa::path(
     get,
     path = "/api/overview",
-    responses((status = 200, body = OverviewResource)),
+    responses(
+        (status = 200, description = "Resource and Run counts visible to the caller.", body = OverviewResource),
+    ),
     tag = "control-plane"
 )]
 pub async fn overview(

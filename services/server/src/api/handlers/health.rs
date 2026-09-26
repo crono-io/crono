@@ -1,15 +1,17 @@
 //! Health check handlers for service monitoring.
 //!
-//! This module exposes three unauthenticated probes:
+//! This module exposes four unauthenticated operational endpoints:
 //! - `/live`: process liveness only, with no dependency checks
-//! - `/ready`: bounded PostgreSQL and `JetStream` readiness for orchestrators
-//! - `/health`: detailed process status and build identity as JSON
+//! - `/ready`: PostgreSQL reachability, because durable work cannot be accepted without it
+//! - `/health`: build identity plus PostgreSQL and NATS status as JSON
+//! - `/metrics`: bounded-cardinality Prometheus metrics in `OpenMetrics` text
 //!
-//! Keeping liveness independent from future PostgreSQL and NATS checks prevents transient
-//! dependency failures from causing restart loops. Readiness is intentionally process-only until
-//! those clients become part of server startup; their bounded checks will be added here when that
-//! state exists. The detailed response and `X-App` header expose only build metadata so operators
-//! and reverse proxies can identify a deployment without receiving configuration or credentials.
+//! Keeping liveness independent from dependencies prevents a transient PostgreSQL or NATS
+//! outage from causing restart loops. Readiness checks only PostgreSQL: a NATS outage degrades
+//! dispatch while execution intent stays durable in the outbox, so `/health` reports NATS as
+//! `degraded` instead of withdrawing the instance from traffic. The detailed response and `X-App`
+//! header expose only build metadata so operators and reverse proxies can identify a deployment
+//! without receiving configuration or credentials.
 
 use super::super::state::AppState;
 use axum::{
@@ -53,10 +55,16 @@ pub async fn live() -> StatusCode {
 #[utoipa::path(
     get,
     path = "/ready",
-    responses((status = 200, description = "Service is ready to receive traffic")),
+    responses(
+        (status = 200, description = "PostgreSQL is reachable, so the server can accept durable work."),
+        (status = 503, description = "PostgreSQL is unreachable; the server cannot accept work."),
+    ),
     tag = "health"
 )]
-/// Report whether PostgreSQL and `JetStream` can serve control-plane traffic.
+/// Report whether PostgreSQL can accept durable control-plane work.
+///
+/// NATS is deliberately excluded: dispatch recovers from the outbox once the
+/// broker returns, so a broker outage must not remove the instance from traffic.
 pub async fn ready(State(state): State<AppState>) -> StatusCode {
     if state.ready().await {
         StatusCode::OK
@@ -106,7 +114,10 @@ pub async fn health(State(state): State<AppState>) -> impl IntoResponse {
 #[utoipa::path(
     get,
     path = "/metrics",
-    responses((status = 200, description = "Prometheus OpenMetrics exposition")),
+    responses(
+        (status = 200, description = "Prometheus metrics in OpenMetrics text exposition format.", body = String, content_type = "application/openmetrics-text"),
+        (status = 500, description = "Metrics could not be encoded.", body = String, content_type = "text/plain"),
+    ),
     tag = "health"
 )]
 /// Expose bounded-cardinality operational metrics.

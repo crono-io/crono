@@ -98,6 +98,10 @@ pub struct Page<T> {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateNamespaceRequest {
+    #[cfg_attr(
+        feature = "openapi",
+        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+    )]
     pub name: String,
 }
 
@@ -114,6 +118,10 @@ pub struct NamespaceResource {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateQueueRequest {
+    #[cfg_attr(
+        feature = "openapi",
+        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+    )]
     pub name: String,
     pub description: Option<String>,
 }
@@ -123,6 +131,10 @@ pub struct CreateQueueRequest {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateQueueRequest {
+    #[cfg_attr(
+        feature = "openapi",
+        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+    )]
     pub name: String,
     pub description: Option<String>,
     pub enabled: bool,
@@ -156,6 +168,10 @@ pub enum ExecutorKind {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateJobRequest {
+    #[cfg_attr(
+        feature = "openapi",
+        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+    )]
     pub name: String,
     pub queue_id: Uuid,
     #[serde(default)]
@@ -167,6 +183,7 @@ pub struct CreateJobRequest {
     #[serde(default)]
     pub arguments: Vec<String>,
     #[serde(default = "default_inputs")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub inputs: serde_json::Value,
     #[serde(default)]
     pub idempotent: bool,
@@ -190,6 +207,10 @@ pub struct CreateJobRequest {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateJobRequest {
+    #[cfg_attr(
+        feature = "openapi",
+        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+    )]
     pub name: String,
     pub queue_id: Uuid,
     pub executor: ExecutorKind,
@@ -197,6 +218,7 @@ pub struct UpdateJobRequest {
     #[serde(default)]
     pub shell_command: Option<String>,
     pub arguments: Vec<String>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub inputs: serde_json::Value,
     pub idempotent: bool,
     #[serde(default)]
@@ -247,6 +269,7 @@ pub struct JobResource {
     #[serde(default)]
     pub shell_command: Option<String>,
     pub arguments: Vec<String>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub inputs: serde_json::Value,
     pub idempotent: bool,
     pub dry_run: bool,
@@ -263,10 +286,15 @@ pub struct JobResource {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateTargetRequest {
+    #[cfg_attr(
+        feature = "openapi",
+        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+    )]
     pub name: String,
     #[serde(default)]
     pub arguments: Vec<String>,
     #[serde(default = "default_inputs")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub inputs: serde_json::Value,
 }
 
@@ -275,8 +303,13 @@ pub struct CreateTargetRequest {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateTargetRequest {
+    #[cfg_attr(
+        feature = "openapi",
+        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+    )]
     pub name: String,
     pub arguments: Vec<String>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub inputs: serde_json::Value,
 }
 
@@ -289,6 +322,7 @@ pub struct TargetResource {
     pub name: String,
     pub qualified_name: String,
     pub arguments: Vec<String>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub inputs: serde_json::Value,
     pub created_at: String,
     pub updated_at: String,
@@ -299,9 +333,14 @@ pub struct TargetResource {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateTargetSetRequest {
+    #[cfg_attr(
+        feature = "openapi",
+        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+    )]
     pub name: String,
     pub target_ids: Vec<Uuid>,
     #[serde(default = "default_inputs")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub inputs: serde_json::Value,
 }
 
@@ -310,8 +349,13 @@ pub struct CreateTargetSetRequest {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct UpdateTargetSetRequest {
+    #[cfg_attr(
+        feature = "openapi",
+        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+    )]
     pub name: String,
     pub target_ids: Vec<Uuid>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub inputs: serde_json::Value,
 }
 
@@ -332,6 +376,7 @@ pub struct TargetSetResource {
     pub name: String,
     pub qualified_name: String,
     pub targets: Vec<TargetReference>,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub inputs: serde_json::Value,
     pub created_at: String,
     pub updated_at: String,
@@ -379,10 +424,15 @@ pub enum CatchupPolicy {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CreateScheduleRequest {
+    #[cfg_attr(
+        feature = "openapi",
+        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+    )]
     pub name: String,
     pub job_id: Uuid,
     pub target: ExecutionTarget,
     #[serde(default = "default_inputs")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub inputs: serde_json::Value,
     pub cron_expression: Option<String>,
     pub execute_at: Option<String>,
@@ -420,6 +470,7 @@ pub struct ScheduleResource {
     pub job_id: Uuid,
     pub job: String,
     pub target: ExecutionTargetResource,
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub inputs: serde_json::Value,
     pub cron_expression: Option<String>,
     pub execute_at: Option<String>,
@@ -453,6 +504,7 @@ pub struct CreateRunRequest {
     pub job_id: Uuid,
     pub target: ExecutionTarget,
     #[serde(default = "default_inputs")]
+    #[cfg_attr(feature = "openapi", schema(value_type = Object))]
     pub inputs: serde_json::Value,
 }
 
@@ -724,8 +776,15 @@ pub struct ErrorEnvelope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ErrorBody {
+    /// Stable machine-readable error code. Known values are `invalid_request`,
+    /// `unauthenticated`, `forbidden`, `not_found`, `method_not_allowed`,
+    /// `already_exists`, `resource_in_use`, `idempotency_conflict`,
+    /// `payload_too_large`, `unsupported_media_type`, `dependency_unavailable`,
+    /// and `internal_error`; clients should treat unknown codes by HTTP status.
     pub code: String,
+    /// Human-readable explanation that never contains internal details.
     pub message: String,
+    /// Request field responsible for an `invalid_request` error, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
 }

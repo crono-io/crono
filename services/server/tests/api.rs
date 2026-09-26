@@ -118,6 +118,169 @@ fn list_query_parameters_are_documented_in_query() -> Result<()> {
     Ok(())
 }
 
+fn generated_document() -> Result<Value> {
+    Ok(serde_json::to_value(crono_server::api::openapi())?)
+}
+
+fn documented_statuses(operation: &Value) -> Vec<&str> {
+    operation
+        .get("responses")
+        .and_then(Value::as_object)
+        .map(|responses| responses.keys().map(String::as_str).collect())
+        .unwrap_or_default()
+}
+
+fn has_inputs(operation: &Value) -> bool {
+    operation.get("requestBody").is_some()
+        || operation
+            .get("parameters")
+            .and_then(Value::as_array)
+            .is_some_and(|parameters| !parameters.is_empty())
+}
+
+#[test]
+fn every_api_operation_documents_authorization_and_dependency_failures() -> Result<()> {
+    let document = generated_document()?;
+    for (path, method, operation) in operations(&document) {
+        if !path.starts_with("/api/") {
+            continue;
+        }
+        let statuses = documented_statuses(operation);
+        for status in ["401", "403", "500", "503"] {
+            assert!(
+                statuses.contains(&status),
+                "{method} {path} does not document {status}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn operations_with_inputs_document_invalid_request() -> Result<()> {
+    let document = generated_document()?;
+    for (path, method, operation) in operations(&document) {
+        if path.starts_with("/api/") && has_inputs(operation) {
+            assert!(
+                documented_statuses(operation).contains(&"400"),
+                "{method} {path} accepts input but does not document 400"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn operations_with_bodies_document_payload_and_media_type_failures() -> Result<()> {
+    let document = generated_document()?;
+    for (path, method, operation) in operations(&document) {
+        if operation.get("requestBody").is_some() {
+            let statuses = documented_statuses(operation);
+            for status in ["413", "415"] {
+                assert!(
+                    statuses.contains(&status),
+                    "{method} {path} accepts a body but does not document {status}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `OpenAPI` 3.1 requires a description on every response object.
+#[test]
+fn every_response_has_a_description() -> Result<()> {
+    let document = generated_document()?;
+    let components = document.pointer("/components/responses");
+    for (path, method, operation) in operations(&document) {
+        let responses = operation
+            .get("responses")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten();
+        for (status, response) in responses {
+            let resolved = match response.get("$ref").and_then(Value::as_str) {
+                Some(reference) => reference
+                    .strip_prefix("#/components/responses/")
+                    .and_then(|name| components.and_then(|components| components.get(name))),
+                None => Some(response),
+            };
+            assert!(
+                resolved
+                    .and_then(|response| response.get("description"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|description| !description.is_empty()),
+                "{method} {path} response {status} has no description"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn list_limit_parameters_declare_documented_bounds() -> Result<()> {
+    let document = generated_document()?;
+    let mut checked = 0;
+    for (path, method, operation) in operations(&document) {
+        let parameters = operation
+            .get("parameters")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten();
+        for parameter in parameters {
+            if parameter.get("name").and_then(Value::as_str) == Some("limit") {
+                let schema = parameter.get("schema");
+                let bound = |key: &str| {
+                    schema
+                        .and_then(|schema| schema.get(key))
+                        .and_then(Value::as_u64)
+                };
+                assert_eq!(bound("minimum"), Some(1), "{method} {path} limit minimum");
+                assert_eq!(bound("maximum"), Some(100), "{method} {path} limit maximum");
+                checked += 1;
+            }
+        }
+    }
+    assert_eq!(checked, 8, "every list endpoint documents its limit");
+    Ok(())
+}
+
+/// Request names are validated as DNS-1123 labels; the schema must say so, or
+/// clients and fuzzers will send values the server always rejects.
+#[test]
+fn request_names_declare_resource_name_constraints() -> Result<()> {
+    let document = generated_document()?;
+    let schemas = document
+        .pointer("/components/schemas")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten();
+    let mut checked = 0;
+    for (schema_name, schema) in schemas {
+        if !schema_name.ends_with("Request") {
+            continue;
+        }
+        if let Some(name) = schema.pointer("/properties/name") {
+            assert_eq!(
+                name.get("maxLength").and_then(Value::as_u64),
+                u64::try_from(crono_api::RESOURCE_NAME_MAX_LENGTH).ok(),
+                "{schema_name}.name maxLength"
+            );
+            assert_eq!(
+                name.get("pattern").and_then(Value::as_str),
+                Some("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"),
+                "{schema_name}.name pattern"
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(
+        checked, 10,
+        "every named create or update request is constrained"
+    );
+    Ok(())
+}
+
 /// The committed contract is what docs, oasdiff, and Schemathesis consume, so
 /// it must be byte-identical to the document generated from the routes.
 #[test]
