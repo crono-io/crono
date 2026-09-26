@@ -128,6 +128,7 @@ impl Application {
             .await?;
         let name = QueueName::parse(&input.name).map_err(invalid_name)?;
         validate_queue_description(input.description.as_deref())?;
+        ensure_queue_name_available(&name, false)?;
         Ok(self
             .store
             .create_queue(&name, input.description.as_deref())
@@ -201,6 +202,7 @@ impl Application {
                 "the system default Queue cannot be disabled",
             ));
         }
+        ensure_queue_name_available(&name, current.system())?;
         Ok(self
             .store
             .update_queue(id, &name, input.description.as_deref(), input.enabled)
@@ -1205,6 +1207,22 @@ impl Application {
     }
 }
 
+/// Reject the system Queue's reserved name for any other Queue.
+///
+/// The system Queue always exists, so another Queue named `default` is a name
+/// conflict. Checking here reports it as one instead of letting PostgreSQL's
+/// `queues_system_identity` check constraint surface as an internal error.
+fn ensure_queue_name_available(
+    name: &QueueName,
+    is_system_queue: bool,
+) -> Result<(), ApplicationError> {
+    if name.is_system() && !is_system_queue {
+        Err(ApplicationError::Conflict)
+    } else {
+        Ok(())
+    }
+}
+
 /// Validate a name cursor before it reaches SQL.
 ///
 /// Every name-ordered list pages by a resource name, so a cursor the server
@@ -1404,8 +1422,24 @@ fn validate_schedule_policy(
 
 #[cfg(test)]
 mod tests {
-    use super::{ApplicationError, page_cursor, stored_worker_id, validate_schedule_policy};
-    use crate::domain::MisfirePolicy;
+    use super::{
+        ApplicationError, ensure_queue_name_available, page_cursor, stored_worker_id,
+        validate_schedule_policy,
+    };
+    use crate::domain::{MisfirePolicy, QueueName};
+    use anyhow::Result;
+
+    #[test]
+    fn system_queue_name_conflicts_for_other_queues() -> Result<()> {
+        let reserved = QueueName::parse(QueueName::SYSTEM)?;
+        assert!(matches!(
+            ensure_queue_name_available(&reserved, false),
+            Err(ApplicationError::Conflict)
+        ));
+        assert!(ensure_queue_name_available(&reserved, true).is_ok());
+        assert!(ensure_queue_name_available(&QueueName::parse("priority")?, false).is_ok());
+        Ok(())
+    }
 
     #[test]
     fn list_rejects_cursor_that_is_not_a_resource_name() {

@@ -75,6 +75,9 @@ impl fmt::Display for ResourceName {
 pub struct QueueName(String);
 
 impl QueueName {
+    /// Name of the always-present system Queue; no other Queue may use it.
+    pub const SYSTEM: &'static str = "default";
+
     /// Validate and own a Queue name under the canonical resource-name rules.
     ///
     /// # Errors
@@ -89,6 +92,12 @@ impl QueueName {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Whether this is the reserved name of the system Queue.
+    #[must_use]
+    pub fn is_system(&self) -> bool {
+        self.0 == Self::SYSTEM
     }
 }
 
