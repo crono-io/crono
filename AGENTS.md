@@ -46,6 +46,7 @@ Use stable Rust, rustfmt, Clippy, Just, Trunk, and the `wasm32-unknown-unknown` 
 - `cargo fmt --all -- --check`: check formatting.
 - `just clippy`: default/all-feature native linting plus WASM.
 - `just test`: default/all-feature workspace tests.
+- `cargo deny check --all-features`: license, source, and advisory policy from `deny.toml`; run it after adding or upgrading dependencies, and justify any new allowance there.
 - `just openapi`: regenerate the committed `docs/openapi/crono-server.json` contract after any API change; `just test` fails while it is stale.
 - `just api-breaking`: compare the contract with `origin/main` using oasdiff before pushing; it fails on breaking changes that no `API-Breaking:` commit trailer acknowledges.
 - `just schemathesis`: fuzz the API with Schemathesis against an isolated throwaway PostgreSQL and server; run it after changing handlers, validation, or the contract.

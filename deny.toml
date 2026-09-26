@@ -1,0 +1,52 @@
+# cargo-deny policy for Crono's dependency graph.
+#
+# The Security Audit workflow runs `cargo deny check --all-features` nightly
+# with cargo-deny 0.20; run the same command after adding or upgrading
+# dependencies. Every allowance below is explicit so a new license, source, or
+# advisory fails the audit until someone decides it is acceptable.
+
+[graph]
+all-features = true
+
+[advisories]
+# Vulnerabilities always fail. Unmaintained advisories fail too, except for
+# the entries below: transitive, compile-time-only macro helpers with no
+# maintained release in the crates that depend on them. Remove an entry as
+# soon as the dependent crates migrate, so a regression cannot hide behind it.
+ignore = [
+  { id = "RUSTSEC-2024-0436", reason = "paste is archived but only expands macros at compile time; it reaches Crono through the Leptos web stack (leptos, either_of, reactive_graph, reactive_stores), which has not replaced it in its latest 0.8 release" },
+  { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 is unmaintained but only formats macro diagnostics at compile time; it reaches Crono through Leptos macros (leptos_macro, leptos_router_macro, reactive_stores_macro, syn_derive), which have no release without it yet" },
+]
+
+[licenses]
+# Permissive licenses compatible with distributing Crono under BSD-3-Clause.
+# Copyleft licenses are deliberately absent; a crate offering one only as an
+# alternative (such as r-efi's `MIT OR Apache-2.0 OR LGPL-2.1-or-later`) is
+# accepted through its permissive option.
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+  "Zlib",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Workspace crates depend on each other by path without a version.
+allow-wildcard-paths = true
+
+[sources]
+# Only crates.io; a git or alternate-registry dependency needs a deliberate
+# allowance here.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
