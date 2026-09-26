@@ -9,7 +9,9 @@ use crate::execution::{ExecutionEvent, ExecutionPhase, ExecutionTimeline, Redact
 use anyhow::{Context, Result, bail};
 use crono_api::{ExecutionSnapshot, ExecutorKind};
 use crono_execution::MAX_INPUT_BYTES;
-use std::{env, io::Write, process::Stdio, sync::Arc, time::Instant};
+use std::{
+    env, io::Write, os::unix::process::ExitStatusExt, process::Stdio, sync::Arc, time::Instant,
+};
 use tempfile::NamedTempFile;
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
@@ -250,16 +252,9 @@ async fn execute_process(
         read_output(stdout, Arc::clone(&timeline), Arc::clone(&redactor), false),
         read_output(stderr, Arc::clone(&timeline), redactor, true),
     )?;
-    #[cfg(unix)]
-    let signal = {
-        use std::os::unix::process::ExitStatusExt;
-        status.signal()
-    };
-    #[cfg(not(unix))]
-    let signal = None;
     timeline.emit(ExecutionEvent::ProcessExited {
         exit_code: status.code(),
-        signal,
+        signal: status.signal(),
         duration_ms: process_duration_ms,
     });
     Ok(ExecutionResult {

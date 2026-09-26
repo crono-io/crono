@@ -72,8 +72,6 @@ jobs:
             target: aarch64-unknown-linux-musl
           - os: macos-latest
             target: x86_64-apple-darwin
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -105,29 +103,18 @@ jobs:
 
           for binary_name in crono-server crono-server-openapi crono-worker crono; do
             executable="target/${TARGET}/release/${binary_name}"
-            if [[ "${RUNNER_OS}" == "Windows" ]]; then
-              executable="${executable}.exe"
-            fi
-
             archive_name="${binary_name}-${RELEASE_VERSION}-${TARGET}"
             staging_dir="${release_dir}/${archive_name}"
             mkdir "${staging_dir}"
             cp "${executable}" "${staging_dir}/"
-
-            if [[ "${RUNNER_OS}" == "Windows" ]]; then
-              (cd "${release_dir}" && 7z a "${archive_name}.zip" "${archive_name}")
-            else
-              tar -C "${release_dir}" -czf "${release_dir}/${archive_name}.tar.gz" "${archive_name}"
-            fi
+            tar -C "${release_dir}" -czf "${release_dir}/${archive_name}.tar.gz" "${archive_name}"
           done
 
       - name: Upload native artifacts
         uses: actions/upload-artifact@v7
         with:
           name: release-native-${{ matrix.target }}
-          path: |-
-            release-artifacts/*.tar.gz
-            release-artifacts/*.zip
+          path: release-artifacts/*.tar.gz
           if-no-files-found: error
 
   frontend-build:

@@ -292,6 +292,8 @@ Each `X.Y.Z` release tag publishes `docs/openapi/` to GitHub Pages through the `
 
 ## Workspace
 
+The server, worker, and CLI run on Unix only (Linux and macOS); Windows is not supported. Releases publish `.tar.gz` archives for `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, and `x86_64-apple-darwin`, plus the web client bundle.
+
 | Package | Responsibility |
 | --- | --- |
 | `services/server` | HTTP API, scheduler, PostgreSQL adapter, outbox publisher, worker control, reconciliation |

@@ -54,6 +54,8 @@ Use stable Rust, rustfmt, Clippy, Just, Trunk, and the `wasm32-unknown-unknown` 
 
 ## Coding Style & Strict Coding Rules
 
+Native applications (server, worker, CLI) target Unix only: Linux and macOS. Windows is not supported, so use Unix APIs such as signals and `std::os::unix` directly instead of adding `#[cfg(unix)]`/`#[cfg(not(unix))]` fallbacks; only the web client and the crates it shares (`crates/api`, `crates/execution`) must also build for `wasm32-unknown-unknown`.
+
 Use Rust 2024 and rustfmt's four-space indentation; Just recipes use two spaces. Use `snake_case` for modules/functions, `UpperCamelCase` for types, and `SCREAMING_SNAKE_CASE` for constants.
 
 Propagate errors with `?`; handle missing data and unavailable dependencies. Avoid panic-prone shortcuts: use checked access and guard division by zero. Never hold locks across `.await`; bound concurrency, queues, and buffers. Define daemon CLI options/defaults in commands, validate them in dispatch, and keep business logic in action/application modules. Client command definitions may identify configuration inputs, but environment/default resolution and URL validation belong in dedicated configuration modules independent of clap.

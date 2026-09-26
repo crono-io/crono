@@ -234,6 +234,10 @@ fn io_error_is_ipv6_unavailable(error: &io::Error) -> bool {
     ) || matches!(error.raw_os_error(), Some(1 | 43 | 47 | 49 | 93 | 97 | 99))
 }
 
+/// Resolve when the process receives SIGINT or SIGTERM.
+///
+/// If one handler cannot be installed, the failure is logged and only the
+/// other signal can stop the server, instead of shutting down immediately.
 async fn shutdown_signal() {
     let interrupt = async {
         if let Err(error) = tokio::signal::ctrl_c().await {
@@ -242,7 +246,6 @@ async fn shutdown_signal() {
         }
     };
 
-    #[cfg(unix)]
     let terminate = async {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
             Ok(mut signal) => {
@@ -255,14 +258,10 @@ async fn shutdown_signal() {
         }
     };
 
-    #[cfg(unix)]
     tokio::select! {
         () = interrupt => {}
         () = terminate => {}
     }
-
-    #[cfg(not(unix))]
-    interrupt.await;
 
     info!("shutdown signal received");
 }
