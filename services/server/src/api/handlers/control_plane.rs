@@ -6,7 +6,11 @@
 //! independently deployed browser client does not depend on server internals.
 
 use crate::{
-    api::{error::ApiError, state::AppState},
+    api::{
+        error::ApiError,
+        extract::{ApiJson, ApiPath, ApiQuery},
+        state::AppState,
+    },
     application::{
         CreateJobInput, CreateQueueInput, CreateScheduleInput, JobRecord, Page as ApplicationPage,
         RequestContext, RunAttemptRecord, RunEventRecord, RunListFilter, RunRecord, ScheduleRecord,
@@ -20,7 +24,7 @@ use crate::{
 };
 use axum::{
     Json,
-    extract::{Extension, Path, Query, State},
+    extract::{Extension, State},
     http::StatusCode,
 };
 use crono_api::{
@@ -39,6 +43,7 @@ use utoipa::IntoParams;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct PageQuery {
     /// Maximum resources to return, from 1 through 100.
     limit: Option<u16>,
@@ -47,6 +52,7 @@ pub struct PageQuery {
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct RunPageQuery {
     /// Maximum resources to return, from 1 through 100.
     limit: Option<u16>,
@@ -69,7 +75,7 @@ pub struct RunPageQuery {
 pub async fn create_namespace(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Json(request): Json<CreateNamespaceRequest>,
+    ApiJson(request): ApiJson<CreateNamespaceRequest>,
 ) -> Result<(StatusCode, Json<NamespaceResource>), ApiError> {
     let namespace = state
         .application()
@@ -88,7 +94,7 @@ pub async fn create_namespace(
 pub async fn list_namespaces(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Query(query): Query<PageQuery>,
+    ApiQuery(query): ApiQuery<PageQuery>,
 ) -> Result<Json<Page<NamespaceResource>>, ApiError> {
     let page = state
         .application()
@@ -107,7 +113,7 @@ pub async fn list_namespaces(
 pub async fn get_namespace(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace_id): Path<Uuid>,
+    ApiPath(namespace_id): ApiPath<Uuid>,
 ) -> Result<Json<NamespaceResource>, ApiError> {
     let namespace = state
         .application()
@@ -126,7 +132,7 @@ pub async fn get_namespace(
 pub async fn create_queue(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Json(request): Json<CreateQueueRequest>,
+    ApiJson(request): ApiJson<CreateQueueRequest>,
 ) -> Result<(StatusCode, Json<QueueResource>), ApiError> {
     let queue = state
         .application()
@@ -151,7 +157,7 @@ pub async fn create_queue(
 pub async fn list_queues(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Query(query): Query<PageQuery>,
+    ApiQuery(query): ApiQuery<PageQuery>,
 ) -> Result<Json<Page<QueueResource>>, ApiError> {
     let page = state
         .application()
@@ -170,7 +176,7 @@ pub async fn list_queues(
 pub async fn get_queue(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(queue_id): Path<Uuid>,
+    ApiPath(queue_id): ApiPath<Uuid>,
 ) -> Result<Json<QueueResource>, ApiError> {
     let queue = state.application().get_queue(&context, queue_id).await?;
     Ok(Json(queue_resource(&queue)?))
@@ -187,8 +193,8 @@ pub async fn get_queue(
 pub async fn update_queue(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(queue_id): Path<Uuid>,
-    Json(request): Json<UpdateQueueRequest>,
+    ApiPath(queue_id): ApiPath<Uuid>,
+    ApiJson(request): ApiJson<UpdateQueueRequest>,
 ) -> Result<Json<QueueResource>, ApiError> {
     let queue = state
         .application()
@@ -215,7 +221,7 @@ pub async fn update_queue(
 pub async fn delete_queue(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(queue_id): Path<Uuid>,
+    ApiPath(queue_id): ApiPath<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     state.application().delete_queue(&context, queue_id).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -232,8 +238,8 @@ pub async fn delete_queue(
 pub async fn create_job(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace_id): Path<Uuid>,
-    Json(request): Json<CreateJobRequest>,
+    ApiPath(namespace_id): ApiPath<Uuid>,
+    ApiJson(request): ApiJson<CreateJobRequest>,
 ) -> Result<(StatusCode, Json<JobResource>), ApiError> {
     let job = state
         .application()
@@ -275,8 +281,8 @@ pub async fn create_job(
 pub async fn list_jobs(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace_id): Path<Uuid>,
-    Query(query): Query<PageQuery>,
+    ApiPath(namespace_id): ApiPath<Uuid>,
+    ApiQuery(query): ApiQuery<PageQuery>,
 ) -> Result<Json<Page<JobResource>>, ApiError> {
     let page = state
         .application()
@@ -295,7 +301,7 @@ pub async fn list_jobs(
 pub async fn get_job(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(job_id): Path<Uuid>,
+    ApiPath(job_id): ApiPath<Uuid>,
 ) -> Result<Json<JobResource>, ApiError> {
     let job = state.application().get_job(&context, job_id).await?;
     Ok(Json(job_resource(&job)?))
@@ -312,8 +318,8 @@ pub async fn get_job(
 pub async fn update_job(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(job_id): Path<Uuid>,
-    Json(request): Json<UpdateJobRequest>,
+    ApiPath(job_id): ApiPath<Uuid>,
+    ApiJson(request): ApiJson<UpdateJobRequest>,
 ) -> Result<Json<JobResource>, ApiError> {
     let job = state
         .application()
@@ -352,8 +358,8 @@ pub async fn update_job(
 pub async fn create_target(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace_id): Path<Uuid>,
-    Json(request): Json<CreateTargetRequest>,
+    ApiPath(namespace_id): ApiPath<Uuid>,
+    ApiJson(request): ApiJson<CreateTargetRequest>,
 ) -> Result<(StatusCode, Json<TargetResource>), ApiError> {
     let target = state
         .application()
@@ -378,8 +384,8 @@ pub async fn create_target(
 pub async fn list_targets(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace_id): Path<Uuid>,
-    Query(query): Query<PageQuery>,
+    ApiPath(namespace_id): ApiPath<Uuid>,
+    ApiQuery(query): ApiQuery<PageQuery>,
 ) -> Result<Json<Page<TargetResource>>, ApiError> {
     let page = state
         .application()
@@ -398,7 +404,7 @@ pub async fn list_targets(
 pub async fn get_target(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(target_id): Path<Uuid>,
+    ApiPath(target_id): ApiPath<Uuid>,
 ) -> Result<Json<TargetResource>, ApiError> {
     let target = state.application().get_target(&context, target_id).await?;
     Ok(Json(target_resource(&target)?))
@@ -415,8 +421,8 @@ pub async fn get_target(
 pub async fn update_target(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(target_id): Path<Uuid>,
-    Json(request): Json<UpdateTargetRequest>,
+    ApiPath(target_id): ApiPath<Uuid>,
+    ApiJson(request): ApiJson<UpdateTargetRequest>,
 ) -> Result<Json<TargetResource>, ApiError> {
     let target = state
         .application()
@@ -442,8 +448,8 @@ pub async fn update_target(
 pub async fn create_target_set(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace_id): Path<Uuid>,
-    Json(request): Json<CreateTargetSetRequest>,
+    ApiPath(namespace_id): ApiPath<Uuid>,
+    ApiJson(request): ApiJson<CreateTargetSetRequest>,
 ) -> Result<(StatusCode, Json<TargetSetResource>), ApiError> {
     let target_set = state
         .application()
@@ -468,8 +474,8 @@ pub async fn create_target_set(
 pub async fn list_target_sets(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace_id): Path<Uuid>,
-    Query(query): Query<PageQuery>,
+    ApiPath(namespace_id): ApiPath<Uuid>,
+    ApiQuery(query): ApiQuery<PageQuery>,
 ) -> Result<Json<Page<TargetSetResource>>, ApiError> {
     let page = state
         .application()
@@ -488,7 +494,7 @@ pub async fn list_target_sets(
 pub async fn get_target_set(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(target_set_id): Path<Uuid>,
+    ApiPath(target_set_id): ApiPath<Uuid>,
 ) -> Result<Json<TargetSetResource>, ApiError> {
     let target_set = state
         .application()
@@ -508,8 +514,8 @@ pub async fn get_target_set(
 pub async fn update_target_set(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(target_set_id): Path<Uuid>,
-    Json(request): Json<UpdateTargetSetRequest>,
+    ApiPath(target_set_id): ApiPath<Uuid>,
+    ApiJson(request): ApiJson<UpdateTargetSetRequest>,
 ) -> Result<Json<TargetSetResource>, ApiError> {
     let target_set = state
         .application()
@@ -535,8 +541,8 @@ pub async fn update_target_set(
 pub async fn create_schedule(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace_id): Path<Uuid>,
-    Json(request): Json<CreateScheduleRequest>,
+    ApiPath(namespace_id): ApiPath<Uuid>,
+    ApiJson(request): ApiJson<CreateScheduleRequest>,
 ) -> Result<(StatusCode, Json<ScheduleResource>), ApiError> {
     let timing = match (request.cron_expression, request.execute_at) {
         (Some(expression), None) => ScheduleTiming::Cron {
@@ -591,8 +597,8 @@ pub async fn create_schedule(
 pub async fn list_schedules(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(namespace_id): Path<Uuid>,
-    Query(query): Query<PageQuery>,
+    ApiPath(namespace_id): ApiPath<Uuid>,
+    ApiQuery(query): ApiQuery<PageQuery>,
 ) -> Result<Json<Page<ScheduleResource>>, ApiError> {
     let page = state
         .application()
@@ -611,7 +617,7 @@ pub async fn list_schedules(
 pub async fn get_schedule(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(schedule_id): Path<Uuid>,
+    ApiPath(schedule_id): ApiPath<Uuid>,
 ) -> Result<Json<ScheduleResource>, ApiError> {
     let record = state
         .application()
@@ -631,8 +637,8 @@ pub async fn get_schedule(
 pub async fn update_schedule(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(schedule_id): Path<Uuid>,
-    Json(request): Json<UpdateScheduleRequest>,
+    ApiPath(schedule_id): ApiPath<Uuid>,
+    ApiJson(request): ApiJson<UpdateScheduleRequest>,
 ) -> Result<Json<ScheduleResource>, ApiError> {
     let record = state
         .application()
@@ -651,7 +657,7 @@ pub async fn update_schedule(
 pub async fn create_run(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Json(request): Json<CreateRunRequest>,
+    ApiJson(request): ApiJson<CreateRunRequest>,
 ) -> Result<(StatusCode, Json<RunBatchResource>), ApiError> {
     let outcome = state
         .application()
@@ -692,7 +698,7 @@ pub async fn create_run(
 pub async fn list_runs(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Query(query): Query<RunPageQuery>,
+    ApiQuery(query): ApiQuery<RunPageQuery>,
 ) -> Result<Json<Page<RunResource>>, ApiError> {
     let page = state
         .application()
@@ -722,7 +728,7 @@ pub async fn list_runs(
 pub async fn get_run(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(run_id): Path<Uuid>,
+    ApiPath(run_id): ApiPath<Uuid>,
 ) -> Result<Json<RunResource>, ApiError> {
     let run = state.application().get_run(&context, run_id).await?;
     Ok(Json(run_resource(&run)?))
@@ -740,8 +746,8 @@ pub async fn get_run(
 pub async fn rerun_run(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(run_id): Path<Uuid>,
-    Json(request): Json<RerunRequest>,
+    ApiPath(run_id): ApiPath<Uuid>,
+    ApiJson(request): ApiJson<RerunRequest>,
 ) -> Result<(StatusCode, Json<RunResource>), ApiError> {
     let outcome = state
         .application()
@@ -770,7 +776,7 @@ pub async fn rerun_run(
 pub async fn list_run_events(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(run_id): Path<Uuid>,
+    ApiPath(run_id): ApiPath<Uuid>,
 ) -> Result<Json<Vec<RunEventResource>>, ApiError> {
     let events = state
         .application()
@@ -795,7 +801,7 @@ pub async fn list_run_events(
 pub async fn list_run_attempts(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(run_id): Path<Uuid>,
+    ApiPath(run_id): ApiPath<Uuid>,
 ) -> Result<Json<Vec<RunAttemptResource>>, ApiError> {
     let attempts = state
         .application()
@@ -819,7 +825,7 @@ pub async fn list_run_attempts(
 pub async fn list_workers(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Query(query): Query<PageQuery>,
+    ApiQuery(query): ApiQuery<PageQuery>,
 ) -> Result<Json<Page<WorkerResource>>, ApiError> {
     let page = state
         .application()
@@ -842,7 +848,7 @@ pub async fn list_workers(
 pub async fn get_worker(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,
-    Path(worker_id): Path<String>,
+    ApiPath(worker_id): ApiPath<String>,
 ) -> Result<Json<WorkerDetailsResource>, ApiError> {
     let record = state.application().get_worker(&context, &worker_id).await?;
     Ok(Json(WorkerDetailsResource {

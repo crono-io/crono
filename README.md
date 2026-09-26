@@ -278,6 +278,8 @@ The System → Monitor page (`/monitor`) calls operator-authorized `GET /api/mon
 
 The OpenAPI document is generated from the same routes the server registers, and a copy is committed at `docs/openapi/crono-server.json` as the versioned HTTP contract. Committing it keeps every API change visible in review, gives each release tag an exact record of the contract it shipped, and lets documentation and contract tooling work without building or running the server. The running server does not serve the document or a documentation UI, so the API exposes no route beyond its real operations.
 
+Every error response uses one JSON shape, `{"error": {"code", "message", "field"}}`, where `code` is a stable machine-readable value and `field` names the offending input when known. That includes requests rejected before any use case runs: malformed or unknown-field JSON bodies, non-UUID path segments, and unparsable query strings return `400 invalid_request`; bodies over 2 MiB return `413 payload_too_large`; a JSON body without a JSON content type returns `415 unsupported_media_type`; unknown routes return `404 not_found`; and unsupported methods return `405 method_not_allowed` with an `Allow` header. Rejection messages describe only the caller's input and are capped at 256 characters.
+
 Regenerate the file with `just openapi` whenever a handler, request or response type, or the crate version changes; the version is part of the document, so a release bump also changes it. The `committed_openapi_document_matches_generated_output` test fails `just test` when the committed file differs from the generated output, which keeps the file trustworthy for every tool that reads it.
 
 ## Workspace

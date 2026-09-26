@@ -156,10 +156,7 @@
             "description": "Maximum resources to return, from 1 through 100.",
             "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int32",
               "minimum": 0
             }
@@ -170,10 +167,7 @@
             "description": "Opaque continuation cursor returned by a previous request.",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -297,10 +291,7 @@
             "description": "Maximum resources to return, from 1 through 100.",
             "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int32",
               "minimum": 0
             }
@@ -311,10 +302,7 @@
             "description": "Opaque continuation cursor returned by a previous request.",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -418,10 +406,7 @@
             "description": "Maximum resources to return, from 1 through 100.",
             "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int32",
               "minimum": 0
             }
@@ -432,10 +417,7 @@
             "description": "Opaque continuation cursor returned by a previous request.",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -539,10 +521,7 @@
             "description": "Maximum resources to return, from 1 through 100.",
             "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int32",
               "minimum": 0
             }
@@ -553,10 +532,7 @@
             "description": "Opaque continuation cursor returned by a previous request.",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -660,10 +636,7 @@
             "description": "Maximum resources to return, from 1 through 100.",
             "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int32",
               "minimum": 0
             }
@@ -674,10 +647,7 @@
             "description": "Opaque continuation cursor returned by a previous request.",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -791,10 +761,7 @@
             "description": "Maximum resources to return, from 1 through 100.",
             "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int32",
               "minimum": 0
             }
@@ -805,10 +772,7 @@
             "description": "Opaque continuation cursor returned by a previous request.",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -1028,10 +992,7 @@
             "description": "Maximum resources to return, from 1 through 100.",
             "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int32",
               "minimum": 0
             }
@@ -1042,10 +1003,7 @@
             "description": "UUID cursor returned by a previous Run request.",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
@@ -1054,10 +1012,7 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
@@ -1066,14 +1021,7 @@
             "in": "query",
             "required": false,
             "schema": {
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/RunStatus"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+              "$ref": "#/components/schemas/RunStatus"
             }
           },
           {
@@ -1081,10 +1029,7 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
@@ -1093,10 +1038,7 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
@@ -1105,10 +1047,7 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           }
@@ -1671,10 +1610,7 @@
             "description": "Maximum resources to return, from 1 through 100.",
             "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int32",
               "minimum": 0
             }
@@ -1685,10 +1621,7 @@
             "description": "Opaque continuation cursor returned by a previous request.",
             "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],

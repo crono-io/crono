@@ -7,6 +7,12 @@
 //! is returned to callers in `x-request-id`, and a client-supplied value is
 //! never adopted as the correlation ID (see [`request_id`]).
 //!
+//! Unmatched paths and unsupported methods are answered by fallbacks that
+//! return the same `ErrorEnvelope` JSON as every other failure, and request
+//! extractors reject malformed input the same way (see [`extract`]). The
+//! fallbacks sit inside the transport layers, so their responses still carry
+//! `x-request-id` and appear in the trace log.
+//!
 //! `serve` also owns the background loops (NATS connection manager, worker
 //! control, outbox dispatcher, scheduler, and reconciler). They share one
 //! cancellation token, stop when the listener drains after a shutdown signal,
@@ -20,7 +26,7 @@ use crate::{
     scheduler::run_scheduler,
 };
 use anyhow::{Context, Result};
-use axum::{Router, middleware};
+use axum::{Router, http::StatusCode, middleware};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::{
     io::{self, ErrorKind},
@@ -33,6 +39,7 @@ use tracing::{error, info};
 use utoipa_axum::router::OpenApiRouter;
 
 mod error;
+mod extract;
 pub(crate) mod handlers;
 mod identity;
 mod openapi;
@@ -45,6 +52,40 @@ pub use openapi::openapi;
 #[must_use]
 fn router(state: state::AppState) -> OpenApiRouter {
     openapi::api_router().with_state(state)
+}
+
+/// Compose the served application from its routes.
+///
+/// Fallbacks are attached before the transport layers so their responses are
+/// correlated and traced like any routed response.
+fn app(router: Router) -> Router {
+    with_transport_layers(with_fallbacks(router))
+}
+
+/// Answer unmatched paths and unsupported methods with the error envelope.
+///
+/// `method_not_allowed_fallback` only affects routes that already exist, so
+/// it must run on the fully registered router; axum keeps the `Allow` header.
+fn with_fallbacks(router: Router) -> Router {
+    router
+        .fallback(route_not_found)
+        .method_not_allowed_fallback(method_not_allowed)
+}
+
+async fn route_not_found() -> error::ApiError {
+    error::ApiError::rejected(
+        StatusCode::NOT_FOUND,
+        "not_found",
+        "no API route matches this path",
+    )
+}
+
+async fn method_not_allowed() -> error::ApiError {
+    error::ApiError::rejected(
+        StatusCode::METHOD_NOT_ALLOWED,
+        "method_not_allowed",
+        "this route does not support the requested HTTP method",
+    )
 }
 
 /// Wrap routes in the correlation, tracing, and identity layers.
@@ -78,7 +119,7 @@ pub async fn serve(
         .context("failed to create asynchronous API listener")?;
     let state = state::AppState::new(application, Arc::clone(&store), publisher.clone());
     let (router, _openapi) = router(state).split_for_parts();
-    let app = with_transport_layers(router);
+    let app = app(router);
 
     let cancellation = CancellationToken::new();
     let connection_publisher = publisher.clone();
@@ -236,16 +277,84 @@ mod tests {
         http::{Request, StatusCode},
         routing::get,
     };
+    use extract::{ApiJson, ApiPath, ApiQuery};
     use request_id::REQUEST_ID_HEADER;
+    use serde::Deserialize;
+    use serde_json::Value;
     use tower::ServiceExt;
     use uuid::Uuid;
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ProbeBody {
+        name: String,
+    }
+
+    #[derive(Deserialize)]
+    struct ProbeQuery {
+        limit: Option<u16>,
+    }
 
     async fn echo_request_id(Extension(context): Extension<RequestContext>) -> String {
         context.request_id().to_string()
     }
 
+    async fn echo_body(ApiJson(body): ApiJson<ProbeBody>) -> String {
+        body.name
+    }
+
+    async fn echo_path(ApiPath(id): ApiPath<Uuid>) -> String {
+        id.to_string()
+    }
+
+    async fn echo_query(ApiQuery(query): ApiQuery<ProbeQuery>) -> String {
+        query.limit.unwrap_or_default().to_string()
+    }
+
+    /// Probe routes composed exactly as `serve` composes the real API.
     fn probe_app() -> Router {
-        with_transport_layers(Router::new().route("/probe", get(echo_request_id)))
+        app(Router::new()
+            .route("/probe", get(echo_request_id).post(echo_body))
+            .route("/probe/{id}", get(echo_path))
+            .route("/probe-query", get(echo_query)))
+    }
+
+    fn json_request(body: impl Into<Body>) -> Result<Request<Body>> {
+        Ok(Request::builder()
+            .method("POST")
+            .uri("/probe")
+            .header("content-type", "application/json")
+            .body(body.into())?)
+    }
+
+    /// Assert the response is the JSON error envelope with `code`.
+    async fn assert_envelope(
+        response: axum::response::Response,
+        status: StatusCode,
+        code: &str,
+    ) -> Result<Value> {
+        assert_eq!(response.status(), status);
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok()),
+            Some("application/json")
+        );
+        issued_request_id(&response)?;
+        let body = body::to_bytes(response.into_body(), 64 * 1024).await?;
+        let envelope: Value = serde_json::from_slice(&body)?;
+        assert_eq!(
+            envelope.pointer("/error/code").and_then(Value::as_str),
+            Some(code)
+        );
+        assert!(
+            envelope
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .is_some_and(|message| !message.is_empty())
+        );
+        Ok(envelope)
     }
 
     fn issued_request_id(response: &axum::response::Response) -> Result<Uuid> {
@@ -288,12 +397,136 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unmatched_routes_still_carry_request_id() -> Result<()> {
+    async fn unknown_route_returns_not_found_envelope() -> Result<()> {
         let response = probe_app()
             .oneshot(Request::builder().uri("/missing").body(Body::empty())?)
             .await?;
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        issued_request_id(&response)?;
+        assert_envelope(response, StatusCode::NOT_FOUND, "not_found").await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unsupported_method_returns_method_not_allowed_envelope_with_allow_header() -> Result<()>
+    {
+        let response = probe_app()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/probe")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let allow = response
+            .headers()
+            .get("allow")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        assert_envelope(
+            response,
+            StatusCode::METHOD_NOT_ALLOWED,
+            "method_not_allowed",
+        )
+        .await?;
+        assert!(allow.is_some_and(|methods| methods.contains("GET") && methods.contains("POST")));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn well_formed_requests_pass_through_the_wrappers() -> Result<()> {
+        let app = probe_app();
+        let body = app
+            .clone()
+            .oneshot(json_request(r#"{"name":"probe"}"#)?)
+            .await?;
+        assert_eq!(body.status(), StatusCode::OK);
+        let id = Uuid::now_v7();
+        let path = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/probe/{id}"))
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(path.status(), StatusCode::OK);
+        let query = app
+            .oneshot(
+                Request::builder()
+                    .uri("/probe-query?limit=7")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(query.status(), StatusCode::OK);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn malformed_json_returns_invalid_request_envelope() -> Result<()> {
+        let response = probe_app().oneshot(json_request("{\"name\":")?).await?;
+        assert_envelope(response, StatusCode::BAD_REQUEST, "invalid_request").await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unknown_json_field_returns_invalid_request_envelope() -> Result<()> {
+        let response = probe_app()
+            .oneshot(json_request(r#"{"name":"probe","role":"admin"}"#)?)
+            .await?;
+        assert_envelope(response, StatusCode::BAD_REQUEST, "invalid_request").await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn missing_content_type_returns_unsupported_media_type_envelope() -> Result<()> {
+        let response = probe_app()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/probe")
+                    .body(Body::from(r#"{"name":"probe"}"#))?,
+            )
+            .await?;
+        assert_envelope(
+            response,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_media_type",
+        )
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn oversized_body_returns_payload_too_large_envelope() -> Result<()> {
+        // Axum's default body limit is 2 MiB; exceed it by one byte.
+        let oversized = vec![b' '; 2 * 1024 * 1024 + 1];
+        let response = probe_app().oneshot(json_request(oversized)?).await?;
+        assert_envelope(response, StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large").await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn non_uuid_path_returns_invalid_request_envelope() -> Result<()> {
+        let response = probe_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/probe/not-a-uuid")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_envelope(response, StatusCode::BAD_REQUEST, "invalid_request").await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn malformed_query_returns_invalid_request_envelope() -> Result<()> {
+        let response = probe_app()
+            .oneshot(
+                Request::builder()
+                    .uri("/probe-query?limit=many")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_envelope(response, StatusCode::BAD_REQUEST, "invalid_request").await?;
         Ok(())
     }
 

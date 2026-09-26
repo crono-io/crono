@@ -66,6 +66,58 @@ fn openapi_contains_health_and_control_plane_contracts() -> Result<()> {
     Ok(())
 }
 
+/// Iterate `(path, method, operation)` for every operation in the document.
+fn operations(document: &Value) -> Vec<(&str, &str, &Value)> {
+    document
+        .get("paths")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .flat_map(|(path, item)| {
+            item.as_object()
+                .into_iter()
+                .flatten()
+                .map(move |(method, operation)| (path.as_str(), method.as_str(), operation))
+        })
+        .collect()
+}
+
+/// Wrapper extractors hide axum's `Query` type from utoipa, so query structs
+/// must declare their location explicitly; a path-located `limit` or cursor
+/// would describe a different API than the server implements.
+#[test]
+fn list_query_parameters_are_documented_in_query() -> Result<()> {
+    let document = serde_json::to_value(crono_server::api::openapi())?;
+    let mut checked = 0;
+    for (path, method, operation) in operations(&document) {
+        let parameters = operation
+            .get("parameters")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten();
+        for parameter in parameters {
+            let name = parameter.get("name").and_then(Value::as_str).unwrap_or("");
+            let location = parameter.get("in").and_then(Value::as_str).unwrap_or("");
+            if location == "path" {
+                assert!(
+                    path.contains(&format!("{{{name}}}")),
+                    "{method} {path} declares path parameter {name} missing from its route"
+                );
+            }
+            if matches!(name, "limit" | "after" | "before") {
+                assert_eq!(location, "query", "{method} {path} parameter {name}");
+                checked += 1;
+            }
+        }
+    }
+    // Seven name-cursor lists expose `limit` and `after`; Runs expose `limit` and `before`.
+    assert_eq!(
+        checked, 16,
+        "every list endpoint exposes its paging parameters"
+    );
+    Ok(())
+}
+
 /// The committed contract is what docs, oasdiff, and Schemathesis consume, so
 /// it must be byte-identical to the document generated from the routes.
 #[test]
