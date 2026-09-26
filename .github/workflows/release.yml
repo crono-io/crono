@@ -195,3 +195,15 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           files: artifacts/*
+
+  docs:
+    name: Publish API reference
+    if: needs.metadata.outputs.is_release == 'true'
+    needs:
+      - metadata
+      - release
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/docs.yml

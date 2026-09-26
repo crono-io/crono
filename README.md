@@ -286,6 +286,8 @@ Regenerate the file with `just openapi` whenever a handler, request or response 
 
 Breaking changes are checked with [oasdiff](https://github.com/oasdiff/oasdiff), pinned as a container image. Run `just api-breaking` before pushing: it compares the contract at `HEAD` with `origin/main`, prints the changelog, and fails on definite (ERR-level) breaking changes such as a removed field, a new required parameter, or a tightened constraint. When a break is intentional, record why in the commit message with a trailer, for example `API-Breaking: rename Run status values to match the lifecycle`; any such trailer in the compared range turns the failure into a report. The `API Contract` workflow runs the same `scripts/api-breaking.sh` on every push to `main` against the previous tip and writes the changelog to the job summary. A red run after a push cannot block anything, so the local check is the real gate.
 
+Each `X.Y.Z` release tag publishes `docs/openapi/` to GitHub Pages through the `API Docs` workflow, so the hosted reference always matches a released contract rather than whatever is deployed. The page renders the committed JSON with a pinned Redoc bundle guarded by a Subresource Integrity hash. Run `just api-docs` to preview it locally at `http://127.0.0.1:8088`. Publishing requires Pages to use "GitHub Actions" as its source and the `github-pages` environment to allow tag deployments.
+
 ## Workspace
 
 | Package | Responsibility |

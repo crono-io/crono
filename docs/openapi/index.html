@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Crono API Reference</title>
+    <meta name="description" content="HTTP API reference for the Crono control plane, rendered from the committed OpenAPI contract.">
+    <style>
+      body { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <!--
+      Renders crono-server.json from this directory. Redoc is pinned to one
+      version with a Subresource Integrity hash so the page cannot change
+      without a commit; update both together when upgrading.
+    -->
+    <redoc spec-url="./crono-server.json"></redoc>
+    <noscript>
+      The interactive reference needs JavaScript. The raw contract is available
+      at <a href="./crono-server.json">crono-server.json</a>.
+    </noscript>
+    <script
+      src="https://cdn.jsdelivr.net/npm/redoc@2.5.4/bundles/redoc.standalone.js"
+      integrity="sha384-w447zOpYfw/1Tv/5AK9NfHTlQIqE3RVR6KY62jCyy9zNDgO64cMwGGP1Fj0zJVf5"
+      crossorigin="anonymous"></script>
+  </body>
+</html>

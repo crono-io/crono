@@ -19,6 +19,11 @@ openapi:
   mv "$staged" "$spec"
   echo "Wrote $spec"
 
+# Preview the rendered API reference at http://127.0.0.1:8088.
+[positional-arguments]
+api-docs port="8088":
+  python3 -m http.server --bind 127.0.0.1 --directory docs/openapi "$1"
+
 # Fail on breaking API changes between a base (default origin/main) and HEAD.
 [positional-arguments]
 api-breaking base="origin/main":
