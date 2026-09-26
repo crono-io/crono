@@ -993,7 +993,7 @@ impl ControlPlaneStore for PostgresStore {
         enabled: bool,
         next_run_at: Option<OffsetDateTime>,
     ) -> Result<ScheduleRecord, StoreError> {
-        let revision = i64::try_from(revision).map_err(|_| StoreError::Internal)?;
+        let revision = stored_revision(revision)?;
         let row = sqlx::query_as::<_, ScheduleRow>(
             "WITH changed AS (
                  UPDATE crono.schedules
@@ -3028,11 +3028,11 @@ fn json_error(error: serde_json::Error) -> StoreError {
 }
 
 fn store_error(error: sqlx::Error) -> StoreError {
-    if is_unique_violation(&error) {
-        return StoreError::Conflict;
-    }
-    if is_foreign_key_violation(&error) {
-        return StoreError::InUse;
+    if let Some(classified) = error
+        .as_database_error()
+        .and_then(|database| classify_sqlstate(database.code().as_deref()))
+    {
+        return classified;
     }
     match error {
         sqlx::Error::PoolTimedOut | sqlx::Error::PoolClosed | sqlx::Error::Io(_) => {
@@ -3045,16 +3045,71 @@ fn store_error(error: sqlx::Error) -> StoreError {
     }
 }
 
+/// Map the SQLSTATE codes that describe the caller's data rather than a
+/// server fault.
+///
+/// Only 22021 (invalid byte sequence, e.g. NUL in `text`) and 22P05
+/// (untranslatable character, e.g. `\u0000` in `jsonb`) are treated as caller
+/// input. Other data exceptions such as numeric overflow stay internal errors
+/// because they indicate a missing boundary check that should be fixed.
+fn classify_sqlstate(code: Option<&str>) -> Option<StoreError> {
+    match code? {
+        "23505" => Some(StoreError::Conflict),
+        "23001" | "23503" => Some(StoreError::InUse),
+        "22021" | "22P05" => Some(StoreError::InvalidData),
+        _ => None,
+    }
+}
+
 fn is_unique_violation(error: &sqlx::Error) -> bool {
     error
         .as_database_error()
         .is_some_and(|database| database.code().as_deref() == Some("23505"))
 }
 
-fn is_foreign_key_violation(error: &sqlx::Error) -> bool {
-    error
-        .as_database_error()
-        .is_some_and(|database| matches!(database.code().as_deref(), Some("23001" | "23503")))
+/// Convert an optimistic-concurrency revision into its stored `bigint` form.
+///
+/// A revision above `i64::MAX` can never match a stored row, so it is stale by
+/// definition rather than a server failure.
+fn stored_revision(revision: u64) -> Result<i64, StoreError> {
+    i64::try_from(revision).map_err(|_| StoreError::StaleRevision)
+}
+
+#[cfg(test)]
+mod error_mapping_tests {
+    use super::{StoreError, classify_sqlstate, stored_revision};
+
+    #[test]
+    fn untranslatable_text_maps_to_invalid_data() {
+        assert_eq!(
+            classify_sqlstate(Some("22021")),
+            Some(StoreError::InvalidData)
+        );
+        assert_eq!(
+            classify_sqlstate(Some("22P05")),
+            Some(StoreError::InvalidData)
+        );
+    }
+
+    #[test]
+    fn server_side_data_exceptions_stay_unclassified() {
+        // Numeric and datetime overflow reveal missing validation, not bad input.
+        assert_eq!(classify_sqlstate(Some("22003")), None);
+        assert_eq!(classify_sqlstate(Some("22008")), None);
+        assert_eq!(classify_sqlstate(None), None);
+    }
+
+    #[test]
+    fn constraint_violations_keep_their_meaning() {
+        assert_eq!(classify_sqlstate(Some("23505")), Some(StoreError::Conflict));
+        assert_eq!(classify_sqlstate(Some("23503")), Some(StoreError::InUse));
+    }
+
+    #[test]
+    fn unrepresentable_revision_is_stale() {
+        assert_eq!(stored_revision(u64::MAX), Err(StoreError::StaleRevision));
+        assert_eq!(stored_revision(7), Ok(7));
+    }
 }
 
 #[cfg(test)]

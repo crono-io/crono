@@ -134,6 +134,8 @@ pub enum StoreError {
     IdempotencyConflict,
     StaleRevision,
     QueueDisabled,
+    /// PostgreSQL refused a value it cannot represent, such as NUL in text.
+    InvalidData,
     Unavailable,
     Internal,
 }
@@ -147,6 +149,7 @@ impl fmt::Display for StoreError {
             Self::IdempotencyConflict => "idempotency key conflicts with an existing request",
             Self::StaleRevision => "resource revision is stale",
             Self::QueueDisabled => "the original Run's Queue is disabled",
+            Self::InvalidData => "request contains data that cannot be stored",
             Self::Unavailable => "persistence is unavailable",
             Self::Internal => "persistence failed",
         })

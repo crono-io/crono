@@ -73,6 +73,9 @@ impl From<StoreError> for ApplicationError {
             StoreError::QueueDisabled => Self::invalid_request(
                 "The original Run's Queue is disabled; enable it before re-running.",
             ),
+            StoreError::InvalidData => Self::invalid_request(
+                "request contains text that cannot be stored; remove NUL characters or invalid encoding",
+            ),
             StoreError::Unavailable => Self::Unavailable,
             StoreError::Internal => Self::Internal,
         }

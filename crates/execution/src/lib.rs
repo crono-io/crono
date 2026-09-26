@@ -22,6 +22,7 @@ pub enum InputError {
     NotObject,
     TooLarge,
     InvalidKey(String),
+    NulCharacter,
     InvalidTemplate(String),
     MissingVariable(String),
     NonScalarVariable(String),
@@ -39,6 +40,9 @@ impl fmt::Display for InputError {
                 formatter,
                 "input key {key:?} must start with a lowercase letter or '_' and contain only lowercase letters, numbers, '_' and '-'"
             ),
+            Self::NulCharacter => {
+                formatter.write_str("input string values must not contain NUL characters")
+            }
             Self::InvalidTemplate(message) => formatter.write_str(message),
             Self::MissingVariable(path) => {
                 write!(formatter, "template variable {path:?} is not defined")
@@ -57,13 +61,14 @@ impl Error for InputError {}
 ///
 /// # Errors
 ///
-/// Rejects non-object roots, path-unsafe object keys, or values above the
-/// worker's bounded temporary-file limit.
+/// Rejects non-object roots, path-unsafe object keys, string values containing
+/// NUL (which PostgreSQL `jsonb` cannot store and argv cannot carry), or
+/// values above the worker's bounded temporary-file limit.
 pub fn validate_inputs(value: &Value) -> Result<(), InputError> {
     if !value.is_object() {
         return Err(InputError::NotObject);
     }
-    validate_keys(value)?;
+    validate_entries(value)?;
     let encoded = serde_json::to_vec(value).map_err(|error| {
         InputError::InvalidTemplate(format!("inputs could not be encoded: {error}"))
     })?;
@@ -127,21 +132,22 @@ pub fn scalar_paths(inputs: &Value) -> Vec<String> {
     paths
 }
 
-fn validate_keys(value: &Value) -> Result<(), InputError> {
+fn validate_entries(value: &Value) -> Result<(), InputError> {
     match value {
         Value::Object(values) => {
             for (key, nested) in values {
                 if !valid_segment(key) {
                     return Err(InputError::InvalidKey(key.clone()));
                 }
-                validate_keys(nested)?;
+                validate_entries(nested)?;
             }
         }
         Value::Array(values) => {
             for nested in values {
-                validate_keys(nested)?;
+                validate_entries(nested)?;
             }
         }
+        Value::String(text) if text.contains('\0') => return Err(InputError::NulCharacter),
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
     }
     Ok(())
@@ -267,6 +273,19 @@ mod tests {
     use super::{InputError, merge_inputs, render_arguments, scalar_paths, validate_inputs};
     use anyhow::Result;
     use serde_json::json;
+
+    #[test]
+    fn inputs_reject_nul_in_string_values() {
+        assert_eq!(
+            validate_inputs(&json!({"name": "a\u{0}b"})),
+            Err(InputError::NulCharacter)
+        );
+        assert_eq!(
+            validate_inputs(&json!({"nested": {"list": ["ok", "\u{0}"]}})),
+            Err(InputError::NulCharacter)
+        );
+        assert_eq!(validate_inputs(&json!({"name": "plain"})), Ok(()));
+    }
 
     #[test]
     fn merges_objects_recursively_and_replaces_other_values() -> Result<()> {

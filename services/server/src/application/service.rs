@@ -15,6 +15,7 @@ use crate::{
     },
     scheduler::next_cron_occurrence,
 };
+use crono_api::validate_resource_name;
 use crono_execution::{
     merge_inputs, render_arguments, validate_argument_templates, validate_inputs,
 };
@@ -83,7 +84,7 @@ impl Application {
             .await?;
         Ok(self
             .store
-            .list_namespaces(&visibility, page_limit(limit)?, after)
+            .list_namespaces(&visibility, page_limit(limit)?, page_cursor(after)?)
             .await?)
     }
 
@@ -147,7 +148,10 @@ impl Application {
         self.authorizer
             .authorize(context, Capability::QueueRead, &ResourceScope::ControlPlane)
             .await?;
-        Ok(self.store.list_queues(page_limit(limit)?, after).await?)
+        Ok(self
+            .store
+            .list_queues(page_limit(limit)?, page_cursor(after)?)
+            .await?)
     }
 
     /// Read one Queue by immutable identity.
@@ -377,7 +381,12 @@ impl Application {
             .await?;
         Ok(self
             .store
-            .list_jobs(namespace_id, &visibility, page_limit(limit)?, after)
+            .list_jobs(
+                namespace_id,
+                &visibility,
+                page_limit(limit)?,
+                page_cursor(after)?,
+            )
             .await?)
     }
 
@@ -455,7 +464,12 @@ impl Application {
             .await?;
         Ok(self
             .store
-            .list_targets(namespace_id, &visibility, page_limit(limit)?, after)
+            .list_targets(
+                namespace_id,
+                &visibility,
+                page_limit(limit)?,
+                page_cursor(after)?,
+            )
             .await?)
     }
 
@@ -594,7 +608,12 @@ impl Application {
             .await?;
         Ok(self
             .store
-            .list_target_sets(namespace_id, &visibility, page_limit(limit)?, after)
+            .list_target_sets(
+                namespace_id,
+                &visibility,
+                page_limit(limit)?,
+                page_cursor(after)?,
+            )
             .await?)
     }
 
@@ -766,7 +785,12 @@ impl Application {
             .await?;
         Ok(self
             .store
-            .list_schedules(namespace_id, &visibility, page_limit(limit)?, after)
+            .list_schedules(
+                namespace_id,
+                &visibility,
+                page_limit(limit)?,
+                page_cursor(after)?,
+            )
             .await?)
     }
 
@@ -1044,7 +1068,10 @@ impl Application {
                 &ResourceScope::ControlPlane,
             )
             .await?;
-        Ok(self.store.list_workers(page_limit(limit)?, after).await?)
+        Ok(self
+            .store
+            .list_workers(page_limit(limit)?, page_cursor(after)?)
+            .await?)
     }
 
     /// Read one worker's bounded diagnostics after the global `WorkerRead` decision.
@@ -1063,7 +1090,7 @@ impl Application {
                 &ResourceScope::ControlPlane,
             )
             .await?;
-        Ok(self.store.get_worker(worker_id).await?)
+        Ok(self.store.get_worker(stored_worker_id(worker_id)?).await?)
     }
 
     /// Count only resources visible to the established principal.
@@ -1176,6 +1203,31 @@ impl Application {
             }
         }
     }
+}
+
+/// Validate a name cursor before it reaches SQL.
+///
+/// Every name-ordered list pages by a resource name, so a cursor the server
+/// could have issued is always a canonical resource name. Rejecting anything
+/// else keeps arbitrary text (including NUL, which PostgreSQL `text` rejects)
+/// out of queries and reports a caller error instead of a server failure.
+fn page_cursor(after: Option<&str>) -> Result<Option<&str>, ApplicationError> {
+    match after {
+        Some(cursor) if validate_resource_name(cursor).is_err() => Err(ApplicationError::invalid(
+            "after",
+            "after must be a cursor returned by a previous page",
+        )),
+        cursor => Ok(cursor),
+    }
+}
+
+/// Worker IDs are validated as resource names at heartbeat, so any other
+/// value cannot name a stored worker and is reported as not found without a
+/// database round trip.
+fn stored_worker_id(worker_id: &str) -> Result<&str, ApplicationError> {
+    validate_resource_name(worker_id)
+        .map(|()| worker_id)
+        .map_err(|_| ApplicationError::NotFound)
 }
 
 fn page_limit(limit: Option<u16>) -> Result<u16, ApplicationError> {
@@ -1333,6 +1385,13 @@ fn validate_schedule_policy(
             "grace_period requires grace seconds and other policies forbid it",
         ));
     }
+    // The column is a PostgreSQL `integer`; larger values would fail on insert.
+    if grace_seconds.is_some_and(|seconds| i32::try_from(seconds).is_err()) {
+        return Err(ApplicationError::invalid(
+            "misfire_grace_seconds",
+            format!("misfire_grace_seconds must not exceed {}", i32::MAX),
+        ));
+    }
     if !(1..=1000).contains(&max_catchup_runs)
         || !(60..=31_536_000).contains(&max_catchup_age_seconds)
     {
@@ -1341,4 +1400,53 @@ fn validate_schedule_policy(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ApplicationError, page_cursor, stored_worker_id, validate_schedule_policy};
+    use crate::domain::MisfirePolicy;
+
+    #[test]
+    fn list_rejects_cursor_that_is_not_a_resource_name() {
+        assert!(matches!(
+            page_cursor(Some("bad\0cursor")),
+            Err(ApplicationError::InvalidInput {
+                field: Some("after"),
+                ..
+            })
+        ));
+        assert!(page_cursor(Some("Upper")).is_err());
+        assert_eq!(
+            page_cursor(Some("next-page")).ok().flatten(),
+            Some("next-page")
+        );
+        assert_eq!(page_cursor(None).ok().flatten(), None);
+    }
+
+    #[test]
+    fn worker_lookup_reports_not_found_for_impossible_ids() {
+        assert!(matches!(
+            stored_worker_id("worker\0one"),
+            Err(ApplicationError::NotFound)
+        ));
+        assert!(matches!(
+            stored_worker_id("-leading"),
+            Err(ApplicationError::NotFound)
+        ));
+        assert_eq!(stored_worker_id("worker-01").ok(), Some("worker-01"));
+    }
+
+    #[test]
+    fn schedule_rejects_grace_beyond_storage_range() {
+        let beyond = u32::try_from(i32::MAX).map_or(u32::MAX, |max| max + 1);
+        assert!(matches!(
+            validate_schedule_policy(MisfirePolicy::GracePeriod, Some(beyond), 1, 60),
+            Err(ApplicationError::InvalidInput {
+                field: Some("misfire_grace_seconds"),
+                ..
+            })
+        ));
+        assert!(validate_schedule_policy(MisfirePolicy::GracePeriod, Some(300), 1, 60).is_ok());
+    }
 }
