@@ -311,12 +311,15 @@ mod tests {
         query.limit.unwrap_or_default().to_string()
     }
 
+    async fn accept_page(ApiQuery(_query): ApiQuery<handlers::control_plane::PageQuery>) {}
+
     /// Probe routes composed exactly as `serve` composes the real API.
     fn probe_app() -> Router {
         app(Router::new()
             .route("/probe", get(echo_request_id).post(echo_body))
             .route("/probe/{id}", get(echo_path))
-            .route("/probe-query", get(echo_query)))
+            .route("/probe-query", get(echo_query))
+            .route("/probe-page", get(accept_page)))
     }
 
     fn json_request(body: impl Into<Body>) -> Result<Request<Body>> {
@@ -514,6 +517,29 @@ mod tests {
             )
             .await?;
         assert_envelope(response, StatusCode::BAD_REQUEST, "invalid_request").await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn unknown_list_query_parameter_is_rejected() -> Result<()> {
+        let app = probe_app();
+        let known = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/probe-page?limit=5&after=next")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(known.status(), StatusCode::OK);
+        let unknown = app
+            .oneshot(
+                Request::builder()
+                    .uri("/probe-page?limit=5&statis=failed")
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_envelope(unknown, StatusCode::BAD_REQUEST, "invalid_request").await?;
         Ok(())
     }
 

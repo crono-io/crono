@@ -42,7 +42,12 @@ use time::format_description::well_known::Rfc3339;
 use utoipa::IntoParams;
 use uuid::Uuid;
 
+/// Name-cursor paging parameters.
+///
+/// Unknown parameters are rejected, matching request bodies, so a mistyped
+/// parameter fails loudly instead of silently returning an unfiltered page.
 #[derive(Debug, Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub struct PageQuery {
     /// Maximum resources to return, from 1 through 100.
@@ -52,7 +57,10 @@ pub struct PageQuery {
     after: Option<String>,
 }
 
+/// Run history paging and filters; unknown parameters are rejected like
+/// [`PageQuery`], which matters most for mistyped filters.
 #[derive(Debug, Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
 #[into_params(parameter_in = Query)]
 pub struct RunPageQuery {
     /// Maximum resources to return, from 1 through 100.
