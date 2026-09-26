@@ -62,7 +62,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Install browser test runner
-        run: cargo install wasm-bindgen-cli --version 0.2.128 --locked
+        run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
 
       - name: Test web components in headless Chrome
         run: cargo test --locked -p crono-web --target wasm32-unknown-unknown
