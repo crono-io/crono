@@ -292,7 +292,7 @@ Each `X.Y.Z` release tag publishes `docs/openapi/` to GitHub Pages through the `
 
 ## Workspace
 
-The server, worker, and CLI run on Unix only (Linux and macOS); Windows is not supported. Releases publish `.tar.gz` archives for `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, and `x86_64-apple-darwin`, plus the web client bundle.
+The server, worker, and CLI run on Unix only (Linux and macOS); Windows is not supported. Releases publish static `.tar.gz` archives for `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `x86_64-apple-darwin`, and `aarch64-apple-darwin`, the web client bundle, `.deb` and `.rpm` packages, and container images; see [Deployment](#deployment).
 
 | Package | Responsibility |
 | --- | --- |
@@ -360,6 +360,33 @@ cd apps/web && trunk build --release
 ```
 
 The canonical draft schema and reset guidance are in [db/sql/README.md](db/sql/README.md). Domain invariants are in [DOMAIN_MODEL.md](DOMAIN_MODEL.md), authorization boundaries in [AUTHORIZATION.md](AUTHORIZATION.md), and CLI layering rules in [CLI_ARCHITECTURE.md](CLI_ARCHITECTURE.md).
+
+## Deployment
+
+Every `X.Y.Z` release builds one set of static musl Linux binaries per architecture and repackages exactly those binaries as archives, `.deb`/`.rpm` packages, and container images, so every artifact of a release runs the same code. Linux artifacts cover `amd64` (x86_64) and `arm64` (aarch64 — the same 64-bit ARM architecture under its Rust and Docker names). The release job publishes only after the images and packages succeed, and `SHA256SUMS` covers every file attached to the GitHub release.
+
+### Kubernetes
+
+The server and web client are published to GHCR as multi-platform (`linux/amd64`, `linux/arm64`) images tagged `X.Y.Z`, `X.Y`, and `latest`, each with an SBOM, build provenance, and a GitHub artifact attestation (`gh attestation verify oci://ghcr.io/crono-io/crono-server:X.Y.Z --owner crono-io`). Both images are small and run as non-root users; base images are pinned by digest in their Dockerfiles.
+
+| Image | Base | Port | Probes | Runs as |
+| --- | --- | ---: | --- | --- |
+| `ghcr.io/crono-io/crono-server` | `distroless/static` (about 5 MB compressed) | 8080 | liveness `/live`, readiness `/ready` | UID 65532 |
+| `ghcr.io/crono-io/crono-web` | `nginx-unprivileged` `alpine-slim` (about 6 MB compressed) | 8080 | `/healthz` | UID 101 |
+
+Configure the server with the environment variables described above (at least `CRONO_DATABASE_URL` and `CRONO_NATS_URL`); it logs structured JSON to stderr and needs no writable filesystem, so `readOnlyRootFilesystem: true` works as is. The web image serves only the compiled single-page app and never proxies the API: route `/api` to the server Service and everything else to the web Service in one Ingress or Gateway, so the browser keeps a single origin and the client's relative `/api` calls need no configuration. Requests for `/api` that reach the web Service return `404` so a routing mistake is obvious. With a read-only root filesystem, give the web container a writable `emptyDir` at `/tmp`, where unprivileged nginx keeps its PID file and temporary files. Run `just images` to build both images for the host platform from local sources.
+
+### Virtual machines
+
+Workers usually run on dedicated VMs close to the systems their Jobs manage. Install `crono-worker` (and optionally `crono-server` and `crono-cli`) from the release's `.deb` or `.rpm` for `amd64` or `arm64`; the static binaries have no library dependencies, so the packages install on any systemd-based distribution. Installation creates the unprivileged `crono` system account, `/etc/crono/{server,worker}.env` (kept across upgrades and readable only by root and the `crono` group), `/var/lib/crono` as the worker's home, and systemd units that are never started automatically. Edit the environment file, then enable the service:
+
+```sh
+sudo apt install ./crono-worker_X.Y.Z_amd64.deb   # or: sudo dnf install ./crono-worker-X.Y.Z-1.x86_64.rpm
+sudoedit /etc/crono/worker.env
+sudo systemctl enable --now crono-worker.service
+```
+
+On SIGTERM the worker stops fetching and lets its current batch of executions finish; the unit uses `KillMode=mixed` so running Job processes are not signalled, and `TimeoutStopSec=15min` bounds the drain before systemd kills what remains. Package upgrades therefore never restart a running worker; restart it when convenient. Jobs run as `crono` with `/var/lib/crono` as their home and only light sandboxing, because they may legitimately need host tools and files; tighten it with a drop-in when your Jobs allow. The server unit, in contrast, is fully locked down and restarts automatically on upgrade. Run `just packages` to build the packages for the host architecture from local sources.
 
 ## License
 

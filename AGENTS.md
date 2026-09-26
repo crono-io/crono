@@ -51,6 +51,7 @@ Use stable Rust, rustfmt, Clippy, Just, Trunk, and the `wasm32-unknown-unknown` 
 - `just api-breaking`: compare the contract with `origin/main` using oasdiff before pushing; it fails on breaking changes that no `API-Breaking:` commit trailer acknowledges.
 - `just schemathesis`: fuzz the API with Schemathesis against an isolated throwaway PostgreSQL and server; run it after changing handlers, validation, or the contract.
 - In `apps/web`, run `trunk serve` or `trunk build --release`.
+- `just images` / `just packages`: build the container images and `.deb`/`.rpm` packages for the host architecture from static musl binaries (`just musl-build`), matching what the release workflow publishes.
 
 ## Coding Style & Strict Coding Rules
 

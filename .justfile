@@ -65,6 +65,55 @@ schemathesis max-examples="":
     SCHEMATHESIS_MAX_EXAMPLES="$1" \
     bash scripts/schemathesis.sh
 
+# Static musl binaries for the host architecture, built in a rust:alpine
+# container because `ring` needs a musl C toolchain; release CI builds the same
+# targets natively with musl-tools. Output lands in target/musl/release.
+[doc("Build static musl server, worker, and CLI binaries in a container.")]
+musl-build:
+  podman run --rm \
+    --volume "$PWD:/src:z" \
+    --volume "${CARGO_HOME:-$HOME/.cargo}/registry:/usr/local/cargo/registry:z" \
+    --workdir /src docker.io/library/rust:1-alpine \
+    sh -c 'apk add --no-cache musl-dev >/dev/null && cargo build --release --locked --target-dir target/musl -p crono-server -p crono-worker -p crono-cli'
+
+# Stage the same build context layout the release workflow uses and build both
+# images for the host platform, tagged localhost/crono-{server,web}:TAG.
+[doc("Build the crono-server and crono-web images locally for the host platform.")]
+images tag="dev": musl-build
+  #!/usr/bin/env bash
+  set -euo pipefail
+  case "$(uname -m)" in
+    x86_64) platform="linux/amd64" ;;
+    aarch64 | arm64) platform="linux/arm64" ;;
+    *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
+  esac
+  (cd apps/web && trunk build --release)
+  readonly context="target/image-context"
+  rm -rf "$context"
+  mkdir -p "$context/$platform" "$context/web"
+  cp target/musl/release/crono-server "$context/$platform/"
+  cp -R apps/web/dist "$context/web/dist"
+  cp -R apps/web/nginx "$context/web/nginx"
+  podman build --platform "$platform" -f services/server/Dockerfile -t "localhost/crono-server:{{ tag }}" "$context"
+  podman build --platform "$platform" -f apps/web/Dockerfile -t "localhost/crono-web:{{ tag }}" "$context"
+  podman images --format '{{{{.Repository}}:{{{{.Tag}} {{{{.Size}}' | grep -E "crono-(server|web):{{ tag }}"
+
+# Build .deb and .rpm packages for the host architecture into target/packages.
+[doc("Build .deb and .rpm packages for the host architecture.")]
+packages version="": musl-build
+  #!/usr/bin/env bash
+  set -euo pipefail
+  case "$(uname -m)" in
+    x86_64) arch="amd64" ;;
+    aarch64 | arm64) arch="arm64" ;;
+    *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
+  esac
+  version="{{ version }}"
+  if [[ -z "$version" ]]; then
+    version="$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)"
+  fi
+  bash scripts/package.sh "$version" "$arch" target/musl/release target/packages
+
 # Preview the rendered API reference at http://127.0.0.1:8088.
 [positional-arguments]
 api-docs port="8088":

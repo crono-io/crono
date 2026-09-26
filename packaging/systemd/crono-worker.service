@@ -1,0 +1,42 @@
+# crono-worker as a systemd service, installed by the crono-worker package.
+#
+# Configure /etc/crono/worker.env, then run
+#   systemctl enable --now crono-worker.service
+# The package never starts the service on its own. Override settings with a
+# drop-in (`systemctl edit crono-worker.service`) instead of editing this file.
+#
+# Jobs are trusted code that runs as the `crono` user with /var/lib/crono as
+# its home and working directory, so sandboxing is intentionally light: Jobs
+# may need the host's tools, network, and files. Tighten it with a drop-in
+# when your Jobs allow it.
+
+[Unit]
+Description=Crono execution worker
+Documentation=https://github.com/crono-io/crono
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=crono
+Group=crono
+EnvironmentFile=-/etc/crono/worker.env
+Environment=HOME=/var/lib/crono
+WorkingDirectory=/var/lib/crono
+ExecStart=/usr/bin/crono-worker -v run
+Restart=on-failure
+RestartSec=5s
+# On SIGTERM the worker stops fetching and lets its current batch of
+# executions finish. `mixed` sends SIGTERM only to the worker, not to running
+# Job processes, and SIGKILLs everything that is left once the timeout
+# expires; raise the timeout if your longest Job runs longer.
+KillMode=mixed
+TimeoutStopSec=15min
+
+# A private /tmp keeps each execution's inputs file away from other users.
+PrivateTmp=yes
+LockPersonality=yes
+RestrictRealtime=yes
+
+[Install]
+WantedBy=multi-user.target

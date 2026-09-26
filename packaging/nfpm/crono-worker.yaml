@@ -1,0 +1,47 @@
+# nfpm definition for the crono-worker .deb and .rpm, built by
+# scripts/package.sh from the static musl release binary. VERSION and ARCH
+# (amd64 or arm64) come from that script, which also stages the binaries in
+# target/package-bin.
+name: crono-worker
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: admin
+priority: optional
+maintainer: Crono maintainers <nbari@tequila.io>
+vendor: Crono
+homepage: https://github.com/crono-io/crono
+license: BSD-3-Clause
+description: |-
+  Crono execution worker
+  Pulls dispatched Runs for one Queue from NATS JetStream, executes them as
+  the crono user, and reports leases and results to the control plane.
+
+contents:
+  - src: target/package-bin/crono-worker
+    dst: /usr/bin/crono-worker
+    file_info:
+      mode: 0755
+  - src: packaging/systemd/crono-worker.service
+    dst: /usr/lib/systemd/system/crono-worker.service
+    file_info:
+      mode: 0644
+  - dst: /etc/crono
+    type: dir
+    file_info:
+      mode: 0755
+  - src: packaging/config/worker.env
+    dst: /etc/crono/worker.env
+    type: config|noreplace
+    file_info:
+      mode: 0640
+  - dst: /var/lib/crono
+    type: dir
+    file_info:
+      mode: 0750
+
+scripts:
+  preinstall: packaging/scripts/preinstall.sh
+  postinstall: packaging/scripts/worker-postinstall.sh
+  preremove: packaging/scripts/worker-preremove.sh
+  postremove: packaging/scripts/postremove.sh

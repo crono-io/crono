@@ -1,0 +1,22 @@
+# nfpm definition for the crono CLI .deb and .rpm, built by scripts/package.sh
+# from the static musl release binary. VERSION and ARCH (amd64 or arm64) come
+# from that script, which also stages the binaries in target/package-bin.
+name: crono-cli
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: admin
+priority: optional
+maintainer: Crono maintainers <nbari@tequila.io>
+vendor: Crono
+homepage: https://github.com/crono-io/crono
+license: BSD-3-Clause
+description: |-
+  Crono command-line client
+  Command-line client for the Crono control-plane API.
+
+contents:
+  - src: target/package-bin/crono
+    dst: /usr/bin/crono
+    file_info:
+      mode: 0755

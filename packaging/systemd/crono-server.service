@@ -1,0 +1,54 @@
+# crono-server as a systemd service, installed by the crono-server package.
+#
+# Configure /etc/crono/server.env, then run
+#   systemctl enable --now crono-server.service
+# The package never starts the service on its own. Override settings with a
+# drop-in (`systemctl edit crono-server.service`) instead of editing this file.
+
+[Unit]
+Description=Crono control-plane API, scheduler, and outbox publisher
+Documentation=https://github.com/crono-io/crono
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=crono
+Group=crono
+EnvironmentFile=-/etc/crono/server.env
+ExecStart=/usr/bin/crono-server -v
+Restart=on-failure
+RestartSec=5s
+# SIGTERM drains HTTP connections, stops the background loops, and closes the
+# PostgreSQL pool within about ten seconds.
+TimeoutStopSec=30s
+
+# The server needs only outbound network access, a listening socket on an
+# unprivileged port, and its configuration; everything else is locked down.
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+
+[Install]
+WantedBy=multi-user.target
