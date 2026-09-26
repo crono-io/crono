@@ -214,7 +214,7 @@ fn worker_diagnostics(dry_run: bool) -> WorkerDiagnostics {
             .filter(|value| value.len() <= 128 && !value.chars().any(char::is_control))
     }
     WorkerDiagnostics {
-        hostname: whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string()),
+        hostname: whoami::hostname().unwrap_or_else(|_| "unknown".to_string()),
         os: std::env::consts::OS.to_string(),
         architecture: std::env::consts::ARCH.to_string(),
         default_shell_path: "/bin/sh".to_string(),

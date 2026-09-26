@@ -41,7 +41,7 @@ pub fn handler(matches: &ArgMatches) -> Result<Action> {
 
 /// Give each process an identifiable host prefix without persisting hardware IDs.
 fn default_worker_id() -> String {
-    let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "worker".to_string());
+    let hostname = whoami::hostname().unwrap_or_else(|_| "worker".to_string());
     let mut prefix = hostname
         .chars()
         .map(|character| {
@@ -73,5 +73,22 @@ mod tests {
         assert!(first.chars().all(|character| character.is_ascii_lowercase()
             || character.is_ascii_digit()
             || character == '-'));
+    }
+
+    /// The prefix must come from the platform host name, not the `worker`
+    /// fallback, whenever the platform reports one.
+    #[test]
+    fn default_identity_starts_with_the_sanitized_host_name() {
+        let Ok(hostname) = whoami::hostname() else {
+            return;
+        };
+        let first_label = hostname
+            .chars()
+            .take_while(char::is_ascii_alphanumeric)
+            .map(|character| character.to_ascii_lowercase())
+            .collect::<String>();
+        if !first_label.is_empty() {
+            assert!(default_worker_id().starts_with(&first_label));
+        }
     }
 }
