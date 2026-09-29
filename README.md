@@ -286,7 +286,7 @@ Regenerate the file with `just openapi` whenever a handler, request or response 
 
 Breaking changes are checked with [oasdiff](https://github.com/oasdiff/oasdiff), pinned as a container image. Run `just api-breaking` before pushing: it compares the contract at `HEAD` with `origin/main`, prints the changelog, and fails on definite (ERR-level) breaking changes such as a removed field, a new required parameter, or a tightened constraint. When a break is intentional, record why in the commit message with a trailer, for example `API-Breaking: rename Run status values to match the lifecycle`; any such trailer in the compared range turns the failure into a report. The `API Contract` workflow runs the same `scripts/api-breaking.sh` on every push to `main` against the previous tip and writes the changelog to the job summary. A red run after a push cannot block anything, so the local check is the real gate.
 
-Each `X.Y.Z` release tag publishes `docs/openapi/` to GitHub Pages through the `API Docs` workflow, so the hosted reference always matches a released contract rather than whatever is deployed. The page renders the committed JSON with a pinned Redoc bundle guarded by a Subresource Integrity hash. Run `just api-docs` to preview it locally at `http://127.0.0.1:8088`. Publishing requires Pages to use "GitHub Actions" as its source and the `github-pages` environment to allow tag deployments.
+Each `X.Y.Z` release publishes the tag's `docs/openapi/` to GitHub Pages from the Release workflow, and only while that tag is the highest promoted release, so the hosted reference always matches the latest released contract rather than whatever is deployed; the `API Docs` workflow republishes the highest promoted release's contract by hand. The page renders the committed JSON with a pinned Redoc bundle guarded by a Subresource Integrity hash. Run `just api-docs` to preview it locally at `http://127.0.0.1:8088`. Publishing requires Pages to use "GitHub Actions" as its source and the `github-pages` environment to allow tag deployments.
 
 [Schemathesis](https://schemathesis.readthedocs.io/) fuzzes the running server against the committed contract. It generates valid and invalid requests for every operation, chains create, read, and delete calls through inferred links, and checks that no request causes a server error, that invalid input is rejected with a documented `4xx`, and that every status, content type, and body matches the document. `schemathesis.toml` holds the tuning, and `scripts/schemathesis.sh` builds and starts the server, waits for `/ready`, and writes JUnit reports and the server log to `target/schemathesis/`. Run `just schemathesis` locally: it starts a disposable PostgreSQL container on port 55432 and the server on port 18080, points NATS at a closed port so no local worker executes fuzzed Jobs, and never touches the development database. The `API Fuzzing` workflow runs nightly with a fresh seed, and a manual run accepts `max-examples` and a `seed` from a previous report to reproduce its failures. Because every endpoint is open under the development authorizer, never point the fuzzer at a shared server.
 
@@ -363,11 +363,11 @@ The canonical draft schema and reset guidance are in [db/sql/README.md](db/sql/R
 
 ## Deployment
 
-Every `X.Y.Z` release builds one set of static musl Linux binaries per architecture and repackages exactly those binaries as archives, `.deb`/`.rpm` packages, and container images, so every artifact of a release runs the same code. Linux artifacts cover `amd64` (x86_64) and `arm64` (aarch64 — the same 64-bit ARM architecture under its Rust and Docker names). The release job publishes only after the images and packages succeed, and `SHA256SUMS` covers every file attached to the GitHub release.
+Every `X.Y.Z` release builds one set of static musl Linux binaries per architecture and repackages exactly those binaries as archives, `.deb`/`.rpm` packages, and container images, so every artifact of a release runs the same code. Linux artifacts cover `amd64` (x86_64) and `arm64` (aarch64 — the same 64-bit ARM architecture under its Rust and Docker names). A release candidate builds, tests and packages all of it before any tag exists, and the tag then publishes exactly those files and image digests (see [Releasing](#releasing)); `SHA256SUMS` covers every file attached to the GitHub release.
 
 ### Kubernetes
 
-The server and web client are published to GHCR as multi-platform (`linux/amd64`, `linux/arm64`) images tagged `X.Y.Z`, `X.Y`, and `latest`, each with an SBOM, build provenance, and a GitHub artifact attestation (`gh attestation verify oci://ghcr.io/crono-io/crono-server:X.Y.Z --owner crono-io`). Both images are small and run as non-root users; base images are pinned by digest in their Dockerfiles.
+The server and web client are published to GHCR as multi-platform (`linux/amd64`, `linux/arm64`) images tagged `X.Y.Z`, `X.Y`, and `latest` (`X.Y` and `latest` follow the highest promoted release, so publishing an older release never moves them back), each with an SBOM, build provenance, and a GitHub artifact attestation (`gh attestation verify oci://ghcr.io/crono-io/crono-server:X.Y.Z --owner crono-io`). Both images are small and run as non-root users; base images are pinned by digest in their Dockerfiles.
 
 | Image | Base | Port | Probes | Runs as |
 | --- | --- | ---: | --- | --- |
@@ -387,6 +387,81 @@ sudo systemctl enable --now crono-worker.service
 ```
 
 On SIGTERM the worker stops fetching and lets its current batch of executions finish; the unit uses `KillMode=mixed` so running Job processes are not signalled, and `TimeoutStopSec=15min` bounds the drain before systemd kills what remains. Package upgrades therefore never restart a running worker; restart it when convenient. Jobs run as `crono` with `/var/lib/crono` as their home and only light sandboxing, because they may legitimately need host tools and files; tighten it with a drop-in when your Jobs allow. The server unit, in contrast, is fully locked down and restarts automatically on upgrade. Run `just packages` to build the packages for the host architecture from local sources.
+
+## Releasing
+
+A release follows one rule: **the commit that is tagged and put on `main` is exactly the
+commit CI tested, and the published files and images are exactly the ones CI built.**
+`just deploy` promotes a commit only after every test, build, package and image passed
+on it, so a release never needs a tag deleted or moved. Branch protection lets onto
+`main` only commits whose **CI OK** check passed, and the Release workflow publishes a
+tag only with the successful candidate run the signed tag names. The flow lives in
+`scripts/release`, `.github/workflows/build.yml` (Test & Build) and
+`.github/workflows/release.yml` (Release); it is the flow documented in full in the
+"Releasing" section of [cron-when](https://github.com/nbari/cron-when#releasing), which
+is its template.
+
+Work, including dependency updates, lands on `sandbox`. When its **Test & Build** run is
+green, merge it into `develop` and run `just deploy` from a clean `develop`.
+
+| Command | What it does |
+|---|---|
+| `just deploy` | Release a patch bump (`deploy-minor`, `deploy-major` for the others); when `develop`'s current version has no tag yet, it releases that version as is instead |
+| `just deploy-current` | Release `develop`'s untagged version as is, explicitly |
+| `just release-status` | Show `develop`, `main`, the staged candidate, its runs and the last tag's publish run |
+| `just release-preflight` | Run only the checks; changes nothing apart from fetching |
+| `just release-republish X.Y.Z` | Recovery: publish an existing tag again with `main`'s workflow |
+| `just protect-branches` | Apply the branch protection the flow relies on |
+
+`just deploy` checks that `develop` is clean and equal to origin, then bumps the
+workspace version (`Cargo.toml`, `Cargo.lock` and the `info.version` of
+`docs/openapi/crono-server.json`) in a temporary worktree, runs `cargo fmt --check`,
+`just clippy` and the OpenAPI drift test there (the full `just test` needs crono's
+PostgreSQL, which CI provides), and pushes a signed commit "bump version to X" to
+the scratch `release` branch only. On that exact commit, Test & Build runs, and so does
+a manual run of the Release workflow in candidate mode: it tests, builds the static
+binaries for the four targets, the web client, the `.deb` and `.rpm` packages and both
+images, and keeps the files as artifacts with a manifest of their SHA-256 sums. The
+images are pushed only as `ghcr.io/crono-io/<image>:sha-<commit>`, with their SBOM,
+provenance and attestation, and the manifest records their digests. When both runs
+pass, the script downloads the manifest and every artifact and checks the commit, the
+version and every checksum, then moves `develop`, `main` and the signed tag X together
+in one atomic push; the tag message names the candidate run.
+
+The tag's Release run builds nothing. Its guard checks the tag (GitHub-verified
+signature, commit on `main`, version, Test & Build, the named candidate run); the GitHub
+release gets exactly the manifest's files with notes GitHub generates, and each image
+digest gets the `X.Y.Z` tag with `skopeo copy --preserve-digests`, so the tested index
+and its attestations are what the tag names. The production steps that follow the
+newest release (GitHub's Latest release, the `X.Y` and `latest` image tags, the API
+reference on Pages) first check that the tag is the highest promoted release, so a late,
+re-run or recovered older tag never moves them back.
+
+If anything fails before the atomic push, nothing moved: no tag, `develop` and `main`
+untouched. Re-run the failed jobs in GitHub (a waiting deploy picks the re-run up within
+15 minutes), or fix it on `sandbox` and merge; then run `just deploy` again, which
+resumes the same candidate and runs, replaces a stale one, or says there is nothing new
+to release. A failed publish step in the tag's run is fixed with "Re-run failed jobs";
+when the tagged workflow itself was wrong, fix it, release as usual, and run
+`just release-republish X.Y.Z`. Recovery needs the candidate's artifacts, which GitHub
+keeps for 90 days, and its `sha-` images.
+
+Tags keep the workflows they were created with: dispatching a workflow on an old tag,
+or re-running an old tag's run, executes that old code. For 0.1.0, released before this
+flow, that means rebuilding and pushing `latest`, `0.1` and the Pages docs without any
+of these checks, so never do it; publish a tag again with `just release-republish
+X.Y.Z`, which runs `main`'s workflow, and republish the docs with the API Docs workflow,
+which always publishes the highest promoted release. A version tag created by hand
+outside `just deploy` is never published, since the guard wants its candidate run, but
+the latest-release checks still count it as the highest release until a higher real
+release replaces it.
+
+`RELEASE_POLL_SECONDS` (30), `RELEASE_CI_TIMEOUT` (3600, per attempt) and
+`RELEASE_RERUN_WAIT` (900, after a failed attempt) are in seconds, and
+`RELEASE_NO_WAIT=1` stops once the candidate is staged, or while CI still runs; a later
+`just deploy` finishes. Releasing needs `just`, `jq`, `gh` (logged in), `cargo-edit`, the
+`wasm32-unknown-unknown` target, and a signing key that GitHub knows as a signing key,
+since commits and tags must be signed.
 
 ## License
 

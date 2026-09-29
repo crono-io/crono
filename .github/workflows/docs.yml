@@ -1,22 +1,26 @@
 ---
 name: API Docs
 
+# Republish the API reference by hand. The Release workflow publishes it for every
+# release; this run publishes the same thing again: the committed contract of the
+# highest promoted release, never an older or unreleased one, whatever ref it runs on.
 on:
-  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   publish:
     name: Publish API Reference
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The same group as the Release workflow's docs job: deploys run one at a time, each
+    # deciding what is latest when it starts, and `queue: max` keeps every pending one.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       pages: write
@@ -29,15 +33,51 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Find the highest promoted release
+        id: latest
+        uses: ./.github/actions/release-is-latest
+        with:
+          token: ${{ github.token }}
+
+      - name: Require a release
+        shell: bash
+        env:
+          HIGHEST: ${{ steps.latest.outputs.highest }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${HIGHEST}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::There is no promoted release to publish (got '${HIGHEST}')."
+            exit 1
+          fi
+
+      - name: Checkout the release's sources
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ steps.latest.outputs.highest }}
+          path: tagged
+          persist-credentials: false
+
+      # The committed contract is published as-is: the drift test in the release's
+      # candidate run already guaranteed it matches the routes.
+      - name: Check the contract carries the release version
+        shell: bash
+        env:
+          VERSION: ${{ steps.latest.outputs.highest }}
+        run: |
+          set -euo pipefail
+          found="$(jq -r .info.version tagged/docs/openapi/crono-server.json)"
+          if [[ "${found}" != "${VERSION}" ]]; then
+            echo "::error::docs/openapi/crono-server.json is for ${found}, not ${VERSION}."
+            exit 1
+          fi
+
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
 
-      # The committed contract is published as-is: the drift test in the
-      # release's test job already guarantees it matches the routes.
       - name: Upload API reference
         uses: actions/upload-pages-artifact@v5
         with:
-          path: docs/openapi
+          path: tagged/docs/openapi
 
       - name: Deploy to GitHub Pages
         id: deploy

@@ -59,3 +59,28 @@ jobs:
       - name: Build web client
         working-directory: apps/web
         run: trunk build --release
+
+  # One aggregate check for branch protection and the release flow: it passes only
+  # when every gating job succeeded, so the required check never depends on job or
+  # matrix names. Coverage is reported, not a gate.
+  ci-ok:
+    name: CI OK
+    if: always()
+    needs:
+      - test
+      - build
+      - frontend-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every job to have succeeded
+        shell: bash
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: ${RESULTS}"
+          for result in ${RESULTS}; do
+            if [[ "${result}" != "success" ]]; then
+              echo "::error::A required job finished with '${result}'."
+              exit 1
+            fi
+          done

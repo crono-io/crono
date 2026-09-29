@@ -272,3 +272,43 @@ db-bootstrap admin-url="postgres://postgres@localhost:5432/postgres":
 
 db-verify admin-url="postgres://postgres@localhost:5432/postgres":
   psql "{{ admin-url }}" -v ON_ERROR_STOP=1 -f db/sql/check.sql
+
+# Releases run scripts/release: the version bump is staged on the scratch `release`
+# branch, Test & Build and a candidate run of release.yml (every test, build, package
+# and image, published nowhere but as sha- image tags) test that exact commit, and only
+# then do develop, main and the signed tag move together in one atomic push; the tag's
+# run publishes exactly what the candidate run built. Every deploy recipe is
+# idempotent: rerunning it resumes the staged candidate, or says there is nothing left
+# to release. See README "Releasing".
+
+[doc("Stage a patch bump, test, build and package it, then release it.")]
+deploy:
+  @scripts/release deploy patch
+
+[doc("Release with a minor version bump.")]
+deploy-minor:
+  @scripts/release deploy minor
+
+[doc("Release with a major version bump.")]
+deploy-major:
+  @scripts/release deploy major
+
+[doc("Release develop's version as is when it has no tag yet (no new bump).")]
+deploy-current:
+  @scripts/release deploy current
+
+[doc("Show where a release stands: develop, main, the staged candidate and its runs.")]
+release-status:
+  @scripts/release status
+
+[doc("Check everything a release needs; changes nothing apart from fetching.")]
+release-preflight:
+  @scripts/release preflight
+
+[doc("Publish an existing release tag again if its own run cannot (recovery run on main).")]
+release-republish version:
+  @scripts/release republish {{ version }}
+
+[doc("Apply the branch protection the release flow relies on (main requires CI OK).")]
+protect-branches:
+  @scripts/release protect
