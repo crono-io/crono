@@ -450,7 +450,8 @@ when the tagged workflow itself was wrong, fix it, release as usual, and run
 keeps for 90 days, and its `sha-` images.
 
 The workflows are hardened like the template's: every action is pinned to a full commit
-SHA with its version in a comment (update them deliberately), the Rust toolchain comes
+SHA with its version in a comment (Dependabot proposes updates once a week, as one pull
+request into `sandbox`), the Rust toolchain comes
 from `rustup` through `.github/actions/rust-toolchain`, no checkout keeps the token, and
 the "Release tags" ruleset (`just protect-branches`) lets `X.Y.Z` tags be created but
 never moved or deleted. To check a downloaded release file:
