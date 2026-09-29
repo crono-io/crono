@@ -1,8 +1,10 @@
 //! Verify that a repeat is a new, single-Target dispatch from stored execution data.
 //!
-//! The test uses an isolated initialized PostgreSQL database and deliberately
+//! The test uses the initialized test database (see `support`) and deliberately
 //! changes the Job and Target after the source Run was created. Neither those
 //! changes nor a Target Set's other members may alter the copied snapshot.
+
+mod support;
 
 use anyhow::Result;
 use crono_api::{ExecutionSnapshot, ExecutionTrigger};
@@ -18,7 +20,7 @@ use crono_server::{
     infrastructure::{DatabasePoolConfig, PostgresStore},
 };
 use sqlx::PgPool;
-use std::{env, sync::Arc};
+use std::sync::Arc;
 use uuid::Uuid;
 
 struct Fixture {
@@ -33,9 +35,10 @@ struct Fixture {
 }
 
 #[tokio::test]
-#[ignore = "requires an initialized CRONO_TEST_DATABASE_URL"]
 async fn rerun_preserves_snapshot_and_repeats_only_selected_set_member() -> Result<()> {
-    let database_url = env::var("CRONO_TEST_DATABASE_URL")?;
+    let Some(database_url) = support::database_url()? else {
+        return Ok(());
+    };
     let store = PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?;
     let pool = PgPool::connect(&database_url).await?;
     let fixture = create_fixture(&store).await?;

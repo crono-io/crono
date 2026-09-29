@@ -1,7 +1,10 @@
-//! Read-only operator monitoring checks against an isolated initialized test database.
+//! Read-only operator monitoring checks against the initialized test database.
 //!
-//! The database test is opt-in because a live scheduler can change aggregate
-//! counts between the independent SQL reads. It never inserts or removes data.
+//! No live scheduler may write to that database, because a new Schedule or
+//! outbox row between the independent SQL reads would change the counts they
+//! compare (see `support`). The test never inserts or removes data.
+
+mod support;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -13,7 +16,7 @@ use crono_server::{
     infrastructure::{DatabasePoolConfig, PostgresStore},
 };
 use sqlx::PgPool;
-use std::{env, sync::Arc};
+use std::sync::Arc;
 use uuid::Uuid;
 
 struct DenyMonitor;
@@ -39,9 +42,10 @@ impl Authorizer for DenyMonitor {
 }
 
 #[tokio::test]
-#[ignore = "requires an isolated initialized CRONO_TEST_DATABASE_URL"]
 async fn monitor_samples_database_counts_and_rejects_unauthorized_readers() -> Result<()> {
-    let database_url = env::var("CRONO_TEST_DATABASE_URL")?;
+    let Some(database_url) = support::database_url()? else {
+        return Ok(());
+    };
     let store = PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?;
     let snapshot = store.monitor_snapshot().await?;
     let pool = PgPool::connect(&database_url).await?;

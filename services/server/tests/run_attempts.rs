@@ -1,5 +1,7 @@
 //! Verify Attempt output ordering and `RunRead` visibility against PostgreSQL.
 
+mod support;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use crono_api::OutputSnapshotRequest;
@@ -13,7 +15,7 @@ use crono_server::{
     infrastructure::{DatabasePoolConfig, PostgresStore},
 };
 use sqlx::PgPool;
-use std::{collections::BTreeSet, env, sync::Arc};
+use std::{collections::BTreeSet, sync::Arc};
 use uuid::Uuid;
 
 struct RunReadAuthorizer {
@@ -161,9 +163,10 @@ async fn remove_run_fixture(
 }
 
 #[tokio::test]
-#[ignore = "requires an initialized CRONO_TEST_DATABASE_URL"]
 async fn attempt_output_is_ordered_and_scoped_to_authorized_runs() -> Result<()> {
-    let database_url = env::var("CRONO_TEST_DATABASE_URL")?;
+    let Some(database_url) = support::database_url()? else {
+        return Ok(());
+    };
     let store = PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?;
     let pool = PgPool::connect(&database_url).await?;
     let (run_id, namespace_id) = create_run_with_attempts(&store, &pool).await?;
@@ -233,9 +236,10 @@ async fn attempt_output_is_ordered_and_scoped_to_authorized_runs() -> Result<()>
 }
 
 #[tokio::test]
-#[ignore = "requires an initialized CRONO_TEST_DATABASE_URL"]
 async fn live_output_requires_lease_and_monotonic_sequence() -> Result<()> {
-    let database_url = env::var("CRONO_TEST_DATABASE_URL")?;
+    let Some(database_url) = support::database_url()? else {
+        return Ok(());
+    };
     let store = PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?;
     let pool = PgPool::connect(&database_url).await?;
     let (run_id, namespace_id) = create_run_with_attempts(&store, &pool).await?;

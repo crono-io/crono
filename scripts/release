@@ -105,16 +105,12 @@ apply_bump() {
 
 # Local fast fail before the candidate is pushed; CI and the candidate run on that commit
 # are the real gate. It runs in a fresh worktree whose own target directory is used, so
-# `cargo clean` never touches a shared build cache. Unlike the other projects it cannot
-# run `just test` yet: crono's server tests need its initialized PostgreSQL on
-# 127.0.0.1:5432, which CI provides and a shared dev host may not. Until those tests are
-# hermetic it runs fmt, clippy and the OpenAPI drift test, the one test the bump can break.
+# `cargo clean` never touches a shared build cache; `just test` is the project's local
+# test suite, so whatever a release must pass locally belongs in that recipe.
 verify_locally() {
     export CARGO_TARGET_DIR="${PWD}/target"
     cargo clean
-    cargo fmt --all -- --check
-    just clippy
-    cargo test --locked -p crono-server --test api committed_openapi_document_matches_generated_output
+    just test
 }
 # --- End of project configuration ---
 # Optional in the configuration block: PROTECT_TAGS=false keeps `protect` from managing

@@ -1,5 +1,7 @@
 //! Verify worker diagnostics stay optional and require a global read decision.
 
+mod support;
+
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use crono_api::{WorkerDiagnostics, WorkerHeartbeatRequest};
@@ -13,7 +15,7 @@ use crono_server::{
     infrastructure::{DatabasePoolConfig, PostgresStore},
 };
 use sqlx::PgPool;
-use std::{env, sync::Arc};
+use std::sync::Arc;
 use uuid::Uuid;
 
 struct DenyWorkerRead;
@@ -39,9 +41,10 @@ impl Authorizer for DenyWorkerRead {
 }
 
 #[tokio::test]
-#[ignore = "requires an initialized CRONO_TEST_DATABASE_URL"]
 async fn worker_details_are_authorized_and_legacy_heartbeats_remain_readable() -> Result<()> {
-    let database_url = env::var("CRONO_TEST_DATABASE_URL")?;
+    let Some(database_url) = support::database_url()? else {
+        return Ok(());
+    };
     let store = PostgresStore::connect(&database_url, &DatabasePoolConfig::default())
         .await
         .context("connect store")?;

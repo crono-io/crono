@@ -3,7 +3,52 @@ clippy:
   cargo clippy --locked --workspace --all-targets --all-features
   cargo clippy --locked -p crono-web --target wasm32-unknown-unknown
 
-test:
+# Verify formatting without modifying source files.
+fmt-check:
+  cargo fmt --all -- --check
+
+# Run formatting, clippy and every workspace test; this is also the release's local check.
+# The database tests use a throwaway PostgreSQL on a random loopback port that is removed
+# on exit, so a running crono-postgres or another project's database on 5432 is never
+# touched. Set CRONO_TEST_DATABASE_URL to use an initialized database of your own instead.
+test: fmt-check clippy
+  #!/usr/bin/env bash
+  set -euo pipefail
+  if [[ -z "${CRONO_TEST_DATABASE_URL:-}" ]]; then
+    container="crono-test-postgres-$$"
+    trap 'podman rm --force --time 0 "$container" >/dev/null 2>&1 || true' EXIT
+    podman run --detach --rm --name "$container" \
+      --env POSTGRES_HOST_AUTH_METHOD=trust \
+      --publish 127.0.0.1::5432 \
+      docker.io/library/postgres:18 >/dev/null
+
+    # Ask over TCP: the image's temporary first-start server listens only on its socket.
+    ready=false
+    for ((attempt = 1; attempt <= 60; attempt++)); do
+      if podman exec "$container" pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then
+        ready=true
+        break
+      fi
+      sleep 0.5
+    done
+    if [[ "$ready" != true ]]; then
+      podman logs --tail 50 "$container"
+      echo "The test PostgreSQL did not become ready within 30 seconds" >&2
+      exit 1
+    fi
+
+    # Copied rather than mounted: an SELinux relabel would lock crono-postgres out of db/sql.
+    podman cp db/sql "$container:/tmp/crono-sql"
+    podman exec --env PGOPTIONS=--client-min-messages=warning "$container" psql \
+      --username postgres \
+      --dbname postgres \
+      --set ON_ERROR_STOP=1 \
+      --file /tmp/crono-sql/00_init.sql >/dev/null
+    port="$(podman port "$container" 5432/tcp)"
+    port="${port%%$'\n'*}"
+    export CRONO_TEST_DATABASE_URL="postgres://crono_runtime@127.0.0.1:${port##*:}/crono"
+  fi
+  export CRONO_TEST_REQUIRE_DATABASE=1
   cargo test --locked --workspace
   cargo test --locked --workspace --all-features
 

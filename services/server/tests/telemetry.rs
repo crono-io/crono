@@ -1,10 +1,17 @@
 //! Test server logging and trace export in an isolated process.
+//!
+//! The server connects to PostgreSQL before it binds its port, so every test
+//! that reaches the bind runs it against the test database (see `support`)
+//! and is skipped without one. NATS points at an address nothing listens on.
+
+mod support;
 
 use anyhow::Result;
 use std::{io::ErrorKind, net::TcpListener, time::Duration};
 use tokio::{process::Command, time::timeout};
 
 const BINARY: &str = env!("CARGO_BIN_EXE_crono-server");
+const UNREACHABLE_NATS: &str = "nats://127.0.0.1:1";
 #[cfg(feature = "telemetry")]
 const SERVICE: &str = "crono-server";
 #[cfg(feature = "telemetry")]
@@ -23,11 +30,14 @@ fn blocked_port() -> Result<Option<(TcpListener, u16)>> {
     }
 }
 
-fn command(port: u16) -> Command {
+/// The server on `port` with a clean environment that reaches only `database_url`.
+fn command(port: u16, database_url: &str) -> Command {
     let mut command = Command::new(BINARY);
     command
         .env_clear()
         .env("RUST_LOG", "info")
+        .env("CRONO_DATABASE_URL", database_url)
+        .env("CRONO_NATS_URL", UNREACHABLE_NATS)
         .args(["--port", &port.to_string()])
         .kill_on_drop(true);
     command
@@ -35,10 +45,17 @@ fn command(port: u16) -> Command {
 
 #[tokio::test]
 async fn no_endpoint_keeps_local_logging_available() -> Result<()> {
+    let Some(database_url) = support::database_url()? else {
+        return Ok(());
+    };
     let Some((_listener, port)) = blocked_port()? else {
         return Ok(());
     };
-    let output = timeout(Duration::from_secs(5), command(port).output()).await??;
+    let output = timeout(
+        Duration::from_secs(5),
+        command(port, &database_url).output(),
+    )
+    .await??;
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8(output.stderr)?;
     assert!(stderr.contains("\"level\":\"ERROR\""), "{stderr}");
@@ -50,12 +67,15 @@ async fn no_endpoint_keeps_local_logging_available() -> Result<()> {
 #[cfg(not(feature = "telemetry"))]
 #[tokio::test]
 async fn default_build_ignores_exporter_configuration() -> Result<()> {
+    let Some(database_url) = support::database_url()? else {
+        return Ok(());
+    };
     let Some((_listener, port)) = blocked_port()? else {
         return Ok(());
     };
     let output = timeout(
         Duration::from_secs(5),
-        command(port)
+        command(port, &database_url)
             .env("OTEL_EXPORTER_OTLP_ENDPOINT", "invalid endpoint")
             .output(),
     )
@@ -81,6 +101,9 @@ mod otlp {
     };
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::{Request, Response, Status, codec::CompressionEncoding, transport::Server};
+
+    /// Never contacted: an invalid exporter endpoint stops the server before it starts.
+    const UNUSED_DATABASE: &str = "postgres://crono_runtime@127.0.0.1:1/crono";
 
     struct Collector(mpsc::Sender<ExportTraceServiceRequest>);
 
@@ -108,6 +131,9 @@ mod otlp {
 
     #[tokio::test]
     async fn exports_service_metadata_and_flushes_on_action_error() -> Result<()> {
+        let Some(database_url) = support::database_url()? else {
+            return Ok(());
+        };
         let Some((_blocked, port)) = blocked_port()? else {
             return Ok(());
         };
@@ -128,7 +154,7 @@ mod otlp {
         });
         let output = timeout(
             Duration::from_secs(10),
-            command(port)
+            command(port, &database_url)
                 .env("OTEL_EXPORTER_OTLP_ENDPOINT", format!("http://{address}"))
                 .env("OTEL_EXPORTER_OTLP_HEADERS", "x-crono-test=present")
                 .output(),
@@ -174,7 +200,7 @@ mod otlp {
 
     #[tokio::test]
     async fn configured_invalid_endpoint_fails_before_action() -> Result<()> {
-        let output = command(0)
+        let output = command(0, UNUSED_DATABASE)
             .env("OTEL_EXPORTER_OTLP_ENDPOINT", "invalid endpoint")
             .output()
             .await?;
@@ -187,6 +213,9 @@ mod otlp {
 
     #[tokio::test]
     async fn unresponsive_collector_cannot_prevent_process_exit() -> Result<()> {
+        let Some(database_url) = support::database_url()? else {
+            return Ok(());
+        };
         let Some((_blocked, port)) = blocked_port()? else {
             return Ok(());
         };
@@ -194,7 +223,7 @@ mod otlp {
         let address = listener.local_addr()?;
         let output = timeout(
             Duration::from_secs(10),
-            command(port)
+            command(port, &database_url)
                 .env("OTEL_EXPORTER_OTLP_ENDPOINT", format!("http://{address}"))
                 .output(),
         )

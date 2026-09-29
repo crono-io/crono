@@ -359,6 +359,12 @@ just api-breaking
 cd apps/web && trunk build --release
 ```
 
+`just test` also runs the formatting check and clippy, and gives the database tests a throwaway
+PostgreSQL on a random loopback port, so it never touches `crono-postgres` or another
+project's database on 5432; set `CRONO_TEST_DATABASE_URL` to an initialized database of
+your own to use that instead. Only the NATS outage test (`just integration-test`) and the
+scheduler load test (`just load-test`) stay manual.
+
 The canonical draft schema and reset guidance are in [db/sql/README.md](db/sql/README.md). Domain invariants are in [DOMAIN_MODEL.md](DOMAIN_MODEL.md), authorization boundaries in [AUTHORIZATION.md](AUTHORIZATION.md), and CLI layering rules in [CLI_ARCHITECTURE.md](CLI_ARCHITECTURE.md).
 
 ## Deployment
@@ -417,18 +423,17 @@ green, merge it into `develop` and run `just deploy` from a clean `develop`.
 `just deploy` checks that `develop` is clean and equal to origin, then bumps the
 workspace version (`Cargo.toml`, `Cargo.lock` and the `info.version` of
 `docs/openapi/crono-server.json`) in a temporary worktree, runs `cargo clean` (its own
-target directory), then `cargo fmt --check`, `just clippy` and the OpenAPI drift test
-there (the full `just test` needs crono's PostgreSQL, which CI provides), and pushes a
-signed commit "bump version to X" to the scratch `release` branch only. On that exact
-commit, Test & Build runs, and so does a manual run of the Release workflow in candidate
-mode: it tests, builds the static binaries for the four targets, the web client, the
-`.deb` and `.rpm` packages and both images, and keeps the files as artifacts with a
-manifest of their SHA-256 sums and build-provenance attestations. The images are pushed
-only as `ghcr.io/crono-io/<image>:sha-<commit>`, with their SBOM, provenance and
-attestation, and the manifest records their digests. When both runs pass, the script
-downloads the manifest and every artifact and checks the commit, the version and every
-checksum, then moves `develop`, `main` and the signed tag X together in one atomic push;
-the tag message names the candidate run.
+target directory) and `just test` there (formatting, clippy and every test, against a
+throwaway PostgreSQL), and pushes a signed commit "bump version to X" to the scratch
+`release` branch only. On that exact commit, Test & Build runs, and so does a manual run
+of the Release workflow in candidate mode: it tests, builds the static binaries for the
+four targets, the web client, the `.deb` and `.rpm` packages and both images, and keeps
+the files as artifacts with a manifest of their SHA-256 sums and build-provenance
+attestations. The images are pushed only as `ghcr.io/crono-io/<image>:sha-<commit>`,
+with their SBOM, provenance and attestation, and the manifest records their digests.
+When both runs pass, the script downloads the manifest and every artifact and checks the
+commit, the version and every checksum, then moves `develop`, `main` and the signed tag
+X together in one atomic push; the tag message names the candidate run.
 
 The tag's Release run builds nothing. Its guard checks the tag (GitHub-verified
 signature, commit on `main`, version, Test & Build, the named candidate run); the GitHub
