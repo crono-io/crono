@@ -301,7 +301,7 @@ deploy-current:
 release-status:
   @scripts/release status
 
-[doc("Check everything a release needs; changes nothing apart from fetching.")]
+[doc("Check everything a release needs; changes nothing that lasts.")]
 release-preflight:
   @scripts/release preflight
 
@@ -309,6 +309,10 @@ release-preflight:
 release-republish version:
   @scripts/release republish {{ version }}
 
-[doc("Apply the branch protection the release flow relies on (main requires CI OK).")]
+[doc("Apply branch protection (main requires CI OK) and the rule that release tags never move.")]
 protect-branches:
   @scripts/release protect
+
+[doc("Build, package and push sha- images for the current branch like a release candidate; no bump, no tag.")]
+release-dry-run:
+  @scripts/release dry-run
