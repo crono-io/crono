@@ -65,7 +65,8 @@ REQUIRED_CHECK="CI OK"           # aggregate job in CI_WORKFLOW that branch prot
 CANDIDATE_WORKFLOW="release.yml" # tag workflow dispatched on the candidate (packages, publishes nothing); empty skips it
 CANDIDATE_MANIFEST="release-manifest" # artifact the candidate run must keep for the tag to publish
 MAIN_PUSH_RESTRICTIONS='null'    # JSON: who may push to MAIN_BRANCH; null keeps anyone with write access
-REQUIRE_CONVERSATION_RESOLUTION=false # PR setting; keep what the repository already uses
+                                 # (org repos may list them, e.g. '{"users":["me"],"teams":[],"apps":[]}')
+REQUIRE_CONVERSATION_RESOLUTION=true # require resolved review conversations on MAIN_BRANCH and DEVELOP_BRANCH
 OPENAPI_SPECS=(docs/openapi/crono-server.json)
 RELEASE_FILES=(Cargo.toml Cargo.lock "${OPENAPI_SPECS[@]}")
 
@@ -103,15 +104,17 @@ apply_bump() {
 }
 
 # Local fast fail before the candidate is pushed; CI and the candidate run on that commit
-# are the real gate. It runs in a fresh worktree: fmt, clippy for the native workspace
-# and the web client, and the OpenAPI drift test, the one test the bump itself can break.
-# The full `just test` needs crono's initialized PostgreSQL on 127.0.0.1:5432 (the server
-# tests start the real binary), which CI provides and a shared dev host may not.
+# are the real gate. It runs in a fresh worktree whose own target directory is used, so
+# `cargo clean` never touches a shared build cache. Unlike the other projects it cannot
+# run `just test` yet: crono's server tests need its initialized PostgreSQL on
+# 127.0.0.1:5432, which CI provides and a shared dev host may not. Until those tests are
+# hermetic it runs fmt, clippy and the OpenAPI drift test, the one test the bump can break.
 verify_locally() {
+    export CARGO_TARGET_DIR="${PWD}/target"
+    cargo clean
     cargo fmt --all -- --check
-    CARGO_TARGET_DIR="${PWD}/target" just clippy
-    CARGO_TARGET_DIR="${PWD}/target" cargo test --locked -p crono-server --test api \
-        committed_openapi_document_matches_generated_output
+    just clippy
+    cargo test --locked -p crono-server --test api committed_openapi_document_matches_generated_output
 }
 # --- End of project configuration ---
 # Optional in the configuration block: PROTECT_TAGS=false keeps `protect` from managing
