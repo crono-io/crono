@@ -398,8 +398,8 @@ on it, so a release never needs a tag deleted or moved. Branch protection lets o
 tag only with the successful candidate run the signed tag names. The flow lives in
 `scripts/release`, `.github/workflows/build.yml` (Test & Build) and
 `.github/workflows/release.yml` (Release); it is the flow documented in full in the
-"Releasing" section of [cron-when](https://github.com/nbari/cron-when#releasing), which
-is its template.
+[RELEASING.md](https://github.com/nbari/cron-when/blob/main/RELEASING.md) of cron-when,
+which is its template.
 
 Work, including dependency updates, lands on `sandbox`. When its **Test & Build** run is
 green, merge it into `develop` and run `just deploy` from a clean `develop`.
@@ -408,10 +408,11 @@ green, merge it into `develop` and run `just deploy` from a clean `develop`.
 |---|---|
 | `just deploy` | Release a patch bump (`deploy-minor`, `deploy-major` for the others); when `develop`'s current version has no tag yet, it releases that version as is instead |
 | `just deploy-current` | Release `develop`'s untagged version as is, explicitly |
-| `just release-status` | Show `develop`, `main`, the staged candidate, its runs and the last tag's publish run |
-| `just release-preflight` | Run only the checks; changes nothing apart from fetching |
+| `just release-status` | Show `develop`, `main`, `sandbox`, the staged candidate and its runs |
+| `just release-preflight` | Run only the checks; changes nothing that lasts |
+| `just release-dry-run` | Build and package the current branch exactly like a candidate (images pushed only as `:sha-<commit>`), with no bump and no tag |
 | `just release-republish X.Y.Z` | Recovery: publish an existing tag again with `main`'s workflow |
-| `just protect-branches` | Apply the branch protection the flow relies on |
+| `just protect-branches` | Apply the branch protection and the rule that release tags are never moved or deleted |
 
 `just deploy` checks that `develop` is clean and equal to origin, then bumps the
 workspace version (`Cargo.toml`, `Cargo.lock` and the `info.version` of
@@ -421,7 +422,8 @@ PostgreSQL, which CI provides), and pushes a signed commit "bump version to X" t
 the scratch `release` branch only. On that exact commit, Test & Build runs, and so does
 a manual run of the Release workflow in candidate mode: it tests, builds the static
 binaries for the four targets, the web client, the `.deb` and `.rpm` packages and both
-images, and keeps the files as artifacts with a manifest of their SHA-256 sums. The
+images, and keeps the files as artifacts with a manifest of their SHA-256 sums and
+build-provenance attestations. The
 images are pushed only as `ghcr.io/crono-io/<image>:sha-<commit>`, with their SBOM,
 provenance and attestation, and the manifest records their digests. When both runs
 pass, the script downloads the manifest and every artifact and checks the commit, the
@@ -430,7 +432,8 @@ in one atomic push; the tag message names the candidate run.
 
 The tag's Release run builds nothing. Its guard checks the tag (GitHub-verified
 signature, commit on `main`, version, Test & Build, the named candidate run); the GitHub
-release gets exactly the manifest's files with notes GitHub generates, and each image
+release gets exactly the manifest's files with notes made from the commit subjects since
+the previous release, and each image
 digest gets the `X.Y.Z` tag with `skopeo copy --preserve-digests`, so the tested index
 and its attestations are what the tag names. The production steps that follow the
 newest release (GitHub's Latest release, the `X.Y` and `latest` image tags, the API
@@ -445,6 +448,17 @@ to release. A failed publish step in the tag's run is fixed with "Re-run failed 
 when the tagged workflow itself was wrong, fix it, release as usual, and run
 `just release-republish X.Y.Z`. Recovery needs the candidate's artifacts, which GitHub
 keeps for 90 days, and its `sha-` images.
+
+The workflows are hardened like the template's: every action is pinned to a full commit
+SHA with its version in a comment (update them deliberately), the Rust toolchain comes
+from `rustup` through `.github/actions/rust-toolchain`, no checkout keeps the token, and
+the "Release tags" ruleset (`just protect-branches`) lets `X.Y.Z` tags be created but
+never moved or deleted. To check a downloaded release file:
+
+```sh
+sha256sum --check --ignore-missing SHA256SUMS
+gh attestation verify <file> --repo crono-io/crono --signer-workflow crono-io/crono/.github/workflows/release.yml
+```
 
 Tags keep the workflows they were created with: dispatching a workflow on an old tag,
 or re-running an old tag's run, executes that old code. For 0.1.0, released before this
