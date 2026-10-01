@@ -14,7 +14,7 @@ members = [
 default-members = ["services/server", "services/worker", "apps/cli"]
 
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 license = "BSD-3-Clause"
 repository = "https://github.com/crono-io/crono"
