@@ -10,7 +10,10 @@ mod preview;
 
 pub use list::JobsPage;
 
-use crate::{api, components::PageHeader};
+use crate::{
+    api,
+    components::{PageHeader, QUIET_ACTION_CLASS},
+};
 use form::JobForm;
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_params_map};
@@ -50,7 +53,7 @@ pub fn EditJobPage() -> impl IntoView {
                     <PageHeader title="Edit Job" description="Update an existing Job." />
                     <div class="rounded-xl border border-crono-border bg-crono-surface p-6">
                         <p class="text-sm text-crono-failed" role="alert">{error.message.clone()}</p>
-                        <A href="/jobs" attr:class="mt-4 inline-block text-sm font-medium text-crono-primary hover:text-crono-primary-hover">"Back to Jobs"</A>
+                        <div class="mt-4"><A href="/jobs" attr:class=QUIET_ACTION_CLASS>"Back to Jobs"</A></div>
                     </div>
                 </div>
             }.into_any(),

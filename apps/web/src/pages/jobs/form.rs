@@ -86,9 +86,9 @@ pub(super) fn JobForm(#[prop(optional)] initial_job: Option<JobResource>) -> imp
                         }.into_any(),
                         None => view! {
                             <div>
-                                <ResourceSelect id="job-namespace" label="Namespace" placeholder="Search/select namespace…" options=namespace_choices.options selected=namespace_id loading=namespace_choices.loading load_error=namespace_choices.load_error field_error=namespace_error />
+                                <ResourceSelect id="job-namespace" label="Namespace" placeholder="Search/select namespace…" options=namespace_choices.options selected=namespace_id loading=namespace_choices.loading load_error=namespace_choices.load_error field_error=namespace_error select_single=true />
                                 <Show when=move || !namespace_choices.loading.get() && namespace_choices.options.get().is_empty() && namespace_choices.load_error.get().is_none()>
-                                    <p class="rounded-md bg-zinc-50 p-3 text-sm text-crono-muted">"No namespaces exist yet. "<A href="/namespaces" attr:class="font-medium text-crono-primary">"Create one before creating a Job."</A></p>
+                                    <p class="rounded-md bg-zinc-50 p-3 text-sm text-crono-muted">"No namespaces exist yet. "<A href="/namespaces" attr:class="font-medium text-crono-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">"Create one before creating a Job."</A></p>
                                 </Show>
                             </div>
                         }.into_any(),
@@ -195,7 +195,7 @@ fn JobFeedbackNotice(feedback: RwSignal<Option<JobFeedback>>) -> impl IntoView {
                     <div>
                         <p class="font-semibold">"Job was not saved"</p>
                         <p class="mt-1">{message}</p>
-                        {duplicate.then(|| view! { <A href="/jobs" attr:class="mt-2 inline-block font-medium underline underline-offset-2 hover:no-underline">"View all Jobs"</A> })}
+                        {duplicate.then(|| view! { <A href="/jobs" attr:class="mt-2 inline-block font-medium underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">"View all Jobs"</A> })}
                     </div>
                 </div>
             }.into_any(),

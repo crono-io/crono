@@ -17,7 +17,8 @@ pub use new::RunJobPage;
 use crono_api::{RunResource, RunStatus, RunTriggerSource};
 
 pub(super) const ACTION_CLASS: &str = "inline-flex items-center justify-center rounded-md bg-crono-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-crono-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary focus-visible:ring-offset-2";
-pub(super) const RUN_ACTION_CLASS: &str = "inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium text-crono-primary hover:bg-crono-primary-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary focus-visible:ring-offset-2";
+/// Match Run history and detail controls to the quiet Monitor navigation links.
+pub(super) const RUN_ACTION_CLASS: &str = crate::components::QUIET_ACTION_CLASS;
 
 /// Text remains present alongside status color for accessible scanning.
 pub(super) const fn status_label(status: RunStatus) -> &'static str {

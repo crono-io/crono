@@ -63,8 +63,13 @@ Canonical names are DNS-1123 labels. Workload names are unique inside their
 owning Namespace; Queue and Namespace names are globally unique. UUIDs are the
 immutable keys for every relationship. Jobs, Runs, and worker presence retain
 Queue UUIDs while Queue names remain editable display and lookup identifiers.
-The bootstrap `default` Queue is system-managed and remains enabled so worker
-configuration has a stable default. Constraint triggers reject cross-Namespace
+The bootstrap also creates a `default` Namespace and an empty `default/default`
+Target. Reapplying it fills in missing starter records without replacing IDs or
+editing Target arguments and inputs. The Target's name remains fixed while its
+arguments and inputs can be edited. The `default` Queue is system-managed and
+remains enabled so worker configuration has a stable default. Jobs and Schedules
+are created explicitly; the bootstrap does not start execution. Constraint
+triggers reject cross-Namespace
 Target Set membership and Job, Target,
 Schedule, and Run combinations even if an adapter is faulty. A Run stores an immutable execution snapshot. The scheduler or
 manual Run path inserts the Run, first Attempt, and outbox row in one

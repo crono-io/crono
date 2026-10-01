@@ -2200,7 +2200,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid; `field` names the offending input when known.",
+            "description": "The request is invalid, including attempts to rename the default Target; `field` names the offending input when known.",
             "content": {
               "application/json": {
                 "schema": {

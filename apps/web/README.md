@@ -14,6 +14,31 @@ workflows. Queues additionally support rename, enable/disable, and guarded
 deletion; the bootstrap `default` Queue is visibly protected while its
 description remains editable. Runs selects existing resources and displays
 durable dispatch state; Workers shows heartbeat-derived presence and capacity.
+The bootstrap also supplies a `default` Namespace and an empty `default/default`
+Target. Required selectors preselect a sole available Namespace or destination;
+multiple choices and optional filters remain explicit. The starter Target's
+name is read-only in the editor, while its arguments and inputs remain editable.
+The Target form uses an Ansible playbook example: `--limit` and `{{ host }}`
+occupy separate additional argument rows, while the Target inputs JSON supplies
+`{"host":"web01.example.com"}`. The arguments follow the Job arguments when a
+Run starts, and the template resolves to the inventory host.
+The form also shows the resulting worker command, with the Job's playbook and
+inventory arguments followed by the Target's resolved host limit.
+A separate `echo` demo pairs a Job argument, a templated Target argument, and
+Target inputs to show how `/bin/echo Hello world` is assembled.
+Targets now browse by Namespace at `/targets` in 25-item cursor pages, with a
+separate `/targets/new` form and direct `/targets/{id}/edit` links. The Targets
+sidebar submenu offers All Targets and Create Target. A saved creation clears
+the form for another Target; a saved edit remains attached to its original ID.
+Both forms retain the Ansible and echo examples and return to the list on
+Cancel.
+Monitor links to Schedules, Runs, and Workers with the same Material Symbols used
+in the sidebar, keeping the destination names visible beside each icon. These
+links are gray at rest, with a light background and blue text on hover and a
+visible focus ring for keyboard navigation.
+Overview's View all links, list row actions, refresh and pagination controls,
+and detail back links use the same quiet treatment. Creation, submission, and
+destructive controls keep their stronger action styling.
 Reserved pages use truthful empty states.
 
 Resource creation uses the shared DNS-1123 label rule from `crono-api` and
@@ -23,6 +48,10 @@ selected UUID rather than a display name. Target Sets use the same pattern for
 multi-selection, and Job creation selects an enabled Queue by UUID. Loading,
 empty, stale-selection, API, and field validation
 states remain in the form so failed submissions do not discard entered values.
+Recurring Schedules select an IANA timezone from a searchable list that starts
+at UTC and displays current signed UTC offsets. The selected zone name is sent
+to the API; offsets are display-only and can change with daylight saving time.
+One-shot Schedules continue to use an explicit UTC timestamp.
 Submission feedback sits beside the Save action: success uses a status notice,
 while API failures use a visible alert. A duplicate Job name also appears beside
 the Name field, and the alert links back to All Jobs.
@@ -40,9 +69,10 @@ later invocation inputs. Recent Runs load authorized Attempt stdout, stderr,
 and errors when an operator opens their output. The Runs history keeps Job/Target,
 Started, Finished, and Status aligned for comparison on wide screens and labels
 those fields on narrow screens. Start and finish retain seconds and exact-time
-tooltips; the finish cell labels duration as elapsed time. History actions use
-decorative Material Symbols alongside visible Details, Output, and Re-run text,
-and the Re-run confirmation expands beneath the action row on narrow screens.
+tooltips; the finish cell labels duration as elapsed time. History actions pair
+decorative Material Symbols with visible Details, Output, and Re-run labels.
+They share Monitor's quiet gray, hover, and keyboard focus treatment. The Re-run
+confirmation expands beneath the action row on narrow screens.
 Successful repeats show one link to the new Run. That notice clears when another
 repeat opens, can be dismissed, and expires after eight seconds; failed repeats
 keep their error beside the confirmation.

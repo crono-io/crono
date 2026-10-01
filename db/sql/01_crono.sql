@@ -18,6 +18,11 @@ CREATE TABLE IF NOT EXISTS crono.namespaces (
     )
 );
 
+-- Repeated bootstrap also fills missing starter resources on existing installs.
+INSERT INTO crono.namespaces (name)
+VALUES ('default')
+ON CONFLICT (name) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS crono.queues (
     id uuid PRIMARY KEY DEFAULT uuidv7(),
     name text NOT NULL UNIQUE,
@@ -96,6 +101,31 @@ CREATE TABLE IF NOT EXISTS crono.targets (
     CONSTRAINT targets_arguments_array CHECK (jsonb_typeof(arguments) = 'array'),
     CONSTRAINT targets_inputs_object CHECK (jsonb_typeof(inputs) = 'object')
 );
+
+-- This Target adds no arguments or inputs until an operator edits it.
+INSERT INTO crono.targets (namespace_id, name)
+SELECT id, 'default' FROM crono.namespaces WHERE name = 'default'
+ON CONFLICT (namespace_id, name) DO NOTHING;
+
+-- Keep the starter Target's name stable without freezing its editable data.
+CREATE OR REPLACE FUNCTION crono.protect_default_target_name()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.name = 'default' AND NEW.name <> OLD.name AND EXISTS (
+        SELECT 1 FROM crono.namespaces
+        WHERE id = OLD.namespace_id AND name = 'default'
+    ) THEN
+        RAISE EXCEPTION 'The default Target cannot be renamed'
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS default_target_name ON crono.targets;
+CREATE TRIGGER default_target_name
+BEFORE UPDATE OF name ON crono.targets
+FOR EACH ROW EXECUTE FUNCTION crono.protect_default_target_name();
 
 CREATE TABLE IF NOT EXISTS crono.target_sets (
     id uuid PRIMARY KEY DEFAULT uuidv7(),

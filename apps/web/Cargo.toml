@@ -11,6 +11,9 @@ publish.workspace = true
 workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+chrono.workspace = true
+chrono-tz.workspace = true
+js-sys.workspace = true
 crono-api.workspace = true
 crono-execution.workspace = true
 gloo-net.workspace = true

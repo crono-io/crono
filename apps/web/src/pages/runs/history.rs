@@ -100,7 +100,7 @@ pub fn RunsPage() -> impl IntoView {
                 <ResourceSelect id="runs-target-filter" label="Target" placeholder="All Targets" options=target_choices.options selected=target_id loading=target_choices.loading load_error=target_choices.load_error optional=true />
                 <ResourceSelect id="runs-target-set-filter" label="Target Set" placeholder="All Target Sets" options=target_set_choices.options selected=target_set_id loading=target_set_choices.loading load_error=target_set_choices.load_error optional=true />
             </section>
-            <div class="flex justify-end"><button type="button" class="text-sm font-medium text-crono-primary hover:text-crono-primary-hover" on:click=move |_| runs.refetch()>"Refresh"</button></div>
+            <div class="flex justify-end"><button type="button" class=RUN_ACTION_CLASS on:click=move |_| runs.refetch()><Icon symbol=MaterialSymbol::Refresh class="text-lg leading-none" />"Refresh"</button></div>
             <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface">
                 {move || runs.map(|result| match result {
                     Ok(page) if page.items.is_empty() => view! {
@@ -113,11 +113,11 @@ pub fn RunsPage() -> impl IntoView {
                 }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Runs…"</p> }.into_any())}
             </section>
             <div class="flex items-center justify-between">
-                <button type="button" class="text-sm font-medium text-crono-primary disabled:text-crono-muted" disabled=move || page_stack.get().is_empty() on:click=move |_| {
+                <button type="button" class=RUN_ACTION_CLASS disabled=move || page_stack.get().is_empty() on:click=move |_| {
                     page_stack.update(|stack| { before.set(stack.pop().flatten()); });
                 }>"← Previous"</button>
                 {move || runs.get().and_then(Result::ok).and_then(|page| page.next_cursor).and_then(|cursor| Uuid::parse_str(&cursor).ok()).map(|cursor| view! {
-                    <button type="button" class="text-sm font-medium text-crono-primary" on:click=move |_| { page_stack.update(|stack| stack.push(before.get_untracked())); before.set(Some(cursor)); }>"Next →"</button>
+                    <button type="button" class=RUN_ACTION_CLASS on:click=move |_| { page_stack.update(|stack| stack.push(before.get_untracked())); before.set(Some(cursor)); }>"Next →"</button>
                 })}
             </div>
         </div>

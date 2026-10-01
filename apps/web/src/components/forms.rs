@@ -149,6 +149,7 @@ pub fn ResourceNameInput(
     label: &'static str,
     value: RwSignal<String>,
     error: Signal<Option<String>>,
+    #[prop(optional)] read_only: Option<Signal<bool>>,
 ) -> impl IntoView {
     let help_id = format!("{id}-help");
     let error_id = format!("{id}-error");
@@ -164,6 +165,7 @@ pub fn ResourceNameInput(
                 type="text"
                 autocomplete="off"
                 required
+                readonly=move || read_only.is_some_and(|value| value.get())
                 aria-describedby=described_by
                 aria-invalid=move || error.get().is_some().then_some("true")
                 prop:value=move || value.get()
@@ -191,6 +193,7 @@ pub fn ResourceSelect(
     load_error: Signal<Option<String>>,
     #[prop(optional, into)] field_error: Signal<Option<String>>,
     #[prop(optional)] optional: bool,
+    #[prop(optional)] select_single: bool,
 ) -> impl IntoView {
     let query = RwSignal::new(String::new());
     let open = RwSignal::new(false);
@@ -205,7 +208,7 @@ pub fn ResourceSelect(
             .filter(|option| option.label.contains(&needle))
             .collect::<Vec<_>>()
     });
-    clear_stale_selection(selected, options, loading, load_error);
+    synchronize_selection(selected, options, loading, load_error, select_single);
     let display_value = move || {
         if open.get() {
             return query.get();
@@ -286,20 +289,37 @@ pub fn ResourceSelect(
     }
 }
 
-fn clear_stale_selection(
+/// Clear stale UUIDs and optionally select a sole choice once per loaded list.
+/// A user's later edit does not cause the same choice to be selected again.
+fn synchronize_selection(
     selected: RwSignal<Option<Uuid>>,
     options: Signal<Vec<ResourceOption>>,
     loading: Signal<bool>,
     load_error: Signal<Option<String>>,
+    select_single: bool,
 ) {
+    let previous_ids = RwSignal::new(None::<Vec<Uuid>>);
     Effect::new(move |_| {
-        let current = selected.get();
         let available = options.get();
-        if !loading.get()
-            && load_error.get().is_none()
-            && current.is_some_and(|id| !available.iter().any(|option| option.id == id))
-        {
+        if loading.get() || load_error.get().is_some() {
+            return;
+        }
+        let ids = available.iter().map(|option| option.id).collect::<Vec<_>>();
+        let options_changed = previous_ids.get_untracked().as_ref() != Some(&ids);
+        if options_changed {
+            previous_ids.set(Some(ids));
+        }
+        let current = selected.get();
+        let stale = current.is_some_and(|id| !available.iter().any(|option| option.id == id));
+        if stale {
             selected.set(None);
+        }
+        if select_single
+            && options_changed
+            && (current.is_none() || stale)
+            && let [only] = available.as_slice()
+        {
+            selected.set(Some(only.id));
         }
     });
 }
@@ -513,6 +533,91 @@ mod browser_tests {
     use web_sys::{Event, HtmlElement, HtmlInputElement, MouseEvent};
 
     wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
+    async fn sole_choice_is_selected_once_and_multiple_choices_remain_explicit() {
+        let host = test_host();
+        assert!(host.is_some(), "browser test requires a document body");
+        let Some(host) = host else {
+            return;
+        };
+        let first = Uuid::from_u128(11);
+        let second = Uuid::from_u128(12);
+        let handle = leptos::mount::mount_to(host.clone(), move || {
+            let selected = RwSignal::new(None);
+            let options = RwSignal::new(vec![ResourceOption {
+                id: first,
+                label: "default".to_string(),
+            }]);
+            view! {
+                <ResourceSelect
+                    id="single-choice"
+                    label="Destination"
+                    placeholder="Select destination"
+                    options=Signal::derive(move || options.get())
+                    selected=selected
+                    loading=Signal::derive(|| false)
+                    load_error=Signal::derive(|| None)
+                    select_single=true
+                />
+                <output id="selected-choice">{move || selected.get().map(|id| id.to_string()).unwrap_or_default()}</output>
+                <button id="add-choice" on:click=move |_| options.update(|items| items.push(ResourceOption { id: second, label: "extra".to_string() }))>"Add"</button>
+                <button id="remove-choice" on:click=move |_| options.update(|items| items.retain(|item| item.id != second))>"Remove"</button>
+            }
+        });
+        leptos::task::tick().await;
+        let output = host.query_selector("#selected-choice").ok().flatten();
+        assert!(output.is_some());
+        let Some(output) = output else {
+            return;
+        };
+        assert_eq!(output.text_content(), Some(first.to_string()));
+
+        let input = host.query_selector("#single-choice").ok().flatten();
+        assert!(input.is_some());
+        let Some(input) = input else {
+            return;
+        };
+        let input = input.dyn_into::<HtmlInputElement>();
+        assert!(input.is_ok());
+        let Ok(input) = input else {
+            return;
+        };
+        input.set_value("search");
+        let input_event = Event::new("input");
+        assert!(input_event.is_ok());
+        let Ok(input_event) = input_event else {
+            return;
+        };
+        assert!(input.dispatch_event(&input_event).is_ok());
+        leptos::task::tick().await;
+        assert_eq!(output.text_content().as_deref(), Some(""));
+
+        let click = MouseEvent::new("click");
+        assert!(click.is_ok());
+        let Ok(click) = click else {
+            return;
+        };
+        let add = host.query_selector("#add-choice").ok().flatten();
+        assert!(add.is_some());
+        let Some(add) = add else {
+            return;
+        };
+        assert!(add.dispatch_event(&click).is_ok());
+        leptos::task::tick().await;
+        assert_eq!(output.text_content().as_deref(), Some(""));
+
+        let remove = host.query_selector("#remove-choice").ok().flatten();
+        assert!(remove.is_some());
+        let Some(remove) = remove else {
+            return;
+        };
+        assert!(remove.dispatch_event(&click).is_ok());
+        leptos::task::tick().await;
+        assert_eq!(output.text_content(), Some(first.to_string()));
+        drop(handle);
+        host.remove();
+    }
 
     fn test_host() -> Option<HtmlElement> {
         let document = web_sys::window()?.document()?;

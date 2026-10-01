@@ -83,6 +83,10 @@ sequenceDiagram
 The scheduler queries the indexed `next_run_at` cursor in bounded batches. PostgreSQL claims allow multiple server instances to operate concurrently without process-local locks, while `UNIQUE (schedule_id, scheduled_at, target_id)` prevents duplicate per-Target occurrences. There is no sleeping Tokio task per Schedule and no periodic full-table scan. A Schedule aimed at a Target Set creates one independent Run for every current member in the same planning transaction.
 
 Cron expressions have five fields, use an IANA timezone for wall-clock calculation, and persist UTC instants. Field syntax is strict: list items cannot be empty (`1,,2`, `,5`, `5,`), numbers are unsigned ASCII digits (no `+5`), and weekday names such as `Mon` are accepted only in the day-of-week field. A Schedule stored before this rule tightened whose expression no longer parses logs "failed to calculate Schedule recurrence" and stops firing until it is updated. Nonexistent spring-forward times are skipped. Repeated fall-back local times produce both distinct UTC occurrences. One-shot timestamps are UTC.
+The Schedule form defaults to UTC and offers a searchable list of the IANA
+zones supported by the scheduler. Each regional choice shows its current UTC
+offset for orientation; the stored timezone name, rather than that temporary
+offset, determines future occurrences and daylight saving changes.
 
 Five-field expressions are parsed with `cron-parser`; supported field syntax
 includes wildcards, lists, ranges, steps, and `Sun` through `Sat` weekday
@@ -236,7 +240,7 @@ sequenceDiagram
 
 ## Reviewing locally
 
-The GUI exercises Namespace, Queue, Job, Target, Target Set, Schedule, and manual Run workflows. Queue administration supports rename, enable/disable, and guarded deletion. Existing relationships are searchable name selectors backed by UUIDs. `/jobs` browses Jobs within a selected Namespace; its sidebar submenu and page action lead to `/jobs/new`, while each Job's Edit link opens `/jobs/{id}/edit`. Creation is never the default Jobs view, and a direct edit URL reloads the Job from the API. Job, Target, and Target Set definitions can be edited without replacing their immutable IDs. The Job editor previews rendered argv and merged inputs against a selected Target or Target Set without creating a Run; later invocation inputs are not part of that preview.
+The GUI exercises Namespace, Queue, Job, Target, Target Set, Schedule, and manual Run workflows. Queue administration supports rename, enable/disable, and guarded deletion. Existing relationships are searchable name selectors backed by UUIDs. `/jobs` browses Jobs within a selected Namespace; its sidebar submenu and page action lead to `/jobs/new`, while each Job's Edit link opens `/jobs/{id}/edit`. Creation is never the default Jobs view, and a direct edit URL reloads the Job from the API. `/targets` similarly browses 25 Targets per page within a Namespace, with `/targets/new` for creation and `/targets/{id}/edit` for direct editing. Job, Target, and Target Set definitions can be edited without replacing their immutable IDs. The Job editor previews rendered argv and merged inputs against a selected Target or Target Set without creating a Run; later invocation inputs are not part of that preview.
 
 Execution → Runs now opens `/runs`, a server-filtered, cursor-paged history instead of a manual Run form. Its history aligns Job/Target, Started, Finished, and Status in columns on wide screens and labels the same fields on smaller screens. Start and finish show seconds, with explicitly labeled elapsed time beneath the finish and exact timestamps available on hover; missing timestamps remain unrecorded rather than being inferred. Details, Output, and Re-run actions retain visible text beside their icons. Use `/runs/new` to start a Job explicitly, or `/runs/{id}` to inspect exact server timestamps, status, Queue, attempt count, and durable server lifecycle events. Attempt output remains a separate on-demand `RunRead` request, not part of the list or timeline response. The trigger source is established by the server: manual HTTP requests are labeled API (including CLI-originated requests until verified client identity is available), scheduled Runs are Scheduler, and repeated Runs are Re-run. No username is inferred in development mode. Names in history reflect current catalog names; the execution snapshot retains what actually ran.
 
@@ -248,12 +252,14 @@ flowchart TD
     Start --> Infra["PostgreSQL + NATS + crono-server"]
     WorkerCmd["Start crono-worker separately<br/>queue: default"] --> Ready["Worker heartbeat visible in Workers"]
 
-    Web --> Namespace["Create a Namespace"]
-    Web --> Queue["Select or manage a Queue"]
-    Namespace --> Job["Create a Job"]
+    Infra --> Namespace["Bootstrap default Namespace"]
+    Infra --> Queue["Bootstrap default Queue"]
+    Infra --> Target["Bootstrap empty default Target"]
+    Web --> Job["Create a Job"]
+    Namespace --> Job
     Queue --> Job
-    Job --> Target["Create a Target"]
-    Target --> Run["Create a manual Run"]
+    Job --> Run["Create a manual Run"]
+    Target --> Run
     Run --> Outbox["Run becomes pending_dispatch"]
     Outbox --> JetStream["JetStream persists dispatch"]
     JetStream --> Consume["Worker pulls dispatch"]
@@ -318,6 +324,11 @@ original launcher is gone: it stops this checkout's server, web, and worker
 processes plus the named `crono-postgres` and `crono-nats` containers. Container
 volumes are preserved. The process cleanup uses Linux `/proc` and `flock` to
 scope and coordinate these commands, including binaries replaced by a rebuild.
+The database bootstrap creates a `default` Namespace, an empty `default/default`
+Target, and the enabled `default` Queue. On an existing database it fills in
+missing starter resources while retaining existing IDs and Target settings.
+Create a Job, then start a worker separately to execute a manual Run; no Job or
+Schedule runs automatically on first install.
 Startup uses `ss` to check listeners on every IPv4 and IPv6 address immediately
 before binding each fixed port; an unrelated port owner is shown but never
 killed. The API sets `SO_REUSEADDR` so normal quick restarts work after an

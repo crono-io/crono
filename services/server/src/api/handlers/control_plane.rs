@@ -480,7 +480,7 @@ pub async fn get_target(
     request_body = UpdateTargetRequest,
     responses(
         (status = 200, description = "The updated Target.", body = TargetResource),
-        (status = 400, description = "The request is invalid; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
+        (status = 400, description = "The request is invalid, including attempts to rename the default Target; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
         (status = 404, description = "The Target was not found.", body = crono_api::ErrorEnvelope),
         (status = 409, description = "The change conflicts with another Target name or a newer revision.", body = crono_api::ErrorEnvelope),
     ),

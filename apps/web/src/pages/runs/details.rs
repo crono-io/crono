@@ -48,7 +48,7 @@ pub fn RunDetailsPage() -> impl IntoView {
     view! {
         <div class="space-y-6">
             <PageHeader title="Run details" description="Inspect execution timing, dispatch history, and Attempt output.">
-                <A href=AppRoute::Runs.path() attr:class="text-sm font-medium text-crono-primary">"← All Runs"</A>
+                <A href=AppRoute::Runs.path() attr:class=RUN_ACTION_CLASS>"← All Runs"</A>
             </PageHeader>
             <CreatedRunNotice notice=created_run_id />
             {move || run.map(|result| match result {
@@ -88,7 +88,7 @@ fn RunDetails(
                 <div><dt class="text-crono-muted">"Attempts"</dt><dd>{format!("{} / {}", run.attempt_count, run.max_attempts)}</dd></div>
                 <div><dt class="text-crono-muted">"Queue"</dt><dd>{if run.queue.is_empty() { "—".to_string() } else { run.queue.clone() }}</dd></div>
                 {run.target_set.clone().map(|set| view! { <div><dt class="text-crono-muted">"Origin Target Set"</dt><dd>{set}</dd></div> })}
-                {run.rerun_of_run_id.map(|id| view! { <div><dt class="text-crono-muted">"Re-run of"</dt><dd><A href=crate::navigation::run_details_path(id) attr:class="text-crono-primary">{id.to_string()}</A></dd></div> })}
+                {run.rerun_of_run_id.map(|id| view! { <div><dt class="text-crono-muted">"Re-run of"</dt><dd><A href=crate::navigation::run_details_path(id) attr:class="font-mono text-crono-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">{id.to_string()}</A></dd></div> })}
             </dl>
             {run.terminal_reason.clone().map(|reason| view! { <p class="rounded-md bg-red-50 p-3 text-sm text-crono-failed">{reason}</p> })}
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">

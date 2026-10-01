@@ -3,7 +3,7 @@
 use super::runs::run_status;
 use crate::{
     api,
-    components::{Icon, PageHeader},
+    components::{Icon, PageHeader, QUIET_ACTION_CLASS},
     navigation::AppRoute,
 };
 use crono_api::WorkerStatus;
@@ -41,7 +41,7 @@ pub fn OverviewPage() -> impl IntoView {
                 <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface">
                     <header class="flex items-center justify-between border-b border-crono-border px-5 py-4 sm:px-6">
                         <h2 class="font-semibold text-crono-text">"Recent Runs"</h2>
-                        <A href=AppRoute::Runs.path() attr:class="text-sm font-medium text-crono-primary hover:text-crono-primary-hover">"View all"</A>
+                        <A href=AppRoute::Runs.path() attr:class=QUIET_ACTION_CLASS><Icon symbol=AppRoute::Runs.symbol() class="text-lg leading-none" />"View all"</A>
                     </header>
                     {move || runs.map(|result| match result {
                         Ok(page) if page.items.is_empty() => view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"No Runs yet."</p> }.into_any(),
@@ -58,7 +58,7 @@ pub fn OverviewPage() -> impl IntoView {
                 <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface">
                     <header class="flex items-center justify-between border-b border-crono-border px-5 py-4 sm:px-6">
                         <h2 class="font-semibold text-crono-text">"Workers"</h2>
-                        <A href=AppRoute::Workers.path() attr:class="text-sm font-medium text-crono-primary hover:text-crono-primary-hover">"View all"</A>
+                        <A href=AppRoute::Workers.path() attr:class=QUIET_ACTION_CLASS><Icon symbol=AppRoute::Workers.symbol() class="text-lg leading-none" />"View all"</A>
                     </header>
                     {move || workers.map(|result| match result {
                         Ok(page) if page.items.is_empty() => view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"No workers have reported presence."</p> }.into_any(),

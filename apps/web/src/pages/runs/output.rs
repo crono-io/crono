@@ -6,7 +6,11 @@
 //! fetched once on opening rather than showing a redundant refresh control.
 
 use super::status_can_change;
-use crate::{api, components::Icon, navigation::MaterialSymbol};
+use crate::{
+    api,
+    components::{Icon, QUIET_ACTION_CLASS},
+    navigation::MaterialSymbol,
+};
 use crono_api::RunStatus;
 use leptos::prelude::*;
 use uuid::Uuid;
@@ -18,7 +22,7 @@ pub(super) fn RunAttemptOutput(run_id: Uuid, status: RunStatus) -> impl IntoView
     view! {
         <div class="mt-3 rounded-md border border-crono-border bg-zinc-50 p-3">
             {status_can_change(status).then(|| view! {
-                <button type="button" class="inline-flex items-center gap-1.5 rounded-md border border-crono-border bg-white px-2.5 py-1.5 text-xs font-medium text-crono-primary shadow-sm transition-colors hover:border-crono-primary/40 hover:bg-crono-primary-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary" on:click=move |_| attempts.refetch()>
+                <button type="button" class=QUIET_ACTION_CLASS on:click=move |_| attempts.refetch()>
                     <Icon symbol=MaterialSymbol::Refresh class="text-base leading-none" />
                     <span>"Refresh output"</span>
                 </button>

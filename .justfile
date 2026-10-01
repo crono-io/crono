@@ -44,6 +44,7 @@ test: fmt-check clippy
       --dbname postgres \
       --set ON_ERROR_STOP=1 \
       --file /tmp/crono-sql/00_init.sql >/dev/null
+    bash tests/bootstrap.sh "$container"
     port="$(podman port "$container" 5432/tcp)"
     port="${port%%$'\n'*}"
     export CRONO_TEST_DATABASE_URL="postgres://crono_runtime@127.0.0.1:${port##*:}/crono"

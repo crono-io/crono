@@ -13,6 +13,7 @@ pub enum AppRoute {
     Jobs,
     JobsNew,
     Targets,
+    TargetsNew,
     TargetSets,
     Schedules,
     Runs,
@@ -33,6 +34,7 @@ impl AppRoute {
             Self::Jobs => "/jobs",
             Self::JobsNew => "/jobs/new",
             Self::Targets => "/targets",
+            Self::TargetsNew => "/targets/new",
             Self::TargetSets => "/target-sets",
             Self::Schedules => "/schedules",
             Self::Runs => "/runs",
@@ -53,6 +55,7 @@ impl AppRoute {
             Self::Jobs => "Jobs",
             Self::JobsNew => "Create Job",
             Self::Targets => "Targets",
+            Self::TargetsNew => "Create Target",
             Self::TargetSets => "Target Sets",
             Self::Schedules => "Schedules",
             Self::Runs => "Runs",
@@ -71,7 +74,7 @@ impl AppRoute {
             Self::Namespaces => MaterialSymbol::AccountTree,
             Self::Queues => MaterialSymbol::Queue,
             Self::Jobs | Self::JobsNew => MaterialSymbol::Work,
-            Self::Targets => MaterialSymbol::Dns,
+            Self::Targets | Self::TargetsNew => MaterialSymbol::Dns,
             Self::TargetSets => MaterialSymbol::Lan,
             Self::Schedules => MaterialSymbol::CalendarMonth,
             Self::Runs | Self::RunsNew => MaterialSymbol::PlayCircle,
@@ -95,6 +98,7 @@ impl AppRoute {
     pub const fn children(self) -> &'static [NavigationChild] {
         match self {
             Self::Jobs => JOB_CHILDREN,
+            Self::Targets => TARGET_CHILDREN,
             Self::Runs => RUN_CHILDREN,
             _ => &[],
         }
@@ -105,6 +109,7 @@ impl AppRoute {
     pub const fn submenu_id(self) -> &'static str {
         match self {
             Self::Jobs => "jobs-submenu",
+            Self::Targets => "targets-submenu",
             Self::Runs => "runs-submenu",
             _ => "",
         }
@@ -126,6 +131,17 @@ const JOB_CHILDREN: &[NavigationChild] = &[
     NavigationChild {
         route: AppRoute::JobsNew,
         label: "Create Job",
+    },
+];
+
+const TARGET_CHILDREN: &[NavigationChild] = &[
+    NavigationChild {
+        route: AppRoute::Targets,
+        label: "All Targets",
+    },
+    NavigationChild {
+        route: AppRoute::TargetsNew,
+        label: "Create Target",
     },
 ];
 
@@ -215,13 +231,14 @@ const EXECUTION_ROUTES: &[AppRoute] = &[AppRoute::Schedules, AppRoute::Runs, App
 const SYSTEM_ROUTES: &[AppRoute] = &[AppRoute::Monitor, AppRoute::Settings];
 
 /// Complete route inventory used for exact matching and verification.
-pub const ALL_ROUTES: [AppRoute; 13] = [
+pub const ALL_ROUTES: [AppRoute; 14] = [
     AppRoute::Overview,
     AppRoute::Namespaces,
     AppRoute::Queues,
     AppRoute::Jobs,
     AppRoute::JobsNew,
     AppRoute::Targets,
+    AppRoute::TargetsNew,
     AppRoute::TargetSets,
     AppRoute::Schedules,
     AppRoute::Runs,
@@ -273,6 +290,12 @@ pub fn job_edit_path(id: impl std::fmt::Display) -> String {
     format!("/jobs/{id}/edit")
 }
 
+/// Canonical edit URL for a Target; resource records remain outside the sidebar.
+#[must_use]
+pub fn target_edit_path(id: impl std::fmt::Display) -> String {
+    format!("/targets/{id}/edit")
+}
+
 /// Canonical details URL for one Run.
 #[must_use]
 pub fn run_details_path(id: impl std::fmt::Display) -> String {
@@ -289,7 +312,8 @@ pub fn worker_details_path(id: impl std::fmt::Display) -> String {
 mod tests {
     use super::{
         ALL_ROUTES, AppRoute, MaterialSymbol, NAVIGATION_GROUPS, is_active_path,
-        is_section_active_path, job_edit_path, run_details_path, worker_details_path,
+        is_section_active_path, job_edit_path, run_details_path, target_edit_path,
+        worker_details_path,
     };
 
     #[test]
@@ -301,6 +325,7 @@ mod tests {
             "/jobs",
             "/jobs/new",
             "/targets",
+            "/targets/new",
             "/target-sets",
             "/runs",
             "/runs/new",
@@ -340,7 +365,10 @@ mod tests {
                 .count();
             assert_eq!(
                 top_level,
-                usize::from(!matches!(route, AppRoute::JobsNew | AppRoute::RunsNew)),
+                usize::from(!matches!(
+                    route,
+                    AppRoute::JobsNew | AppRoute::TargetsNew | AppRoute::RunsNew
+                )),
                 "{}",
                 route.path()
             );
@@ -348,13 +376,18 @@ mod tests {
                 child,
                 usize::from(matches!(
                     route,
-                    AppRoute::Jobs | AppRoute::JobsNew | AppRoute::Runs | AppRoute::RunsNew
+                    AppRoute::Jobs
+                        | AppRoute::JobsNew
+                        | AppRoute::Targets
+                        | AppRoute::TargetsNew
+                        | AppRoute::Runs
+                        | AppRoute::RunsNew
                 )),
                 "{}",
                 route.path()
             );
-            assert!(!route.label().is_empty());
-            assert!(!route.symbol().as_str().is_empty());
+            assert_ne!(route.label(), "");
+            assert_ne!(route.symbol().as_str(), "");
         }
     }
 
@@ -363,6 +396,14 @@ mod tests {
         assert!(is_active_path("/targets", AppRoute::Targets));
         assert!(!is_active_path("/targets/", AppRoute::Targets));
         assert!(!is_active_path("/target-sets", AppRoute::Targets));
+        assert!(is_active_path("/targets/new", AppRoute::TargetsNew));
+        assert!(!is_active_path("/targets/new", AppRoute::Targets));
+        assert!(is_section_active_path("/targets/new", AppRoute::Targets));
+        assert!(is_section_active_path(
+            "/targets/123/edit",
+            AppRoute::Targets
+        ));
+        assert!(!is_section_active_path("/targets-other", AppRoute::Targets));
         assert!(!is_active_path("/unknown", AppRoute::Overview));
         assert!(is_active_path("/jobs/new", AppRoute::JobsNew));
         assert!(!is_active_path("/jobs/new", AppRoute::Jobs));
@@ -388,6 +429,25 @@ mod tests {
         assert_eq!(AppRoute::Jobs.submenu_id(), "jobs-submenu");
         let id = "00000000-0000-0000-0000-000000000000";
         assert_eq!(job_edit_path(id), format!("/jobs/{id}/edit"));
+    }
+
+    #[test]
+    fn target_submenu_contains_only_browse_and_create_actions() {
+        assert_eq!(AppRoute::Targets.children().len(), 2);
+        assert_eq!(
+            AppRoute::Targets
+                .children()
+                .first()
+                .map(|child| child.label),
+            Some("All Targets")
+        );
+        assert_eq!(
+            AppRoute::Targets.children().get(1).map(|child| child.label),
+            Some("Create Target")
+        );
+        assert_eq!(AppRoute::Targets.submenu_id(), "targets-submenu");
+        let id = "00000000-0000-0000-0000-000000000000";
+        assert_eq!(target_edit_path(id), format!("/targets/{id}/edit"));
     }
 
     #[test]

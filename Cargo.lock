@@ -695,9 +695,12 @@ dependencies = [
 name = "crono-web"
 version = "0.1.4"
 dependencies = [
+ "chrono",
+ "chrono-tz",
  "crono-api",
  "crono-execution",
  "gloo-net 0.7.0",
+ "js-sys",
  "leptos",
  "leptos_router",
  "serde",

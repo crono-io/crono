@@ -26,7 +26,7 @@ pub use runs::{RunDetailsPage, RunJobPage, RunsPage};
 pub use schedules::SchedulesPage;
 pub use settings::SettingsPage;
 pub use target_sets::TargetSetsPage;
-pub use targets::TargetsPage;
+pub use targets::{CreateTargetPage, EditTargetPage, TargetsPage};
 pub use workers::{WorkerDetailsPage, WorkersPage};
 
 use crate::{

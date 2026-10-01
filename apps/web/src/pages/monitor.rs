@@ -3,8 +3,13 @@
 //! A bounded JSON snapshot is refreshed while this page is mounted. Shared
 //! database counts are separated from API-instance poll and connection health,
 //! so the browser never infers cluster-wide liveness from one process's state.
+//! Related resource links use the same symbols as the main navigation.
 
-use crate::{api, components::PageHeader, navigation::AppRoute};
+use crate::{
+    api,
+    components::{Icon, PageHeader, QUIET_ACTION_CLASS},
+    navigation::AppRoute,
+};
 use crono_api::{DatabaseMonitorResource, MonitorResource, PipelineMonitorResource};
 use leptos::prelude::*;
 use leptos_router::components::A;
@@ -101,10 +106,16 @@ fn snapshot_view(snapshot: MonitorResource) -> impl IntoView {
                     <MetricTile label="Publisher DB poll" value=instance.publisher_last_poll_at.unwrap_or_else(|| "Not observed yet".to_string()) detail="Last successful outbox claim on this API instance" />
                 </div>
             </section>
-            <nav aria-label="Investigate execution" class="flex flex-wrap gap-4 text-sm font-medium text-crono-primary">
-                <A href=AppRoute::Schedules.path()>"View Schedules →"</A>
-                <A href=AppRoute::Runs.path()>"View Runs →"</A>
-                <A href=AppRoute::Workers.path()>"View Workers →"</A>
+            <nav aria-label="Investigate execution" class="flex flex-wrap gap-2">
+                <A href=AppRoute::Schedules.path() attr:class=QUIET_ACTION_CLASS>
+                    <Icon symbol=AppRoute::Schedules.symbol() class="text-lg leading-none" />"View Schedules"
+                </A>
+                <A href=AppRoute::Runs.path() attr:class=QUIET_ACTION_CLASS>
+                    <Icon symbol=AppRoute::Runs.symbol() class="text-lg leading-none" />"View Runs"
+                </A>
+                <A href=AppRoute::Workers.path() attr:class=QUIET_ACTION_CLASS>
+                    <Icon symbol=AppRoute::Workers.symbol() class="text-lg leading-none" />"View Workers"
+                </A>
             </nav>
         </div>
     }

@@ -492,7 +492,8 @@ impl Application {
         Ok(self.store.get_target(id).await?)
     }
 
-    /// Replace Target arguments and inputs for future execution snapshots.
+    /// Replace Target metadata for future snapshots while keeping the starter
+    /// Target's name stable. Authorization precedes reading its current name.
     ///
     /// # Errors
     ///
@@ -516,6 +517,16 @@ impl Application {
                 &ResourceScope::Target(id),
             )
             .await?;
+        let current = self.store.get_target(id).await?;
+        if current.namespace.as_str() == "default"
+            && current.target.name().as_str() == "default"
+            && name.as_str() != "default"
+        {
+            return Err(ApplicationError::invalid(
+                "name",
+                "the default Target cannot be renamed",
+            ));
+        }
         let definition = TargetDefinition { arguments, inputs };
         Ok(self.store.update_target(id, &name, &definition).await?)
     }

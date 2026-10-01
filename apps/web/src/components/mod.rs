@@ -10,6 +10,7 @@ pub mod forms;
 pub mod icon;
 pub mod layout;
 pub mod page_header;
+pub mod timezone_select;
 
 pub use card::Card;
 pub use empty_state::EmptyState;
@@ -20,3 +21,7 @@ pub use forms::{
 };
 pub use icon::Icon;
 pub use page_header::PageHeader;
+pub use timezone_select::TimezoneSelect;
+
+/// Style secondary links and controls as quiet navigation with clear hover and focus states.
+pub(crate) const QUIET_ACTION_CLASS: &str = "inline-flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2 py-2 text-sm font-medium text-crono-muted transition-colors hover:bg-zinc-100 hover:text-crono-primary focus-visible:bg-crono-primary-soft focus-visible:text-crono-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-crono-muted sm:gap-2 sm:px-3";

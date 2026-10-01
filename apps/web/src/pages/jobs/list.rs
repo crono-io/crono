@@ -6,7 +6,7 @@
 use super::super::resource_options;
 use crate::{
     api,
-    components::{EmptyState, PageHeader, ResourceSelect},
+    components::{EmptyState, PageHeader, QUIET_ACTION_CLASS, ResourceSelect},
     navigation::{AppRoute, MaterialSymbol, job_edit_path},
 };
 use crono_api::{JobResource, Page};
@@ -29,7 +29,7 @@ pub fn JobsPage() -> impl IntoView {
                 <A href=AppRoute::JobsNew.path() attr:class=ACTION_CLASS>"+ Create Job"</A>
             </PageHeader>
             <div class="max-w-xl">
-                <ResourceSelect id="jobs-namespace-filter" label="Namespace" placeholder="Select a Namespace to browse Jobs…" options=namespace_choices.options selected=namespace_id loading=namespace_choices.loading load_error=namespace_choices.load_error optional=true />
+                <ResourceSelect id="jobs-namespace-filter" label="Namespace" placeholder="Select a Namespace to browse Jobs…" options=namespace_choices.options selected=namespace_id loading=namespace_choices.loading load_error=namespace_choices.load_error optional=true select_single=true />
             </div>
             <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface">
                 {move || {
@@ -75,7 +75,7 @@ fn ResourceList(jobs: LocalResource<api::ApiResult<Page<JobResource>>>) -> impl 
                                     <p class="text-sm text-crono-muted">{job.qualified_name}</p>
                                     <p class="mt-1 text-xs text-crono-muted">{format!("{:?} · {} · {} argv items{}", job.executor, job.queue, job.arguments.len(), if job.dry_run { " · Dry run" } else { "" })}</p>
                                 </div>
-                                <A href=edit_path attr:class="text-sm font-medium text-crono-primary hover:text-crono-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">"Edit →"</A>
+                                <A href=edit_path attr:class=QUIET_ACTION_CLASS>"Edit"</A>
                             </li>
                         }
                     }).collect_view()}

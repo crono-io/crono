@@ -6,7 +6,7 @@
 
 use crate::{
     api,
-    components::{EmptyState, PageHeader},
+    components::{EmptyState, Icon, PageHeader, QUIET_ACTION_CLASS},
     navigation::{MaterialSymbol, worker_details_path},
 };
 use crono_api::WorkerStatus;
@@ -29,7 +29,7 @@ pub fn WorkersPage() -> impl IntoView {
                         <h2 class="font-semibold text-crono-text">"Worker presence"</h2>
                         <p class="mt-1 text-xs text-crono-muted">"Online ≤30s · stale ≤2m · offline retained for 7 days"</p>
                     </div>
-                    <button class="text-sm font-medium text-crono-primary hover:text-crono-primary-hover" type="button" on:click=move |_| workers.refetch()>"Refresh"</button>
+                    <button class=QUIET_ACTION_CLASS type="button" on:click=move |_| workers.refetch()><Icon symbol=MaterialSymbol::Refresh class="text-lg leading-none" />"Refresh"</button>
                 </header>
                 {move || workers.map(|result| match result {
                     Ok(page) if page.items.is_empty() => view! {
@@ -93,7 +93,7 @@ pub fn WorkerDetailsPage() -> impl IntoView {
     view! {
         <div class="space-y-6">
             <PageHeader title="Worker details" description="Heartbeat-backed identity and safe execution diagnostics.">
-                <A href="/workers" attr:class="text-sm font-medium text-crono-primary hover:underline">"← All Workers"</A>
+                <A href="/workers" attr:class=QUIET_ACTION_CLASS>"← All Workers"</A>
             </PageHeader>
             {move || worker.map(|result| match result {
                 Ok(details) => {

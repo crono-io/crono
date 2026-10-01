@@ -116,12 +116,23 @@ pub async fn update_job(id: Uuid, request: &UpdateJobRequest) -> ApiResult<JobRe
     put(&format!("{API_ROOT}/jobs/{id}"), request).await
 }
 
-pub async fn list_targets(namespace_id: Uuid) -> ApiResult<Page<TargetResource>> {
-    get(&format!("{}?limit=100", targets_path(namespace_id))).await
+/// Fetch one alphabetical page without silently truncating large Target lists.
+pub async fn list_targets(
+    namespace_id: Uuid,
+    after: Option<&str>,
+) -> ApiResult<Page<TargetResource>> {
+    let base = format!("{}?limit=25", targets_path(namespace_id));
+    let url = after.map_or(base.clone(), |cursor| format!("{base}&after={cursor}"));
+    get(&url).await
 }
 
 pub async fn all_targets(namespace_id: Uuid) -> ApiResult<Vec<TargetResource>> {
     get_all(&targets_path(namespace_id)).await
+}
+
+/// Fetch one authorized Target so an edit URL survives refresh or direct entry.
+pub async fn get_target(id: Uuid) -> ApiResult<TargetResource> {
+    get(&format!("{API_ROOT}/targets/{id}")).await
 }
 
 pub async fn create_target(

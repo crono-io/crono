@@ -3,7 +3,7 @@
 //! The server owns authorization and snapshot creation. This form submits only
 //! the selected identities and invocation inputs; it does not resolve commands.
 
-use super::ACTION_CLASS;
+use super::{ACTION_CLASS, RUN_ACTION_CLASS};
 use crate::{
     api,
     components::{
@@ -88,14 +88,14 @@ pub fn RunJobPage() -> impl IntoView {
     view! {
         <div class="space-y-8">
             <PageHeader title="Run a Job" description="Start a manual execution from a Job and a Target or Target Set.">
-                <A href=AppRoute::Runs.path() attr:class="text-sm font-medium text-crono-primary hover:text-crono-primary-hover">"← All Runs"</A>
+                <A href=AppRoute::Runs.path() attr:class=RUN_ACTION_CLASS>"← All Runs"</A>
             </PageHeader>
             <section class="rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
                 <form class="space-y-4" on:submit=submit novalidate>
-                    <ResourceSelect id="run-namespace" label="Namespace" placeholder="Search/select namespace…" options=namespace_choices.options selected=namespace_id loading=namespace_choices.loading load_error=namespace_choices.load_error field_error=namespace_error />
+                    <ResourceSelect id="run-namespace" label="Namespace" placeholder="Search/select namespace…" options=namespace_choices.options selected=namespace_id loading=namespace_choices.loading load_error=namespace_choices.load_error field_error=namespace_error select_single=true />
                     <div class="grid gap-4 md:grid-cols-2">
                         <ResourceSelect id="run-job" label="Job" placeholder="Search/select job…" options=job_choices.options selected=job_id loading=job_choices.loading load_error=job_choices.load_error field_error=job_error />
-                        <ResourceSelect id="run-target" label="Destination" placeholder="Search/select Target or Target Set…" options=destination_choices selected=target_id loading=Signal::derive(move || target_choices.loading.get() || set_choices.loading.get()) load_error=Signal::derive(move || target_choices.load_error.get().or_else(|| set_choices.load_error.get())) field_error=target_error />
+                        <ResourceSelect id="run-target" label="Destination" placeholder="Search/select Target or Target Set…" options=destination_choices selected=target_id loading=Signal::derive(move || target_choices.loading.get() || set_choices.loading.get()) load_error=Signal::derive(move || target_choices.load_error.get().or_else(|| set_choices.load_error.get())) field_error=target_error select_single=true />
                     </div>
                     <JsonObjectInput id="run-inputs" label="Invocation inputs" value=inputs error=input_error />
                     <Show when=move || namespace_id.get().is_some() && !job_choices.loading.get() && job_choices.options.get().is_empty() && job_choices.load_error.get().is_none()>

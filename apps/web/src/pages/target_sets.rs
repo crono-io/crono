@@ -8,8 +8,9 @@ use super::resource_options;
 use crate::{
     api,
     components::{
-        FormActions, JsonObjectInput, PageHeader, ResourceMultiSelect, ResourceNameInput,
-        ResourceSelect, name_validation_message, parse_input_object, visible_name_validation,
+        FormActions, JsonObjectInput, PageHeader, QUIET_ACTION_CLASS, ResourceMultiSelect,
+        ResourceNameInput, ResourceSelect, name_validation_message, parse_input_object,
+        visible_name_validation,
     },
 };
 use crono_api::{CreateTargetSetRequest, UpdateTargetSetRequest};
@@ -164,8 +165,8 @@ fn target_sets_view(state: &TargetSetViewState) -> impl IntoView + use<> {
             <section class="rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
                 <h2 class="text-base font-semibold text-crono-text">{move || if state.editing_id.get().is_some() { "Edit Target Set" } else { "Create Target Set" }}</h2>
                 <form class="mt-5 space-y-5" on:submit=move |event| state.submit.run(event) novalidate>
-                    <ResourceSelect id="target-set-namespace" label="Namespace" placeholder="Search/select namespace…" options=state.namespace_choices.options selected=state.namespace_id loading=state.namespace_choices.loading load_error=state.namespace_choices.load_error field_error=state.namespace_error />
-                    <Show when=move || !state.namespace_choices.loading.get() && state.namespace_choices.options.get().is_empty() && state.namespace_choices.load_error.get().is_none()><p class="rounded-md bg-zinc-50 p-3 text-sm text-crono-muted">"No namespaces exist yet. "<A href="/namespaces" attr:class="font-medium text-crono-primary">"Create one first."</A></p></Show>
+                    <ResourceSelect id="target-set-namespace" label="Namespace" placeholder="Search/select namespace…" options=state.namespace_choices.options selected=state.namespace_id loading=state.namespace_choices.loading load_error=state.namespace_choices.load_error field_error=state.namespace_error select_single=true />
+                    <Show when=move || !state.namespace_choices.loading.get() && state.namespace_choices.options.get().is_empty() && state.namespace_choices.load_error.get().is_none()><p class="rounded-md bg-zinc-50 p-3 text-sm text-crono-muted">"No namespaces exist yet. "<A href="/namespaces" attr:class="font-medium text-crono-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">"Create one first."</A></p></Show>
                     <ResourceNameInput id="target-set-name" label="Name" value=state.name error=state.name_error />
                     <ResourceMultiSelect id="target-set-targets" label="Targets" options=state.target_choices.options selected=state.target_ids loading=state.target_choices.loading load_error=state.target_choices.load_error field_error=state.member_error />
                     <JsonObjectInput id="target-set-inputs" label="Shared inputs" value=state.inputs error=state.input_error />
@@ -175,7 +176,7 @@ fn target_sets_view(state: &TargetSetViewState) -> impl IntoView + use<> {
             </section>
             <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface"><header class="border-b border-crono-border px-5 py-4 sm:px-6"><h2 class="font-semibold text-crono-text">"Target Sets in Namespace"</h2></header>{move || state.target_sets.map(|result| match result {
                 Ok(page) if page.items.is_empty() => view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Select a Namespace or create its first Target Set."</p> }.into_any(),
-                Ok(page) => view! { <ul class="divide-y divide-crono-border">{page.items.iter().cloned().map(|set| { let edit_set = set.clone(); view! { <li class="flex items-center justify-between gap-4 px-5 py-4 sm:px-6"><div><p class="font-medium text-crono-text">{set.qualified_name}</p><p class="mt-1 text-sm text-crono-muted">{set.targets.iter().map(|target| target.name.clone()).collect::<Vec<_>>().join(", ")}</p></div><button type="button" class="text-sm font-medium text-crono-primary" on:click=move |_| { state.editing_id.set(Some(edit_set.id)); state.namespace_id.set(Some(edit_set.namespace_id)); state.name.set(edit_set.name.clone()); state.target_ids.set(edit_set.targets.iter().map(|target| target.id).collect()); state.inputs.set(pretty_json(&edit_set.inputs)); }>"Edit"</button></li> } }).collect_view()}</ul> }.into_any(),
+                Ok(page) => view! { <ul class="divide-y divide-crono-border">{page.items.iter().cloned().map(|set| { let edit_set = set.clone(); view! { <li class="flex items-center justify-between gap-4 px-5 py-4 sm:px-6"><div><p class="font-medium text-crono-text">{set.qualified_name}</p><p class="mt-1 text-sm text-crono-muted">{set.targets.iter().map(|target| target.name.clone()).collect::<Vec<_>>().join(", ")}</p></div><button type="button" class=QUIET_ACTION_CLASS on:click=move |_| { state.editing_id.set(Some(edit_set.id)); state.namespace_id.set(Some(edit_set.namespace_id)); state.name.set(edit_set.name.clone()); state.target_ids.set(edit_set.targets.iter().map(|target| target.id).collect()); state.inputs.set(pretty_json(&edit_set.inputs)); }>"Edit"</button></li> } }).collect_view()}</ul> }.into_any(),
                 Err(error) => view! { <p class="px-6 py-10 text-center text-sm text-crono-failed">{error.message.clone()}</p> }.into_any(),
             }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Target Sets…"</p> }.into_any())}</section>
         </div>

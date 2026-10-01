@@ -161,4 +161,35 @@ BEGIN
 END;
 $$;
 
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM crono.queues
+        WHERE name = 'default' AND system AND enabled
+    ) THEN
+        RAISE EXCEPTION 'Missing enabled system default Queue';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM crono.namespaces WHERE name = 'default'
+    ) THEN
+        RAISE EXCEPTION 'Missing default Namespace';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM crono.targets AS t
+        JOIN crono.namespaces AS n ON n.id = t.namespace_id
+        WHERE n.name = 'default' AND t.name = 'default'
+    ) THEN
+        RAISE EXCEPTION 'Missing default Target';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgrelid = 'crono.targets'::regclass
+          AND tgname = 'default_target_name'
+          AND NOT tgisinternal
+    ) THEN
+        RAISE EXCEPTION 'Missing default Target name protection';
+    END IF;
+END;
+$$;
+
 \echo 'Crono database check complete.'

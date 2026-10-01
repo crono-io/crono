@@ -8,7 +8,7 @@
 use crate::{
     api,
     components::{
-        FormActions, PageHeader, ResourceNameInput, name_validation_message,
+        FormActions, PageHeader, QUIET_ACTION_CLASS, ResourceNameInput, name_validation_message,
         visible_name_validation,
     },
 };
@@ -252,7 +252,7 @@ fn QueueRow(queue: QueueResource, on_changed: Callback<()>) -> impl IntoView {
                                 if value.is_empty() { "No description".to_string() } else { value }
                             }}</p>
                         </div>
-                        <button type="button" class="self-start rounded-md border border-crono-border px-3 py-2 text-sm font-medium text-crono-text hover:bg-zinc-50" on:click=move |_| editing.set(true)>"Edit"</button>
+                        <button type="button" class=QUIET_ACTION_CLASS on:click=move |_| editing.set(true)>"Edit"</button>
                     </div>
                 }
             >
