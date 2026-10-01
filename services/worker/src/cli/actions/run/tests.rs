@@ -120,7 +120,7 @@ async fn dry_run_prints_rendered_argv_without_spawning_a_process() -> Result<()>
         result.stdout_tail,
         "DRY RUN (not executed): \"/definitely/missing/executable\" \"hello world\" \"quoted\\\"value\""
     );
-    assert!(result.stderr_tail.is_empty());
+    assert_eq!(result.stderr_tail, "");
     assert!(
         events
             .iter()
@@ -200,7 +200,7 @@ async fn shell_uses_templated_argument_as_data_not_shell_source() -> Result<()> 
     let (result, events) = observed(execution, false).await?;
     assert!(result.succeeded);
     assert_eq!(result.stdout_tail, "Hello, $(printf injected >&2)\n");
-    assert!(result.stderr_tail.is_empty());
+    assert_eq!(result.stderr_tail, "");
     assert!(events.iter().any(|entry| matches!(&entry.event,
         ExecutionEvent::CommandResolved { shell_command: Some(script), .. }
             if script.contains("printf 'Hello"))));
@@ -507,6 +507,6 @@ fn old_execution_snapshots_default_new_observability_fields() -> Result<()> {
     assert_eq!(restored.job_id, None);
     assert_eq!(restored.trigger, None);
     assert_eq!(restored.scheduled_at, None);
-    assert!(restored.argument_templates.is_empty());
+    assert_eq!(restored.argument_templates, Vec::<String>::new());
     Ok(())
 }

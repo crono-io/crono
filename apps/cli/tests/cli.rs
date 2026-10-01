@@ -26,7 +26,7 @@ fn help_does_not_resolve_client_configuration() -> Result<()> {
         .output()?;
 
     assert!(output.status.success());
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, Vec::<u8>::new());
     let stdout = String::from_utf8(output.stdout)?;
     assert!(stdout.contains("Usage: crono"));
     assert!(stdout.contains("--address <URL>"));
@@ -151,7 +151,7 @@ fn process_rejects_malformed_and_credential_bearing_addresses() -> Result<()> {
     for address in ["not a URL", "https://user:password@crono.example.com"] {
         let output = invoke(&["--address", address])?;
         assert_eq!(output.status.code(), Some(1));
-        assert!(!output.stderr.is_empty());
+        assert_ne!(output.stderr, Vec::<u8>::new());
     }
     Ok(())
 }

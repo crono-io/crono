@@ -615,7 +615,7 @@ mod run_resource_compatibility_tests {
         let run: RunResource = serde_json::from_value(old)?;
         assert_eq!(run.trigger_source, RunTriggerSource::Unknown);
         assert!(!run.rerunnable);
-        assert!(run.triggered_at.is_empty());
+        assert_eq!(run.triggered_at, "");
         Ok(())
     }
 }

@@ -301,7 +301,7 @@ fn committed_openapi_document_matches_generated_output() -> Result<()> {
 fn openapi_binary_emits_parseable_document() -> Result<()> {
     let output = Command::new(env!("CARGO_BIN_EXE_crono-server-openapi")).output()?;
     assert!(output.status.success());
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, Vec::<u8>::new());
 
     let document: Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(

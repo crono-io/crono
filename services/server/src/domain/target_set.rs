@@ -168,7 +168,7 @@ mod tests {
 
         let error = set.add_target(&postgres);
         assert!(error.is_err());
-        assert!(set.members().is_empty());
+        assert_eq!(set.members(), &BTreeSet::new());
         if let Err(error) = error {
             assert_eq!(error.expected(), namespace_id);
             assert_eq!(error.actual(), NamespaceId::new(Uuid::from_u128(2)));

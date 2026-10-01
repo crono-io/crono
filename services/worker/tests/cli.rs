@@ -30,7 +30,7 @@ fn help_and_version_do_not_initialize_telemetry() -> Result<()> {
             !stdout.contains('\u{1b}'),
             "piped output must not contain ANSI escapes"
         );
-        assert!(output.stderr.is_empty());
+        assert_eq!(output.stderr, Vec::<u8>::new());
     }
     Ok(())
 }
@@ -59,7 +59,7 @@ fn missing_or_unknown_commands_are_rejected() -> Result<()> {
     for args in [&[][..], &["unknown"][..], &["run", "--unknown"][..]] {
         let output = invoke(args)?;
         assert_eq!(output.status.code(), Some(2));
-        assert!(!output.stderr.is_empty());
+        assert_ne!(output.stderr, Vec::<u8>::new());
     }
     Ok(())
 }
@@ -68,7 +68,7 @@ fn missing_or_unknown_commands_are_rejected() -> Result<()> {
 fn run_reports_unavailable_nats() -> Result<()> {
     let output = invoke(&["run", "--nats-url", "nats://127.0.0.1:1"])?;
     assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, Vec::<u8>::new());
     assert!(String::from_utf8(output.stderr)?.contains("failed to connect worker to NATS"));
     Ok(())
 }

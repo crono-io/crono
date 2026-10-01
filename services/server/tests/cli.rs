@@ -30,7 +30,7 @@ fn help_and_version_do_not_initialize_telemetry() -> Result<()> {
             !stdout.contains('\u{1b}'),
             "piped output must not contain ANSI escapes"
         );
-        assert!(output.stderr.is_empty());
+        assert_eq!(output.stderr, Vec::<u8>::new());
     }
     Ok(())
 }
@@ -59,7 +59,7 @@ fn obsolete_commands_and_unknown_arguments_are_rejected() -> Result<()> {
     for args in [&["run"][..], &["unknown"][..], &["--unknown"][..]] {
         let output = invoke(args)?;
         assert_eq!(output.status.code(), Some(2));
-        assert!(!output.stderr.is_empty());
+        assert_ne!(output.stderr, Vec::<u8>::new());
     }
     Ok(())
 }
