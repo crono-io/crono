@@ -15,7 +15,7 @@ use crate::{
     components::{
         ArgumentListInput, FormActions, JsonObjectInput, PageHeader, ResourceFeedback,
         ResourceFeedbackModal, ResourceNameInput, ResourceSelect,
-        forms::{FIELD_CLASS, READ_ONLY_FIELD_CLASS},
+        forms::{FIELD_CLASS, READ_ONLY_FIELD_CLASS, trim_structured_field},
         name_validation_message, parse_input_object, visible_name_validation,
     },
 };
@@ -100,7 +100,7 @@ pub(super) fn JobForm(#[prop(optional)] initial_job: Option<JobResource>) -> imp
                     </div>
                     <div class="grid gap-4 md:grid-cols-2">
                         <label class="block text-sm font-medium text-crono-text">"Executor"<select class=FIELD_CLASS prop:value=move || match executor.get() { ExecutorKind::Noop => "noop", ExecutorKind::Process => "process", ExecutorKind::Shell => "shell" } on:change=move |event| { let selected = match event_target_value(&event).as_str() { "process" => ExecutorKind::Process, "shell" => ExecutorKind::Shell, _ => ExecutorKind::Noop }; if selected == ExecutorKind::Shell && executor.get_untracked() != ExecutorKind::Shell { executable.set("/bin/sh".to_string()); } executor.set(selected); }><option value="noop">"No-op"</option><option value="process">"Process · direct executable"</option><option value="shell">"Shell · script"</option></select></label>
-                        <label class="block text-sm font-medium text-crono-text">{move || if executor.get() == ExecutorKind::Shell { "Shell interpreter" } else { "Executable" }}<input class=FIELD_CLASS type="text" placeholder=move || if executor.get() == ExecutorKind::Shell { "/bin/sh" } else { "/usr/bin/echo" } disabled=move || executor.get() == ExecutorKind::Noop prop:value=move || executable.get() on:input=move |event| executable.set(event_target_value(&event))/><p class="mt-1 text-sm text-crono-failed">{move || executable_error.get().unwrap_or_default()}</p></label>
+                        <label class="block text-sm font-medium text-crono-text">{move || if executor.get() == ExecutorKind::Shell { "Shell interpreter" } else { "Executable" }}<input class=FIELD_CLASS type="text" placeholder=move || if executor.get() == ExecutorKind::Shell { "/bin/sh" } else { "/usr/bin/echo" } disabled=move || executor.get() == ExecutorKind::Noop prop:value=move || executable.get() on:input=move |event| executable.set(event_target_value(&event)) on:blur=move |_| trim_structured_field(executable)/><p class="mt-1 text-sm text-crono-failed">{move || executable_error.get().unwrap_or_default()}</p></label>
                     </div>
                     <Show when=move || executor.get() == ExecutorKind::Shell>
                         <label class="block text-sm font-medium text-crono-text">"Shell script"<textarea class=FIELD_CLASS rows="4" placeholder="printf 'started\n'; /usr/bin/sleep 10; printf 'Hello, %s\n' \"$1\"" prop:value=move || shell_command.get() on:input=move |event| shell_command.set(event_target_value(&event))></textarea><p class="mt-1 text-xs text-crono-muted">"The script is literal. Put {{ name }} in Arguments and read it as $1; Crono will not inject input into shell source."</p><p class="mt-1 text-sm text-crono-failed">{move || shell_command_error.get().unwrap_or_default()}</p></label>
@@ -501,23 +501,31 @@ impl JobFields {
     }
 }
 
+/// Build the same normalized settings used by validation and command preview.
+/// Only name/path padding and numeric parsing change; argv, script, and JSON stay literal.
 fn job_request(fields: JobFields) -> Result<CreateJobRequest, ()> {
     Ok(CreateJobRequest {
-        name: fields.name.get(),
+        name: fields.name.get().trim().to_owned(),
         queue_id: fields.queue_id.get().ok_or(())?,
         executor: fields.executor.get(),
-        executable: (fields.executor.get() != ExecutorKind::Noop).then(|| fields.executable.get()),
+        executable: (fields.executor.get() != ExecutorKind::Noop)
+            .then(|| fields.executable.get().trim().to_owned()),
         shell_command: (fields.executor.get() == ExecutorKind::Shell)
             .then(|| fields.shell_command.get()),
         arguments: fields.arguments.get(),
         inputs: parse_input_object(&fields.inputs.get()).map_err(|_| ())?,
         idempotent: fields.idempotent.get(),
         dry_run: fields.dry_run.get(),
-        max_attempts: fields.max_attempts.get().parse().map_err(|_| ())?,
-        retry_initial_seconds: fields.retry_initial.get().parse().map_err(|_| ())?,
-        retry_max_seconds: fields.retry_max.get().parse().map_err(|_| ())?,
-        retry_multiplier: fields.retry_multiplier.get().parse().map_err(|_| ())?,
-        retry_jitter: fields.retry_jitter.get().parse().map_err(|_| ())?,
+        max_attempts: fields.max_attempts.get().trim().parse().map_err(|_| ())?,
+        retry_initial_seconds: fields.retry_initial.get().trim().parse().map_err(|_| ())?,
+        retry_max_seconds: fields.retry_max.get().trim().parse().map_err(|_| ())?,
+        retry_multiplier: fields
+            .retry_multiplier
+            .get()
+            .trim()
+            .parse()
+            .map_err(|_| ())?,
+        retry_jitter: fields.retry_jitter.get().trim().parse().map_err(|_| ())?,
     })
 }
 
@@ -543,12 +551,12 @@ fn update_job_request(value: CreateJobRequest) -> UpdateJobRequest {
 /// Render retry-policy values with the same label and control sizing as other fields.
 #[component]
 fn NumberField(label: &'static str, value: RwSignal<String>) -> impl IntoView {
-    view! { <label class="block text-sm font-medium text-crono-text">{label}<input class=FIELD_CLASS type="number" min="0" step="any" prop:value=move || value.get() on:input=move |event| value.set(event_target_value(&event))/></label> }
+    view! { <label class="block text-sm font-medium text-crono-text">{label}<input class=FIELD_CLASS type="number" min="0" step="any" prop:value=move || value.get() on:input=move |event| value.set(event_target_value(&event)) on:blur=move |_| trim_structured_field(value)/></label> }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::job_feedback_error;
+    use super::{JobFields, job_feedback_error, job_request};
     use crate::api::ApiError;
     use crate::components::{ResourceFeedback, ResourceFeedbackModal};
     use leptos::prelude::*;
@@ -556,6 +564,66 @@ mod tests {
     use wasm_bindgen::JsCast;
     use wasm_bindgen_test::wasm_bindgen_test;
     use web_sys::HtmlElement;
+
+    /// Keep this fixture independent of API option loads so only field behavior is tested.
+    fn process_fields() -> JobFields {
+        JobFields {
+            name: RwSignal::new("echo".to_string()),
+            queue_id: RwSignal::new(Some(uuid::Uuid::from_u128(1))),
+            executor: RwSignal::new(crono_api::ExecutorKind::Process),
+            executable: RwSignal::new("/usr/bin/echo ".to_string()),
+            shell_command: RwSignal::new(String::new()),
+            arguments: RwSignal::new(vec![" hello ".to_string()]),
+            inputs: RwSignal::new(r#"{"message":" world "}"#.to_string()),
+            idempotent: RwSignal::new(false),
+            dry_run: RwSignal::new(false),
+            max_attempts: RwSignal::new("1".to_string()),
+            retry_initial: RwSignal::new("1".to_string()),
+            retry_max: RwSignal::new("60".to_string()),
+            retry_multiplier: RwSignal::new("2".to_string()),
+            retry_jitter: RwSignal::new("0.2".to_string()),
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn structured_job_fields_trim_padding_without_changing_execution_content() {
+        let owner = Owner::new();
+        owner.with(|| {
+            untrack(|| {
+                let fields = process_fields();
+                let request = job_request(fields);
+                assert!(request.is_ok());
+                let Ok(request) = request else {
+                    return;
+                };
+                assert_eq!(request.executable.as_deref(), Some("/usr/bin/echo"));
+                assert_eq!(request.arguments, [" hello "]);
+                assert_eq!(request.inputs, serde_json::json!({"message":" world "}));
+                fields.name.set(" \techo\u{a0}".to_string());
+                fields.executor.set(crono_api::ExecutorKind::Shell);
+                fields.executable.set(" \t/bin/sh\n".to_string());
+                let script = "\n  printf '%s' \"$1\"  \n";
+                fields.shell_command.set(script.to_string());
+                fields.max_attempts.set(" 2 ".to_string());
+                fields.retry_initial.set(" 3 ".to_string());
+                fields.retry_max.set(" 60 ".to_string());
+                fields.retry_multiplier.set(" 2.5 ".to_string());
+                fields.retry_jitter.set(" 0.1 ".to_string());
+                let request = job_request(fields);
+                assert!(request.is_ok());
+                let Ok(request) = request else {
+                    return;
+                };
+                assert_eq!(request.name, "echo");
+                assert_eq!(request.executable.as_deref(), Some("/bin/sh"));
+                assert_eq!(request.shell_command.as_deref(), Some(script));
+                assert_eq!(request.max_attempts, 2);
+                assert_eq!(request.retry_initial_seconds, 3);
+                assert_eq!(request.retry_max_seconds, 60);
+                assert!((request.retry_multiplier - 2.5).abs() < f64::EPSILON);
+            });
+        });
+    }
 
     #[wasm_bindgen_test]
     fn duplicate_job_error_identifies_the_name_conflict() {

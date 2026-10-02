@@ -28,9 +28,10 @@ pub struct ResourceOption {
     pub label: String,
 }
 
-/// Return concise DNS-1123 feedback without changing the supplied value.
+/// Validate the trimmed name without altering the field while the user types.
 #[must_use]
 pub fn name_validation_message(value: &str, required: bool) -> Option<String> {
+    let value = value.trim();
     if value.is_empty() && !required {
         return None;
     }
@@ -43,10 +44,16 @@ pub fn name_validation_message(value: &str, required: bool) -> Option<String> {
 /// until the user attempts to submit the form.
 #[must_use]
 pub fn visible_name_validation(value: &str, attempted: bool) -> Option<String> {
-    if value.is_empty() && !attempted {
+    if value.trim().is_empty() && !attempted {
         return None;
     }
     name_validation_message(value, true)
+}
+
+/// Trim a structured field on blur; never use this for scripts, argv, or JSON values.
+/// Request builders also trim so submission does not depend on focus changes.
+pub(crate) fn trim_structured_field(value: RwSignal<String>) {
+    value.update(|input| *input = input.trim().to_owned());
 }
 
 /// Parse and validate the JSON object entered in an input editor.
@@ -153,6 +160,7 @@ pub fn ArgumentListInput(
 }
 
 /// Canonical resource-name field with stable guidance and inline errors.
+/// Padding is removed on blur, preserving cursor behavior during typing.
 #[component]
 pub fn ResourceNameInput(
     #[prop(into)] id: String,
@@ -180,6 +188,7 @@ pub fn ResourceNameInput(
                 aria-invalid=move || error.get().is_some().then_some("true")
                 prop:value=move || value.get()
                 on:input=move |event| value.set(event_target_value(&event))
+                on:blur=move |_| trim_structured_field(value)
             />
             <p id=help_id class="mt-1.5 text-xs text-crono-muted">
                 "Lowercase letters, numbers and hyphens. Maximum 63 characters."
@@ -519,6 +528,9 @@ mod tests {
     #[test]
     fn name_feedback_uses_the_shared_dns_rule() {
         assert!(name_validation_message("postgres-backup", true).is_none());
+        assert!(name_validation_message(" \tpostgres-backup\u{85}", true).is_none());
+        assert!(name_validation_message(&format!(" {} ", "a".repeat(63)), true).is_none());
+        assert!(name_validation_message(" \t ", true).is_some());
         assert!(name_validation_message("Postgres Backup", true).is_some());
         assert!(name_validation_message(&"a".repeat(64), true).is_some());
     }

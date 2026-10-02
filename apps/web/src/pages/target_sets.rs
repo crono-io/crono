@@ -221,7 +221,7 @@ fn target_set_submit(
             return;
         };
         let request = CreateTargetSetRequest {
-            name: state.name.get_untracked(),
+            name: state.name.get_untracked().trim().to_owned(),
             target_ids: state.target_ids.get_untracked(),
             inputs,
         };

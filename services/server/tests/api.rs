@@ -331,8 +331,8 @@ fn list_limit_parameters_declare_documented_bounds() -> Result<()> {
     Ok(())
 }
 
-/// Request names are validated as DNS-1123 labels; the schema must say so, or
-/// clients and fuzzers will send values the server always rejects.
+/// Request names permit padding but constrain the canonical segment, matching
+/// application normalization without imposing a raw 63-character limit.
 #[test]
 fn request_names_declare_resource_name_constraints() -> Result<()> {
     let document = generated_document()?;
@@ -347,15 +347,19 @@ fn request_names_declare_resource_name_constraints() -> Result<()> {
             continue;
         }
         if let Some(name) = schema.pointer("/properties/name") {
-            assert_eq!(
-                name.get("maxLength").and_then(Value::as_u64),
-                u64::try_from(crono_api::RESOURCE_NAME_MAX_LENGTH).ok(),
-                "{schema_name}.name maxLength"
+            assert!(
+                name.get("maxLength").is_none(),
+                "padding is not name length"
             );
-            assert_eq!(
-                name.get("pattern").and_then(Value::as_str),
-                Some("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"),
-                "{schema_name}.name pattern"
+            assert!(
+                name.get("pattern")
+                    .and_then(Value::as_str)
+                    .is_some_and(
+                        |pattern| pattern.contains("[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
+                            && pattern.starts_with(r"^[\u0009-\u000d")
+                            && pattern.ends_with("*$")
+                    ),
+                "{schema_name}.name constrains trimmed canonical names"
             );
             checked += 1;
         }
@@ -364,6 +368,41 @@ fn request_names_declare_resource_name_constraints() -> Result<()> {
         checked, 13,
         "every named create or update request is constrained"
     );
+    Ok(())
+}
+
+/// Padded write endpoints must not relax the response guarantees for saved graphs.
+#[test]
+fn workflow_edges_accept_padding_only_in_write_schemas() -> Result<()> {
+    let document = generated_document()?;
+    assert_eq!(
+        document
+            .pointer("/components/schemas/WorkflowResource/properties/edges/items/$ref")
+            .and_then(Value::as_str),
+        Some("#/components/schemas/WorkflowEdgeResource")
+    );
+    for endpoint in ["from", "to"] {
+        let request = format!("/components/schemas/WorkflowEdgeRequest/properties/{endpoint}");
+        let response = format!("/components/schemas/WorkflowEdgeResource/properties/{endpoint}");
+        assert!(
+            document
+                .pointer(&format!("{request}/pattern"))
+                .and_then(Value::as_str)
+                .is_some_and(|pattern| pattern.starts_with(r"^[\u0009-\u000d"))
+        );
+        assert_eq!(
+            document
+                .pointer(&format!("{response}/maxLength"))
+                .and_then(Value::as_u64),
+            Some(63)
+        );
+        assert_eq!(
+            document
+                .pointer(&format!("{response}/pattern"))
+                .and_then(Value::as_str),
+            Some("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
+        );
+    }
     Ok(())
 }
 

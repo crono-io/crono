@@ -3,6 +3,10 @@
 //! Namespace deletion protects bootstrap and referenced resources. Scoped lists
 //! establish authorization before checking parent existence, so removing an
 //! empty Namespace also removes access to its child collection routes.
+//! Write boundaries trim surrounding whitespace from structured names, command
+//! paths, and schedule values before validation. Literal arguments, shell source,
+//! JSON values, and descriptions remain untouched; committed snapshots are never
+//! normalized while reading or executing them.
 
 use super::{
     ApplicationError, Authorizer, Capability, ControlPlaneStore, CreateJobInput, CreateQueueInput,
@@ -67,7 +71,7 @@ impl Application {
                 &ResourceScope::ControlPlane,
             )
             .await?;
-        let name = NamespaceName::parse(value).map_err(invalid_name)?;
+        let name = NamespaceName::parse(value.trim()).map_err(invalid_name)?;
         Ok(self.store.create_namespace(&name).await?)
     }
 
@@ -162,7 +166,7 @@ impl Application {
                 &ResourceScope::ControlPlane,
             )
             .await?;
-        let name = QueueName::parse(&input.name).map_err(invalid_name)?;
+        let name = QueueName::parse(input.name.trim()).map_err(invalid_name)?;
         validate_queue_description(input.description.as_deref())?;
         ensure_queue_name_available(&name, false)?;
         Ok(self
@@ -220,7 +224,7 @@ impl Application {
         input: UpdateQueueInput,
     ) -> Result<Queue, ApplicationError> {
         let id = QueueId::new(id);
-        let name = QueueName::parse(&input.name).map_err(invalid_name)?;
+        let name = QueueName::parse(input.name.trim()).map_err(invalid_name)?;
         validate_queue_description(input.description.as_deref())?;
         self.authorizer
             .authorize(context, Capability::QueueUpdate, &ResourceScope::Queue(id))
@@ -271,6 +275,7 @@ impl Application {
     }
 
     /// Create a directly editable Job definition after Namespace authorization.
+    /// Name and executable padding is removed before validation and persistence.
     ///
     /// # Errors
     ///
@@ -281,8 +286,9 @@ impl Application {
         namespace_id: Uuid,
         input: CreateJobInput,
     ) -> Result<JobRecord, ApplicationError> {
+        let input = normalize_job_input(input);
         let namespace_id = NamespaceId::new(namespace_id);
-        let name = ResourceName::parse(&input.name).map_err(invalid_name)?;
+        let name = ResourceName::parse(input.name.trim()).map_err(invalid_name)?;
         validate_job(&input)?;
         self.authorizer
             .authorize(
@@ -337,6 +343,7 @@ impl Application {
     ///
     /// Existing Runs retain their immutable snapshots; only future Runs observe
     /// the updated command, inputs, Queue, and retry policy.
+    /// Name and executable padding is removed; literal execution content is retained.
     ///
     /// # Errors
     ///
@@ -347,8 +354,9 @@ impl Application {
         id: Uuid,
         input: CreateJobInput,
     ) -> Result<JobRecord, ApplicationError> {
+        let input = normalize_job_input(input);
         let id = JobId::new(id);
-        let name = ResourceName::parse(&input.name).map_err(invalid_name)?;
+        let name = ResourceName::parse(input.name.trim()).map_err(invalid_name)?;
         validate_job(&input)?;
         self.authorizer
             .authorize(context, Capability::JobUpdate, &ResourceScope::Job(id))
@@ -460,7 +468,7 @@ impl Application {
         inputs: serde_json::Value,
     ) -> Result<TargetRecord, ApplicationError> {
         let namespace_id = NamespaceId::new(namespace_id);
-        let name = ResourceName::parse(name).map_err(invalid_name)?;
+        let name = ResourceName::parse(name.trim()).map_err(invalid_name)?;
         validate_arguments(&arguments)?;
         validate_input_object(&inputs)?;
         self.authorizer
@@ -545,7 +553,7 @@ impl Application {
         inputs: serde_json::Value,
     ) -> Result<TargetRecord, ApplicationError> {
         let id = TargetId::new(id);
-        let name = ResourceName::parse(name).map_err(invalid_name)?;
+        let name = ResourceName::parse(name.trim()).map_err(invalid_name)?;
         validate_arguments(&arguments)?;
         validate_input_object(&inputs)?;
         self.authorizer
@@ -614,7 +622,7 @@ impl Application {
         inputs: serde_json::Value,
     ) -> Result<TargetSetRecord, ApplicationError> {
         let namespace_id = NamespaceId::new(namespace_id);
-        let name = ResourceName::parse(name).map_err(invalid_name)?;
+        let name = ResourceName::parse(name.trim()).map_err(invalid_name)?;
         validate_input_object(&inputs)?;
         if target_ids.is_empty() || target_ids.len() > MAX_TARGET_SET_MEMBERS {
             return Err(ApplicationError::invalid(
@@ -737,7 +745,7 @@ impl Application {
         let id = TargetSetId::new(id);
         let existing = self.store.get_target_set(id).await?;
         let namespace_id = existing.target_set.namespace_id();
-        let name = ResourceName::parse(name).map_err(invalid_name)?;
+        let name = ResourceName::parse(name.trim()).map_err(invalid_name)?;
         validate_input_object(&inputs)?;
         validate_target_ids(&target_ids)?;
         self.authorizer
@@ -768,7 +776,7 @@ impl Application {
         input: CreateScheduleInput,
     ) -> Result<ScheduleRecord, ApplicationError> {
         let namespace_id = NamespaceId::new(namespace_id);
-        let name = ResourceName::parse(&input.name).map_err(invalid_name)?;
+        let name = ResourceName::parse(input.name.trim()).map_err(invalid_name)?;
         validate_input_object(&input.inputs)?;
         self.authorizer
             .authorize(
@@ -812,6 +820,8 @@ impl Application {
                 expression,
                 timezone,
             } => {
+                let expression = expression.trim().to_owned();
+                let timezone = timezone.trim().to_owned();
                 let next = next_cron_occurrence(&expression, &timezone, now).map_err(|error| {
                     ApplicationError::invalid("cron_expression", error.to_string())
                 })?;
@@ -1417,6 +1427,16 @@ pub(super) fn validate_rendered_execution(
         .map_err(|error| ApplicationError::invalid("arguments", error.to_string()))
 }
 
+/// Normalize only an executable/interpreter path before validating a Job write.
+///
+/// `Some` remains `Some`, including an empty trimmed path, so No-op and required
+/// path validation cannot be bypassed. Shell source, argv, and inputs are literal.
+fn normalize_job_input(mut input: CreateJobInput) -> CreateJobInput {
+    input.executable = input.executable.map(|path| path.trim().to_owned());
+    input
+}
+
+/// Validate normalized Job settings without probing worker-local filesystem paths.
 fn validate_job(input: &CreateJobInput) -> Result<(), ApplicationError> {
     validate_arguments(&input.arguments)?;
     validate_input_object(&input.inputs)?;

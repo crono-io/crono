@@ -22,7 +22,7 @@ use axum::{
 };
 use crono_api::{
     CreateWorkflowRequest, DependencyCondition, ExecutionTarget, Page, StartWorkflowRequest,
-    UpdateWorkflowRequest, WorkflowChildRunResource, WorkflowEdgeRequest, WorkflowNodeResource,
+    UpdateWorkflowRequest, WorkflowChildRunResource, WorkflowEdgeResource, WorkflowNodeResource,
     WorkflowNodeRunResource, WorkflowNodeRunState, WorkflowResource, WorkflowRunResource,
     WorkflowRunState,
 };
@@ -264,7 +264,7 @@ fn workflow_resource(record: &WorkflowRecord) -> Result<WorkflowResource, ApiErr
             .definition
             .edges
             .iter()
-            .map(|edge| WorkflowEdgeRequest {
+            .map(|edge| WorkflowEdgeResource {
                 from: edge.from.as_str().to_owned(),
                 to: edge.to.as_str().to_owned(),
                 condition: api_condition(edge.condition),

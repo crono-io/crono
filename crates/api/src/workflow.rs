@@ -2,7 +2,8 @@
 //!
 //! Definitions refer to Jobs by UUID and edges by canonical names local to the
 //! graph. Invocation responses include the launch snapshot, so edits cannot
-//! change a consumer's reconstruction. Outputs and Attempts stay on Run routes.
+//! change a consumer's reconstruction. Writes accept padded node names; responses
+//! retain strict canonical endpoints. Outputs and Attempts stay on Run routes.
 
 use crate::ExecutionTarget;
 use serde::{Deserialize, Serialize};
@@ -25,25 +26,25 @@ pub enum DependencyCondition {
 pub struct WorkflowNodeRequest {
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub name: String,
     pub job_id: Uuid,
 }
 
-/// Canonical node-name endpoints; duplicate pairs and self edges are rejected.
+/// Node-name inputs are trimmed before duplicate pairs and self edges are rejected.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct WorkflowEdgeRequest {
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub from: String,
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub to: String,
     pub condition: DependencyCondition,
@@ -56,7 +57,7 @@ pub struct WorkflowEdgeRequest {
 pub struct CreateWorkflowRequest {
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub name: String,
     #[cfg_attr(feature = "openapi", schema(max_length = 500))]
@@ -77,7 +78,7 @@ pub struct UpdateWorkflowRequest {
     pub revision: u64,
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub name: String,
     #[cfg_attr(feature = "openapi", schema(max_length = 500))]
@@ -110,6 +111,35 @@ pub struct WorkflowNodeResource {
     pub job_id: Uuid,
 }
 
+/// Stored dependency endpoints remain canonical even when write inputs were padded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+pub struct WorkflowEdgeResource {
+    #[cfg_attr(
+        feature = "openapi",
+        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+    )]
+    pub from: String,
+    #[cfg_attr(
+        feature = "openapi",
+        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+    )]
+    pub to: String,
+    pub condition: DependencyCondition,
+}
+
+impl From<&WorkflowEdgeResource> for WorkflowEdgeRequest {
+    /// Restore an editable dependency without rewriting its saved endpoints or condition.
+    fn from(edge: &WorkflowEdgeResource) -> Self {
+        Self {
+            from: edge.from.clone(),
+            to: edge.to.clone(),
+            condition: edge.condition,
+        }
+    }
+}
+
 /// Editable catalog graph, or the immutable copy embedded in an invocation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -121,7 +151,7 @@ pub struct WorkflowResource {
     pub description: Option<String>,
     pub revision: u64,
     pub nodes: Vec<WorkflowNodeResource>,
-    pub edges: Vec<WorkflowEdgeRequest>,
+    pub edges: Vec<WorkflowEdgeResource>,
     pub created_at: String,
     pub updated_at: String,
 }

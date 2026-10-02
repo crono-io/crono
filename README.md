@@ -6,7 +6,7 @@ The project is still a draft. Its HTTP and messaging contracts are intentionally
 
 ## Reliability architecture
 
-PostgreSQL is the source of truth for Namespaces, Queues, Jobs, Targets, Target Sets, Schedules, calculated `next_run_at` cursors, Runs, Attempts, retry state, leases, misfires, dispatch state, and audit history. UUIDs are immutable identities and relationship keys. Canonical resource names are strict DNS-1123 labels used for lookup and display; the API rejects invalid input rather than normalizing it. JetStream is a durable, high-throughput execution transport; it is not the scheduler database.
+PostgreSQL is the source of truth for Namespaces, Queues, Jobs, Targets, Target Sets, Schedules, calculated `next_run_at` cursors, Runs, Attempts, retry state, leases, misfires, dispatch state, and audit history. UUIDs are immutable identities and relationship keys. Canonical resource names are strict DNS-1123 labels used for lookup and display; write requests trim surrounding whitespace before validating the canonical value; invalid characters and casing are still rejected. JetStream is a durable, high-throughput execution transport; it is not the scheduler database.
 
 ```mermaid
 flowchart LR

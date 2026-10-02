@@ -89,17 +89,19 @@ pub struct WorkflowLaunch {
 }
 
 impl WorkflowInput {
-    /// Parse canonical names and reject the complete invalid graph before writing.
+    /// Trim name padding, then reject collisions and invalid graphs before writing.
+    /// Node names and edge endpoints share normalization; literal descriptions do not.
     fn definition(self) -> Result<WorkflowDefinition, ApplicationError> {
         let definition = WorkflowDefinition {
-            name: ResourceName::parse(&self.name).map_err(super::service::invalid_name)?,
+            name: ResourceName::parse(self.name.trim()).map_err(super::service::invalid_name)?,
             description: self.description,
             nodes: self
                 .nodes
                 .into_iter()
                 .map(|(name, job_id)| {
                     Ok(WorkflowNode {
-                        name: ResourceName::parse(&name).map_err(super::service::invalid_name)?,
+                        name: ResourceName::parse(name.trim())
+                            .map_err(super::service::invalid_name)?,
                         job_id,
                     })
                 })
@@ -109,8 +111,9 @@ impl WorkflowInput {
                 .into_iter()
                 .map(|(from, to, condition)| {
                     Ok(WorkflowEdge {
-                        from: ResourceName::parse(&from).map_err(super::service::invalid_name)?,
-                        to: ResourceName::parse(&to).map_err(super::service::invalid_name)?,
+                        from: ResourceName::parse(from.trim())
+                            .map_err(super::service::invalid_name)?,
+                        to: ResourceName::parse(to.trim()).map_err(super::service::invalid_name)?,
                         condition,
                     })
                 })

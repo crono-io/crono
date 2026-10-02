@@ -3,6 +3,9 @@
 //! HTTP resources are intentionally unversioned while Crono remains a draft.
 //! `JetStream` messages contain stable identifiers and immutable execution data
 //! remains in PostgreSQL, allowing the transport to be rebuilt safely.
+//! Structured write fields accept surrounding Unicode whitespace, which the
+//! application removes before validation. Literal execution content and
+//! authentication credentials are outside that normalization boundary.
 
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt};
@@ -11,13 +14,27 @@ use uuid::Uuid;
 mod workflow;
 pub use workflow::{
     CreateWorkflowRequest, DependencyCondition, StartWorkflowRequest, UpdateWorkflowRequest,
-    WorkflowChildRunResource, WorkflowEdgeRequest, WorkflowNodeRequest, WorkflowNodeResource,
-    WorkflowNodeRunResource, WorkflowNodeRunState, WorkflowResource, WorkflowRunResource,
-    WorkflowRunState,
+    WorkflowChildRunResource, WorkflowEdgeRequest, WorkflowEdgeResource, WorkflowNodeRequest,
+    WorkflowNodeResource, WorkflowNodeRunResource, WorkflowNodeRunState, WorkflowResource,
+    WorkflowRunResource, WorkflowRunState,
 };
 
 /// Maximum byte length of a canonical DNS-1123 resource label.
 pub const RESOURCE_NAME_MAX_LENGTH: usize = 63;
+
+/// Describe padded write inputs without weakening canonical stored-name validation.
+///
+/// The explicit Unicode `White_Space` class matches Rust's `str::trim`; JavaScript
+/// `\s` additionally accepts a BOM and omits NEL. The length bound applies to the
+/// canonical segment, so padding does not consume its 63-character allowance.
+#[cfg(feature = "openapi")]
+fn resource_name_input_schema() -> utoipa::openapi::schema::Object {
+    utoipa::openapi::schema::ObjectBuilder::new()
+        .schema_type(utoipa::openapi::schema::Type::String)
+        .pattern(Some(r"^[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\u0009-\u000d\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]*$"))
+        .description(Some("Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit."))
+        .build()
+}
 
 /// Why a canonical Namespace or resource name was rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,7 +125,7 @@ pub struct Page<T> {
 pub struct CreateNamespaceRequest {
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub name: String,
 }
@@ -128,7 +145,7 @@ pub struct NamespaceResource {
 pub struct CreateQueueRequest {
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub name: String,
     pub description: Option<String>,
@@ -141,7 +158,7 @@ pub struct CreateQueueRequest {
 pub struct UpdateQueueRequest {
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub name: String,
     pub description: Option<String>,
@@ -178,7 +195,7 @@ pub enum ExecutorKind {
 pub struct CreateJobRequest {
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub name: String,
     pub queue_id: Uuid,
@@ -217,7 +234,7 @@ pub struct CreateJobRequest {
 pub struct UpdateJobRequest {
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub name: String,
     pub queue_id: Uuid,
@@ -296,7 +313,7 @@ pub struct JobResource {
 pub struct CreateTargetRequest {
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub name: String,
     #[serde(default)]
@@ -313,7 +330,7 @@ pub struct CreateTargetRequest {
 pub struct UpdateTargetRequest {
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub name: String,
     pub arguments: Vec<String>,
@@ -343,7 +360,7 @@ pub struct TargetResource {
 pub struct CreateTargetSetRequest {
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub name: String,
     pub target_ids: Vec<Uuid>,
@@ -359,7 +376,7 @@ pub struct CreateTargetSetRequest {
 pub struct UpdateTargetSetRequest {
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub name: String,
     pub target_ids: Vec<Uuid>,
@@ -434,7 +451,7 @@ pub enum CatchupPolicy {
 pub struct CreateScheduleRequest {
     #[cfg_attr(
         feature = "openapi",
-        schema(pattern = "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", max_length = 63)
+        schema(schema_with = crate::resource_name_input_schema)
     )]
     pub name: String,
     pub job_id: Uuid,

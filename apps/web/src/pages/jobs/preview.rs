@@ -53,6 +53,7 @@ pub(super) fn job_preview_options(
 }
 
 /// Render the current form values for one selected destination without side effects.
+/// Executable padding is trimmed exactly as on save; script and argv stay literal.
 pub(super) fn preview_text(
     fields: PreviewFields,
     selected: Option<Uuid>,
@@ -70,7 +71,7 @@ pub(super) fn preview_text(
     let executable = if fields.executor.get() == ExecutorKind::Noop {
         "noop".to_string()
     } else {
-        format!("{:?}", fields.executable.get())
+        format!("{:?}", fields.executable.get().trim())
     };
     let selected_targets = if let Some(target) = targets.iter().find(|target| target.id == selected)
     {

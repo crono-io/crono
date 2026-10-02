@@ -6,6 +6,9 @@ Crono data, uses no credentials, and controls failures/progress to check retries
 terminal polling cleanup, immutable views, and responsive keyboard operation.
 It also measures shared field alignment and height across resource forms and
 Run filters; set CRONO_WEB_FORMS_ONLY=1 to run those checks independently.
+Structured-input checks verify blur, preview and submission normalization while
+preserving script, argument and JSON whitespace; CRONO_WEB_INPUTS_ONLY=1 isolates
+those checks. HTTP fixtures echo submitted Jobs without normalizing them.
 """
 
 import base64
@@ -42,7 +45,7 @@ WORKFLOW_DATA["edges"] = [{"from": "backup", "to": "upgrade", "condition": "succ
                           {"from": "upgrade", "to": "validate", "condition": "success"},
                           {"from": "upgrade", "to": "rollback", "condition": "failure"}]
 STATE = dict(workflow=copy.deepcopy(WORKFLOW_DATA), fail_list=False, fail_launch=True,
-             requests=[], launch_requests=[], polls=0, active=0, max_active=0,
+             requests=[], launch_requests=[], job_writes=[], polls=0, active=0, max_active=0,
              permanent_running=False, history=True, poll_failure=False, cancelled=False, launch_delay=0, fail_workflow_get=False)
 
 def invocation(terminal=False):
@@ -143,7 +146,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         value = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))) or b"{}")
         STATE["requests"].append(("POST", self.path))
-        if self.path == f"/api/workflows/{WORKFLOW}/runs":
+        if self.path == f"/api/namespaces/{NS}/jobs":
+            STATE["job_writes"].append(value)
+            self.respond(201, dict(value, id=identity(77), namespace_id=NS,
+                                   namespace="operations", qualified_name=f"operations/{value['name']}",
+                                   queue="default", created_at=STAMP, updated_at=STAMP))
+        elif self.path == f"/api/workflows/{WORKFLOW}/runs":
             STATE["launch_requests"].append(value)
             time.sleep(STATE["launch_delay"])
             if STATE["fail_launch"]:
@@ -231,6 +239,68 @@ def main():
             js("document.querySelector(arguments[0]).focus()", selector)
             wait(lambda: js("return [...document.querySelectorAll('[role=option] button')].some(b=>{const c=b.cloneNode(true); c.querySelectorAll('[aria-hidden=true]').forEach(e=>e.remove()); return c.textContent.trim()===arguments[0]})",label), "Option missing")
             js("const b=[...document.querySelectorAll('[role=option] button')].find(b=>{const c=b.cloneNode(true); c.querySelectorAll('[aria-hidden=true]').forEach(e=>e.remove()); return c.textContent.trim()===arguments[0]}); b.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true})); document.querySelector(arguments[1]).blur()",label,selector)
+        def structured_inputs_check():
+            def blur(selector):
+                js("document.querySelector(arguments[0]).dispatchEvent(new Event('blur'))", selector)
+            def executor(kind):
+                js("const e=document.querySelector('form label select'); e.value=arguments[0]; e.dispatchEvent(new Event('change',{bubbles:true}))", kind)
+            open_page("/jobs/new")
+            choose("#job-namespace", "operations")
+            choose("#job-queue", "default")
+            executor("process")
+            choose("#job-preview-target", "Target · db-1")
+            fill("#job-name", " \techo\u00a0")
+            executable = "input[placeholder='/usr/bin/echo']"
+            fill(executable, " /usr/bin/echo \t")
+            assert js("return document.querySelector('#job-name').value") == " \techo\u00a0", "Name changed while typing"
+            assert js("return document.querySelector(arguments[0]).value", executable) == " /usr/bin/echo \t", "Path changed while typing"
+            wait(lambda: '$ "/usr/bin/echo"' in js("return document.querySelector('form pre').textContent"), "Preview did not use the trimmed path")
+            click("+ Add argument")
+            fill("#job-arguments-0", " literal ")
+            fill("#job-inputs", '{"message":" value "}')
+            blur("#job-name")
+            blur(executable)
+            blur("#job-arguments-0")
+            blur("#job-inputs")
+            wait(lambda: js("return document.querySelector('#job-name').value") == "echo", "Name not trimmed on blur")
+            assert js("return document.querySelector(arguments[0]).value", executable) == "/usr/bin/echo", "Executable not trimmed on blur"
+            assert js("return document.querySelector('#job-arguments-0').value") == " literal ", "Argument changed on blur"
+            js("document.querySelector('#job-name').scrollIntoView({block:'center'})")
+            Path("/tmp/crono-input-normalization.png").write_bytes(base64.b64decode(request(base+"/screenshot")))
+            # Submit padded fields without blurring them: keyboard/programmatic submission
+            # must produce the same request as mouse submission after leaving a field.
+            fill("#job-name", " echo ")
+            fill(executable, " /usr/bin/echo \u0085")
+            click("Save Job")
+            wait(lambda: "Saved operations/echo." in text(), "Padded Job did not save")
+            submitted = STATE["job_writes"][-1]
+            assert submitted["name"] == "echo" and submitted["executable"] == "/usr/bin/echo", submitted
+            assert submitted["arguments"] == [" literal "] and submitted["inputs"] == {"message":" value "}, submitted
+            open_page("/jobs/new")
+            choose("#job-namespace", "operations")
+            executor("shell")
+            script = "\n  printf '%s' \"$1\"  \n"
+            fill("#job-name", " shell ")
+            fill("input[placeholder='/bin/sh']", " /bin/sh ")
+            fill("textarea[placeholder^=\"printf\"]", script)
+            blur("textarea[placeholder^=\"printf\"]")
+            click("Save Job")
+            wait(lambda: "Saved operations/shell." in text(), "Shell Job did not save")
+            assert STATE["job_writes"][-1]["executable"] == "/bin/sh"
+            assert STATE["job_writes"][-1]["shell_command"] == script, "Script whitespace changed"
+            open_page("/schedules")
+            wait(lambda: js("return !!document.querySelector('#schedule-timezone')"), "Schedule form missing")
+            cron = "form label input:not([id])"
+            fill(cron, " \t0  0 * * * ")
+            blur(cron)
+            wait(lambda: js("return document.querySelector(arguments[0]).value", cron) == "0  0 * * *", "Cron padding not trimmed or internal whitespace changed")
+            js("const e=document.querySelector('form label select'); e.value='once'; e.dispatchEvent(new Event('change',{bubbles:true}))")
+            once = "input[placeholder='2026-09-25T12:00:00Z']"
+            wait(lambda: js("return !!document.querySelector(arguments[0])", once), "One-shot field missing")
+            fill(once, " 2030-01-01T00:00:00Z ")
+            blur(once)
+            wait(lambda: js("return document.querySelector(arguments[0]).value", once) == "2030-01-01T00:00:00Z", "Timestamp padding not trimmed")
+            print("Structured input browser checks passed: typing preserved, blur/save/preview agree, Unicode padding removed, arguments/JSON/scripts unchanged, cron and timestamp blur")
         def form_controls_check():
             def aligned(selectors):
                 boxes = js("return arguments[0].map(s=>{const e=document.querySelector(s); const r=e.getBoundingClientRect(); return {selector:s,top:r.top,height:r.height}})", selectors)
@@ -311,6 +381,9 @@ def main():
             click("Discard draft and reload")
             wait(lambda: js("return document.querySelector('#workflow-description')?.value") == WORKFLOW_DATA["description"], "Reload did not restore metadata")
             assert js("return document.querySelector('input[id^=workflow-node-name-]').value") == "backup", "Reloaded graph and visible node fields disagree"
+        if os.environ.get("CRONO_WEB_INPUTS_ONLY") == "1":
+            structured_inputs_check()
+            return
         if os.environ.get("CRONO_WEB_FORMS_ONLY") == "1":
             form_controls_check()
             return
@@ -458,6 +531,7 @@ def main():
         late_launch_check()
         reload_failure_check()
         form_controls_check()
+        structured_inputs_check()
         print("Workflow browser checks passed: CRUD, namespace isolation, editor errors/removal/revision recovery, Target Set launch retry, immutable progress, skips/Run links, polling/cleanup, cancellation confirmation, delete guard, responsive layout")
     finally:
         if session:

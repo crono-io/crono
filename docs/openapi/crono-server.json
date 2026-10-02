@@ -3547,8 +3547,8 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
           },
           "queue_id": {
             "type": "string",
@@ -3590,8 +3590,8 @@
         "properties": {
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
           }
         },
         "additionalProperties": false
@@ -3611,8 +3611,8 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
           }
         },
         "additionalProperties": false
@@ -3697,8 +3697,8 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
           },
           "target": {
             "$ref": "#/components/schemas/ExecutionTarget"
@@ -3726,8 +3726,8 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
           }
         },
         "additionalProperties": false
@@ -3745,8 +3745,8 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
           },
           "target_ids": {
             "type": "array",
@@ -3782,8 +3782,8 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
           },
           "nodes": {
             "type": "array",
@@ -5016,7 +5016,7 @@
                 "edges": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/WorkflowEdgeRequest"
+                    "$ref": "#/components/schemas/WorkflowEdgeResource"
                   }
                 },
                 "id": {
@@ -5829,8 +5829,8 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
           },
           "queue_id": {
             "type": "string",
@@ -5882,8 +5882,8 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
           }
         },
         "additionalProperties": false
@@ -5926,8 +5926,8 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
           }
         },
         "additionalProperties": false
@@ -5946,8 +5946,8 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
           },
           "target_ids": {
             "type": "array",
@@ -5984,8 +5984,8 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
           },
           "nodes": {
             "type": "array",
@@ -6155,7 +6155,32 @@
       },
       "WorkflowEdgeRequest": {
         "type": "object",
-        "description": "Canonical node-name endpoints; duplicate pairs and self edges are rejected.",
+        "description": "Node-name inputs are trimmed before duplicate pairs and self edges are rejected.",
+        "required": [
+          "from",
+          "to",
+          "condition"
+        ],
+        "properties": {
+          "condition": {
+            "$ref": "#/components/schemas/DependencyCondition"
+          },
+          "from": {
+            "type": "string",
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
+          },
+          "to": {
+            "type": "string",
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorkflowEdgeResource": {
+        "type": "object",
+        "description": "Stored dependency endpoints remain canonical even when write inputs were padded.",
         "required": [
           "from",
           "to",
@@ -6192,8 +6217,8 @@
           },
           "name": {
             "type": "string",
-            "maxLength": 63,
-            "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+            "description": "Surrounding Unicode whitespace is trimmed before validation. The resulting name must be 1–63 lowercase ASCII letters, digits or hyphens, starting and ending with a letter or digit.",
+            "pattern": "^[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]*$"
           }
         },
         "additionalProperties": false
@@ -6311,7 +6336,7 @@
           "edges": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/WorkflowEdgeRequest"
+              "$ref": "#/components/schemas/WorkflowEdgeResource"
             }
           },
           "id": {

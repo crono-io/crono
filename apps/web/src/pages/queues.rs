@@ -10,7 +10,8 @@ use crate::{
     api,
     components::{
         DeleteControl, FormActions, PageHeader, QUIET_ACTION_CLASS, ResourceFeedback,
-        ResourceFeedbackModal, ResourceNameInput, focus_heading, forms::FIELD_CLASS,
+        ResourceFeedbackModal, ResourceNameInput, focus_heading,
+        forms::{FIELD_CLASS, trim_structured_field},
         name_validation_message, visible_name_validation,
     },
 };
@@ -62,7 +63,7 @@ pub fn QueuesPage() -> impl IntoView {
         name_server_error.set(None);
         description_server_error.set(None);
         feedback.set(None);
-        let requested_name = name.get_untracked();
+        let requested_name = name.get_untracked().trim().to_owned();
         let requested_description = description.get_untracked();
         if name_validation_message(&requested_name, true).is_some()
             || description_validation(&requested_description).is_some()
@@ -216,7 +217,7 @@ fn QueueRow(
         }
         feedback.set(None);
         error.set(None);
-        let requested_name = name.get_untracked();
+        let requested_name = name.get_untracked().trim().to_owned();
         let requested_description = description.get_untracked();
         if let Some(message) = name_validation_message(&requested_name, true)
             .or_else(|| description_validation(&requested_description))
@@ -300,7 +301,7 @@ fn QueueRow(
                 <div class="space-y-4">
                     <div>
                         <label for=format!("queue-edit-name-{id}") class="block text-sm font-medium text-crono-text">"Name"</label>
-                        <input id=format!("queue-edit-name-{id}") class=FIELD_CLASS type="text" disabled=system prop:value=move || name.get() on:input=move |event| name.set(event_target_value(&event)) />
+                        <input id=format!("queue-edit-name-{id}") class=FIELD_CLASS type="text" disabled=system prop:value=move || name.get() on:input=move |event| name.set(event_target_value(&event)) on:blur=move |_| trim_structured_field(name) />
                         <Show when=move || system>
                             <p class="mt-1.5 text-xs text-crono-muted">"The system default Queue name is fixed."</p>
                         </Show>

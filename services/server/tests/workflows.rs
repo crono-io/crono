@@ -6,6 +6,9 @@
 
 mod support;
 
+#[path = "workflows/input_normalization.rs"]
+mod input_normalization;
+
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use axum::{

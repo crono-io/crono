@@ -691,7 +691,7 @@ pub async fn create_schedule(
             timezone: request.timezone,
         },
         (None, Some(execute_at)) => ScheduleTiming::Once {
-            execute_at: time::OffsetDateTime::parse(&execute_at, &Rfc3339).map_err(|_| {
+            execute_at: time::OffsetDateTime::parse(execute_at.trim(), &Rfc3339).map_err(|_| {
                 ApiError::from(crate::application::ApplicationError::invalid(
                     "execute_at",
                     "execute_at must be an RFC 3339 timestamp",

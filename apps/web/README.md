@@ -66,8 +66,14 @@ and detail back links use the same quiet treatment. Creation and submission
 controls keep their stronger action styling.
 Reserved pages use truthful empty states.
 
-Resource creation uses the shared DNS-1123 label rule from `crono-api` and
-never rewrites user input. Existing relationships use client-filtered,
+Resource creation uses the shared DNS-1123 label rule from `crono-api` after
+trimming surrounding Unicode whitespace. Names and executable/interpreter paths
+trim on blur and when requests are built; typing keeps its cursor position.
+Numeric settings trim before parsing, and Schedule values trim before saving.
+The API applies the same rules at write boundaries. Scripts, arguments, JSON
+string values, descriptions, and credentials retain their exact content.
+Internal spaces remain significant, and trimming never changes letter case.
+Existing relationships use client-filtered,
 keyboard-accessible selectors that fetch each collection once and retain the
 selected UUID rather than a display name. Target Sets use the same pattern for
 multi-selection, and Job creation selects an enabled Queue by UUID. Loading,

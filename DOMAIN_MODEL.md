@@ -33,10 +33,11 @@ This draft deliberately has no JobVersion, TargetVersion, ScheduleVersion, `/api
 
 UUIDv7 values are immutable resource identities and every relationship stores
 those UUIDs. Names are stable lookup and display identifiers, not foreign keys.
-Namespace, Queue, Job, Target, Target Set, and Schedule names use one DNS-1123 label
-rule: 1 through 63 ASCII lowercase letters, digits, or hyphens, with an
-alphanumeric first and last character. The API rejects invalid names without
-normalizing them. Names are unique inside their owning Namespace; Namespace
+Namespace, Queue, Job, Target, Target Set, Schedule, and Workflow names use one
+DNS-1123 label rule: 1 through 63 ASCII lowercase letters, digits, or hyphens, with an
+alphanumeric first and last character. Writes trim surrounding Unicode whitespace
+before validating this canonical value; invalid characters and uppercase letters
+remain errors. Names are unique inside their owning Namespace; Namespace
 and Queue names are unique globally. Disabling a Queue prevents new Job
 assignments while existing Jobs, Runs, and workers can drain. Deletion succeeds
 only when no durable relationship references the Queue. The bootstrap `default`
@@ -48,6 +49,25 @@ A manual Run uses the request UUID as an idempotency key: replaying the same req
 A scheduled occurrence is identified by `(schedule_id, scheduled_at)`. PostgreSQL enforces that pair as unique. Scheduler claims improve concurrency, but this constraint is the final correctness boundary during failover or competing scheduler instances.
 
 Each logical Run can have multiple Attempts. Message redelivery for an existing Attempt never allocates another Attempt. Execution retry does: the old Attempt remains immutable audit history and a transaction creates the next Attempt plus its outbox event.
+
+## Structured input normalization
+
+Write requests trim surrounding Unicode whitespace from resource names,
+Workflow node names and dependency endpoints, executable and interpreter paths,
+cron expressions, timezones, and timestamp strings before validation. The web
+client also trims these fields on blur and submission, and trims numeric fields
+before parsing. Name length limits apply to the canonical value after trimming.
+Stored names and API responses retain their canonical constraints; only write
+inputs accept padding.
+For example, `/usr/bin/echo ` becomes `/usr/bin/echo`; whitespace inside a path
+or expression stays intact. Crono does not change case or remove quotes.
+
+Scripts, individual arguments and argument templates, JSON values, descriptions,
+and credentials retain their exact contents. These values may intentionally
+contain whitespace and are not structured identifiers. Workers execute the
+stored snapshot without applying new normalization rules. Existing Job
+definitions can be edited and saved to correct padded paths; no migration
+rewrites existing definitions, Runs, or WorkflowRun snapshots.
 
 ## Workflow state
 

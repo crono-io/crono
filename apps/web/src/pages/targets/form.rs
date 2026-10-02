@@ -283,7 +283,7 @@ fn target_submit(
             return;
         }
         let create = CreateTargetRequest {
-            name: state.name.get_untracked(),
+            name: state.name.get_untracked().trim().to_owned(),
             arguments: state.arguments.get_untracked(),
             inputs,
         };

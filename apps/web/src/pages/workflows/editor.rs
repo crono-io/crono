@@ -124,7 +124,11 @@ impl Editor {
                     job_id: node.job_id,
                 })
                 .collect(),
-            edges: workflow.edges.clone(),
+            edges: workflow
+                .edges
+                .iter()
+                .map(WorkflowEdgeRequest::from)
+                .collect(),
         });
         Self {
             edit_id: initial.map(|workflow| workflow.id),
@@ -184,8 +188,10 @@ impl Editor {
     }
 
     /// Validate names, references, and obvious edge errors without checking cycles.
+    /// Normalize names before duplicate checks and derive matching edge endpoints.
+    /// This leaves description text and the referenced Job identities unchanged.
     pub fn request(self) -> Result<CreateWorkflowRequest, String> {
-        let name = self.name.get();
+        let name = self.name.get().trim().to_owned();
         if let Some(error) = name_validation_message(&name, true) {
             return Err(error);
         }
@@ -200,7 +206,7 @@ impl Editor {
         let mut unique = BTreeSet::new();
         let mut nodes = Vec::new();
         for row in rows {
-            let node_name = row.name.get();
+            let node_name = row.name.get().trim().to_owned();
             if let Some(error) = name_validation_message(&node_name, true) {
                 return Err(format!("Job node name: {error}"));
             }
@@ -255,7 +261,7 @@ impl Editor {
             .into_iter()
             .map(|row| GraphNode {
                 key: row.key.to_string(),
-                name: row.name.get(),
+                name: row.name.get().trim().to_owned(),
                 job: jobs
                     .iter()
                     .find(|job| Some(job.id) == row.job.get())
@@ -328,6 +334,56 @@ mod tests {
     use leptos::prelude::*;
     use uuid::Uuid;
     use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[wasm_bindgen_test]
+    fn trimmed_node_names_match_edges_and_collisions_are_rejected() {
+        let owner = Owner::new();
+        owner.with(|| {
+            untrack(|| {
+                let draft = Editor::new(None);
+                draft.name.set(" \tupgrade\u{a0}".to_string());
+                draft.description.set(" keep description \n".to_string());
+                draft.namespace.set(Some(Uuid::now_v7()));
+                let first = draft.nodes.get().first().copied();
+                assert!(first.is_some());
+                let Some(first) = first else {
+                    return;
+                };
+                first.name.set(" backup ".to_string());
+                first.job.set(Some(Uuid::now_v7()));
+                let second = JobRow::empty();
+                second.name.set(" verify\u{85}".to_string());
+                second.job.set(Some(Uuid::now_v7()));
+                draft.nodes.update(|rows| rows.push(second));
+                let edge = EdgeRow::empty();
+                edge.from.set(Some(first.key));
+                edge.to.set(Some(second.key));
+                draft.edges.update(|rows| rows.push(edge));
+                let request = draft.request();
+                assert!(request.is_ok());
+                let Ok(request) = request else {
+                    return;
+                };
+                assert_eq!(request.name, "upgrade");
+                assert_eq!(request.description.as_deref(), Some(" keep description \n"));
+                assert!(request.nodes.iter().any(|node| node.name == "backup"));
+                assert!(request.nodes.iter().any(|node| node.name == "verify"));
+                assert!(
+                    request
+                        .edges
+                        .iter()
+                        .any(|edge| edge.from == "backup" && edge.to == "verify")
+                );
+                assert_eq!(
+                    first.name.get(),
+                    " backup ",
+                    "Building a request does not change the draft while typing"
+                );
+                second.name.set("backup\u{a0}".to_string());
+                assert!(draft.request().is_err_and(|error| error.contains("unique")));
+            });
+        });
+    }
 
     #[wasm_bindgen_test]
     fn nodes_edges_self_dependencies_and_safe_removal_use_stable_row_identities() {

@@ -47,7 +47,7 @@ pub fn NamespacesPage() -> impl IntoView {
         attempted.set(true);
         server_error.set(None);
         feedback.set(None);
-        let requested_name = name.get_untracked();
+        let requested_name = name.get_untracked().trim().to_owned();
         if name_validation_message(&requested_name, true).is_some() {
             return;
         }
