@@ -5,9 +5,11 @@
 //! client/service boundary.
 
 use crate::pages::{
-    CreateJobPage, CreateTargetPage, EditJobPage, EditTargetPage, JobsPage, MonitorPage,
-    NamespacesPage, NotFoundPage, OverviewPage, QueuesPage, RunDetailsPage, RunJobPage, RunsPage,
-    SchedulesPage, SettingsPage, TargetSetsPage, TargetsPage, WorkerDetailsPage, WorkersPage,
+    CreateJobPage, CreateTargetPage, CreateWorkflowPage, EditJobPage, EditTargetPage,
+    EditWorkflowPage, JobsPage, MonitorPage, NamespacesPage, NotFoundPage, OverviewPage,
+    QueuesPage, RunDetailsPage, RunJobPage, RunWorkflowPage, RunsPage, SchedulesPage, SettingsPage,
+    TargetSetsPage, TargetsPage, WorkerDetailsPage, WorkersPage, WorkflowDetailsPage,
+    WorkflowRunDetailsPage, WorkflowsPage,
 };
 use leptos::prelude::*;
 use leptos_router::{
@@ -31,6 +33,12 @@ pub fn RouterContent() -> impl IntoView {
             <Route path=path!("/targets/:target_id/edit") view=EditTargetPage />
             <Route path=path!("/target-sets") view=TargetSetsPage />
             <Route path=path!("/schedules") view=SchedulesPage />
+            <Route path=path!("/workflows") view=WorkflowsPage />
+            <Route path=path!("/workflows/new") view=CreateWorkflowPage />
+            <Route path=path!("/workflows/:workflow_id") view=WorkflowDetailsPage />
+            <Route path=path!("/workflows/:workflow_id/edit") view=EditWorkflowPage />
+            <Route path=path!("/workflows/:workflow_id/run") view=RunWorkflowPage />
+            <Route path=path!("/workflow-runs/:workflow_run_id") view=WorkflowRunDetailsPage />
             <Route path=path!("/runs") view=RunsPage />
             <Route path=path!("/runs/new") view=RunJobPage />
             <Route path=path!("/runs/:run_id") view=RunDetailsPage />

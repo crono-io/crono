@@ -16,6 +16,7 @@ mod settings;
 mod target_sets;
 mod targets;
 mod workers;
+mod workflows;
 
 pub use jobs::{CreateJobPage, EditJobPage, JobsPage};
 pub use monitor::MonitorPage;
@@ -28,6 +29,10 @@ pub use settings::SettingsPage;
 pub use target_sets::TargetSetsPage;
 pub use targets::{CreateTargetPage, EditTargetPage, TargetsPage};
 pub use workers::{WorkerDetailsPage, WorkersPage};
+pub use workflows::{
+    CreateWorkflowPage, EditWorkflowPage, RunWorkflowPage, WorkflowDetailsPage,
+    WorkflowRunDetailsPage, WorkflowsPage,
+};
 
 use crate::{
     components::{Card, EmptyState},

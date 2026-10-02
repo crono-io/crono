@@ -3,13 +3,23 @@
 //! The controls keep canonical-name feedback, required-field presentation, and
 //! searchable UUID selection consistent while leaving API ownership in pages.
 //! Search is entirely client-side over one bounded collection load.
+//! Labels leave a consistent six-pixel gap before their controls. Single-line
+//! fields use the same 44-pixel height as native selects and timezone selectors;
+//! multi-line editors retain their own content height.
 
 use super::Icon;
 use crate::navigation::MaterialSymbol;
 use leptos::prelude::*;
 use uuid::Uuid;
 
-const INPUT_CLASS: &str = "w-full rounded-md border border-crono-border bg-white px-3 py-2.5 text-sm text-crono-text shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-crono-primary focus:ring-2 focus:ring-crono-primary-soft disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500";
+/// Common control appearance, independent of label spacing or editor height.
+pub(crate) const INPUT_CLASS: &str = "crono-input";
+
+/// Place a control immediately after its block label with the shared gap.
+pub(crate) const FIELD_CLASS: &str = "mt-1.5 crono-input";
+
+/// Present fixed relationships with the same spacing and minimum height as editable fields.
+pub(crate) const READ_ONLY_FIELD_CLASS: &str = "mt-1.5 crono-readonly-field";
 
 /// UUID-backed option displayed by its canonical human-readable name.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,7 +155,7 @@ pub fn ArgumentListInput(
 /// Canonical resource-name field with stable guidance and inline errors.
 #[component]
 pub fn ResourceNameInput(
-    id: &'static str,
+    #[prop(into)] id: String,
     label: &'static str,
     value: RwSignal<String>,
     error: Signal<Option<String>>,
@@ -156,12 +166,12 @@ pub fn ResourceNameInput(
     let described_by = format!("{help_id} {error_id}");
     view! {
         <div>
-            <label for=id class="block text-sm font-medium text-crono-text">
+            <label for=id.clone() class="block text-sm font-medium text-crono-text">
                 {label}<span class="ml-1 text-crono-failed" aria-hidden="true">"*"</span>
             </label>
             <input
                 id=id
-                class=INPUT_CLASS
+                class=FIELD_CLASS
                 type="text"
                 autocomplete="off"
                 required
@@ -184,7 +194,7 @@ pub fn ResourceNameInput(
 /// Searchable single-resource combobox that stores only the selected UUID.
 #[component]
 pub fn ResourceSelect(
-    id: &'static str,
+    #[prop(into)] id: String,
     label: &'static str,
     placeholder: &'static str,
     options: Signal<Vec<ResourceOption>>,
@@ -235,7 +245,7 @@ pub fn ResourceSelect(
 
     view! {
         <div>
-            <label for=id class="block text-sm font-medium text-crono-text">
+            <label for=id.clone() class="block text-sm font-medium text-crono-text">
                 {label}
                 <Show when=move || !optional>
                     <span class="ml-1 text-crono-failed" aria-hidden="true">"*"</span>
@@ -244,7 +254,7 @@ pub fn ResourceSelect(
             <div class="relative mt-1.5">
                 <input
                     id=id
-                    class=INPUT_CLASS
+                    class=format!("pr-10 {INPUT_CLASS}")
                     type="text"
                     role="combobox"
                     autocomplete="off"
@@ -271,7 +281,7 @@ pub fn ResourceSelect(
                     on:keydown=keydown
                     on:blur=move |_| open.set(false)
                 />
-                <Icon symbol=MaterialSymbol::ExpandMore class="pointer-events-none absolute right-3 top-2.5 text-lg text-crono-muted" />
+                <Icon symbol=MaterialSymbol::ExpandMore class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-lg text-crono-muted" />
                 <Show when=move || open.get() && !disabled()>
                     <ResourceSelectOptions
                         list_id=list_id.clone()

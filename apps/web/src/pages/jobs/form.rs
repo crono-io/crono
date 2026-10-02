@@ -14,15 +14,14 @@ use crate::{
     api,
     components::{
         ArgumentListInput, FormActions, JsonObjectInput, PageHeader, ResourceFeedback,
-        ResourceFeedbackModal, ResourceNameInput, ResourceSelect, name_validation_message,
-        parse_input_object, visible_name_validation,
+        ResourceFeedbackModal, ResourceNameInput, ResourceSelect,
+        forms::{FIELD_CLASS, READ_ONLY_FIELD_CLASS},
+        name_validation_message, parse_input_object, visible_name_validation,
     },
 };
 use crono_api::{CreateJobRequest, ExecutorKind, JobResource, UpdateJobRequest};
 use leptos::{prelude::*, task::spawn_local};
 use leptos_router::{NavigateOptions, components::A, hooks::use_navigate};
-
-const FIELD_CLASS: &str = "mt-1.5 w-full rounded-md border border-crono-border bg-white px-3 py-2.5 text-sm text-crono-text shadow-sm outline-none focus:border-crono-primary focus:ring-2 focus:ring-crono-primary-soft";
 
 /// Render the shared create/edit form without owning browse-page state.
 #[component]
@@ -84,7 +83,7 @@ pub(super) fn JobForm(#[prop(optional)] initial_job: Option<JobResource>) -> imp
                 <form class="mt-5 space-y-5" on:submit=move |event| submit.run(event) novalidate>
                     {match namespace_name {
                         Some(namespace) => view! {
-                            <div><p class="text-sm font-medium text-crono-text">"Namespace"</p><p class="mt-1.5 rounded-md border border-crono-border bg-zinc-50 px-3 py-2.5 text-sm text-crono-muted">{namespace}</p></div>
+                            <div><p class="text-sm font-medium text-crono-text">"Namespace"</p><p class=READ_ONLY_FIELD_CLASS>{namespace}</p></div>
                         }.into_any(),
                         None => view! {
                             <div>
@@ -115,7 +114,7 @@ pub(super) fn JobForm(#[prop(optional)] initial_job: Option<JobResource>) -> imp
                         <p class="-mt-3 text-xs text-crono-muted">"Process example: executable "<code>"/usr/bin/echo"</code>", one argument "<code>"Hello, {{ name }}"</code>", and default inputs "<code>r#"{"name":"world"}"#</code>". Process does not parse shell syntax such as &&."</p>
                     </Show>
                     <JsonObjectInput id="job-inputs" label="Default inputs" value=inputs error=input_error />
-                    <details class="rounded-lg border border-crono-border p-4"><summary class="cursor-pointer text-sm font-medium text-crono-text">"Retry and safety policy"</summary><div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-5"><NumberField label="Max attempts" value=max_attempts /><NumberField label="Initial seconds" value=retry_initial /><NumberField label="Maximum seconds" value=retry_max /><NumberField label="Multiplier" value=retry_multiplier /><NumberField label="Jitter" value=retry_jitter /></div><label class="mt-4 flex items-center gap-2 text-sm text-crono-text"><input type="checkbox" prop:checked=move || idempotent.get() on:change=move |event| idempotent.set(event_target_checked(&event))/><span>"Safe to retry after an ambiguous worker failure"</span></label></details>
+                    <details class="rounded-lg border border-crono-border p-4"><summary class="cursor-pointer text-sm font-medium text-crono-text">"Retry and safety policy"</summary><div class="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5"><NumberField label="Max attempts" value=max_attempts /><NumberField label="Initial seconds" value=retry_initial /><NumberField label="Maximum seconds" value=retry_max /><NumberField label="Multiplier" value=retry_multiplier /><NumberField label="Jitter" value=retry_jitter /></div><label class="mt-4 flex items-center gap-2 text-sm text-crono-text"><input type="checkbox" prop:checked=move || idempotent.get() on:change=move |event| idempotent.set(event_target_checked(&event))/><span>"Safe to retry after an ambiguous worker failure"</span></label></details>
                     <div class="rounded-lg border border-crono-border bg-zinc-50 p-4">
                         <h3 class="text-sm font-semibold text-crono-text">"Command and inputs preview"</h3>
                         <p class="mt-1 text-xs text-crono-muted">"Select a Target or Target Set to see the command and merged inputs prepared for each Target. This does not create or execute a Run. Inputs supplied later by a Schedule or manual Run are not included."</p>
@@ -541,9 +540,10 @@ fn update_job_request(value: CreateJobRequest) -> UpdateJobRequest {
     }
 }
 
+/// Render retry-policy values with the same label and control sizing as other fields.
 #[component]
 fn NumberField(label: &'static str, value: RwSignal<String>) -> impl IntoView {
-    view! { <label class="block text-xs font-medium text-crono-muted">{label}<input class=FIELD_CLASS type="number" min="0" step="any" prop:value=move || value.get() on:input=move |event| value.set(event_target_value(&event))/></label> }
+    view! { <label class="block text-sm font-medium text-crono-text">{label}<input class=FIELD_CLASS type="number" min="0" step="any" prop:value=move || value.get() on:input=move |event| value.set(event_target_value(&event))/></label> }
 }
 
 #[cfg(test)]

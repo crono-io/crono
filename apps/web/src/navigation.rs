@@ -18,6 +18,8 @@ pub enum AppRoute {
     Schedules,
     Runs,
     RunsNew,
+    Workflows,
+    WorkflowsNew,
     Workers,
     Monitor,
     Settings,
@@ -39,6 +41,8 @@ impl AppRoute {
             Self::Schedules => "/schedules",
             Self::Runs => "/runs",
             Self::RunsNew => "/runs/new",
+            Self::Workflows => "/workflows",
+            Self::WorkflowsNew => "/workflows/new",
             Self::Workers => "/workers",
             Self::Monitor => "/monitor",
             Self::Settings => "/settings",
@@ -60,6 +64,8 @@ impl AppRoute {
             Self::Schedules => "Schedules",
             Self::Runs => "Runs",
             Self::RunsNew => "Run a Job",
+            Self::Workflows => "Workflows",
+            Self::WorkflowsNew => "Create Workflow",
             Self::Workers => "Workers",
             Self::Monitor => "Monitor",
             Self::Settings => "Settings",
@@ -71,7 +77,7 @@ impl AppRoute {
     pub const fn symbol(self) -> MaterialSymbol {
         match self {
             Self::Overview => MaterialSymbol::Dashboard,
-            Self::Namespaces => MaterialSymbol::AccountTree,
+            Self::Namespaces | Self::Workflows | Self::WorkflowsNew => MaterialSymbol::AccountTree,
             Self::Queues => MaterialSymbol::Queue,
             Self::Jobs | Self::JobsNew => MaterialSymbol::Work,
             Self::Targets | Self::TargetsNew => MaterialSymbol::Dns,
@@ -100,6 +106,7 @@ impl AppRoute {
             Self::Jobs => JOB_CHILDREN,
             Self::Targets => TARGET_CHILDREN,
             Self::Runs => RUN_CHILDREN,
+            Self::Workflows => WORKFLOW_CHILDREN,
             _ => &[],
         }
     }
@@ -111,6 +118,7 @@ impl AppRoute {
             Self::Jobs => "jobs-submenu",
             Self::Targets => "targets-submenu",
             Self::Runs => "runs-submenu",
+            Self::Workflows => "workflows-submenu",
             _ => "",
         }
     }
@@ -153,6 +161,17 @@ const RUN_CHILDREN: &[NavigationChild] = &[
     NavigationChild {
         route: AppRoute::RunsNew,
         label: "Run a Job",
+    },
+];
+
+const WORKFLOW_CHILDREN: &[NavigationChild] = &[
+    NavigationChild {
+        route: AppRoute::Workflows,
+        label: "All Workflows",
+    },
+    NavigationChild {
+        route: AppRoute::WorkflowsNew,
+        label: "Create Workflow",
     },
 ];
 
@@ -229,11 +248,16 @@ const RESOURCE_ROUTES: &[AppRoute] = &[
     AppRoute::Targets,
     AppRoute::TargetSets,
 ];
-const EXECUTION_ROUTES: &[AppRoute] = &[AppRoute::Schedules, AppRoute::Runs, AppRoute::Workers];
+const EXECUTION_ROUTES: &[AppRoute] = &[
+    AppRoute::Schedules,
+    AppRoute::Runs,
+    AppRoute::Workflows,
+    AppRoute::Workers,
+];
 const SYSTEM_ROUTES: &[AppRoute] = &[AppRoute::Monitor, AppRoute::Settings];
 
 /// Complete route inventory used for exact matching and verification.
-pub const ALL_ROUTES: [AppRoute; 14] = [
+pub const ALL_ROUTES: [AppRoute; 16] = [
     AppRoute::Overview,
     AppRoute::Namespaces,
     AppRoute::Queues,
@@ -245,6 +269,8 @@ pub const ALL_ROUTES: [AppRoute; 14] = [
     AppRoute::Schedules,
     AppRoute::Runs,
     AppRoute::RunsNew,
+    AppRoute::Workflows,
+    AppRoute::WorkflowsNew,
     AppRoute::Workers,
     AppRoute::Monitor,
     AppRoute::Settings,
@@ -284,6 +310,7 @@ pub fn is_section_active_path(path: &str, route: AppRoute) -> bool {
             && path
                 .strip_prefix(route.path())
                 .is_some_and(|suffix| suffix.starts_with('/')))
+        || (route == AppRoute::Workflows && path.starts_with("/workflow-runs/"))
 }
 
 /// Canonical edit URL for a Job; resource records never become sidebar items.
@@ -308,6 +335,30 @@ pub fn run_details_path(id: impl std::fmt::Display) -> String {
 #[must_use]
 pub fn worker_details_path(id: impl std::fmt::Display) -> String {
     format!("/workers/{id}")
+}
+
+/// Open a Workflow independently of the current list or Namespace filter.
+#[must_use]
+pub fn workflow_details_path(id: impl std::fmt::Display) -> String {
+    format!("/workflows/{id}")
+}
+
+/// Edit after loading the current definition and optimistic revision.
+#[must_use]
+pub fn workflow_edit_path(id: impl std::fmt::Display) -> String {
+    format!("/workflows/{id}/edit")
+}
+
+/// Open a launch form; opening a URL never executes a Workflow.
+#[must_use]
+pub fn workflow_launch_path(id: impl std::fmt::Display) -> String {
+    format!("/workflows/{id}/run")
+}
+
+/// Open the immutable invocation snapshot and current node progress.
+#[must_use]
+pub fn workflow_run_details_path(id: impl std::fmt::Display) -> String {
+    format!("/workflow-runs/{id}")
 }
 
 #[cfg(test)]
@@ -369,7 +420,10 @@ mod tests {
                 top_level,
                 usize::from(!matches!(
                     route,
-                    AppRoute::JobsNew | AppRoute::TargetsNew | AppRoute::RunsNew
+                    AppRoute::JobsNew
+                        | AppRoute::TargetsNew
+                        | AppRoute::RunsNew
+                        | AppRoute::WorkflowsNew
                 )),
                 "{}",
                 route.path()
@@ -384,6 +438,8 @@ mod tests {
                         | AppRoute::TargetsNew
                         | AppRoute::Runs
                         | AppRoute::RunsNew
+                        | AppRoute::Workflows
+                        | AppRoute::WorkflowsNew
                 )),
                 "{}",
                 route.path()
@@ -465,6 +521,48 @@ mod tests {
         );
         assert_eq!(AppRoute::Runs.submenu_id(), "runs-submenu");
         assert_eq!(run_details_path("123"), "/runs/123");
+    }
+
+    #[test]
+    fn workflows_have_static_actions_and_keep_deep_links_in_the_execution_section() {
+        assert_eq!(AppRoute::from_path("/workflows"), Some(AppRoute::Workflows));
+        assert_eq!(
+            AppRoute::from_path("/workflows/new"),
+            Some(AppRoute::WorkflowsNew)
+        );
+        let children = AppRoute::Workflows.children();
+        assert_eq!(children.len(), 2);
+        assert_eq!(
+            children.first().map(|child| child.label),
+            Some("All Workflows")
+        );
+        assert_eq!(
+            children.get(1).map(|child| child.label),
+            Some("Create Workflow")
+        );
+        assert_eq!(AppRoute::Workflows.submenu_id(), "workflows-submenu");
+        for path in [
+            "/workflows/123",
+            "/workflows/123/edit",
+            "/workflow-runs/456",
+        ] {
+            assert!(is_section_active_path(path, AppRoute::Workflows));
+        }
+        assert!(!is_section_active_path(
+            "/workflows-other",
+            AppRoute::Workflows
+        ));
+        assert!(!is_section_active_path(
+            "/workflow-runs-other/123",
+            AppRoute::Workflows
+        ));
+        assert_eq!(super::workflow_details_path("123"), "/workflows/123");
+        assert_eq!(super::workflow_edit_path("123"), "/workflows/123/edit");
+        assert_eq!(super::workflow_launch_path("123"), "/workflows/123/run");
+        assert_eq!(
+            super::workflow_run_details_path("456"),
+            "/workflow-runs/456"
+        );
     }
 
     #[test]

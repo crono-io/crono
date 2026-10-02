@@ -10,14 +10,12 @@ use crate::{
     api,
     components::{
         DeleteControl, FormActions, PageHeader, QUIET_ACTION_CLASS, ResourceFeedback,
-        ResourceFeedbackModal, ResourceNameInput, focus_heading, name_validation_message,
-        visible_name_validation,
+        ResourceFeedbackModal, ResourceNameInput, focus_heading, forms::FIELD_CLASS,
+        name_validation_message, visible_name_validation,
     },
 };
 use crono_api::QueueResource;
 use leptos::{prelude::*, task::spawn_local};
-
-const INPUT_CLASS: &str = "w-full rounded-md border border-crono-border bg-white px-3 py-2.5 text-sm text-crono-text shadow-sm outline-none transition placeholder:text-zinc-400 focus:border-crono-primary focus:ring-2 focus:ring-crono-primary-soft disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500";
 
 /// Create and administer global worker Queues.
 #[component]
@@ -149,7 +147,7 @@ fn queue_page(state: QueuePageState) -> impl IntoView {
                         <label for="queue-description" class="block text-sm font-medium text-crono-text">"Description"</label>
                         <textarea
                             id="queue-description"
-                            class=INPUT_CLASS
+                            class=FIELD_CLASS
                             rows="3"
                             maxlength="500"
                             aria-invalid=move || state.description_error.get().is_some().then_some("true")
@@ -301,15 +299,15 @@ fn QueueRow(
             >
                 <div class="space-y-4">
                     <div>
-                        <label class="block text-sm font-medium text-crono-text">"Name"</label>
-                        <input class=INPUT_CLASS type="text" disabled=system prop:value=move || name.get() on:input=move |event| name.set(event_target_value(&event)) />
+                        <label for=format!("queue-edit-name-{id}") class="block text-sm font-medium text-crono-text">"Name"</label>
+                        <input id=format!("queue-edit-name-{id}") class=FIELD_CLASS type="text" disabled=system prop:value=move || name.get() on:input=move |event| name.set(event_target_value(&event)) />
                         <Show when=move || system>
                             <p class="mt-1.5 text-xs text-crono-muted">"The system default Queue name is fixed."</p>
                         </Show>
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-crono-text">"Description"</label>
-                        <textarea class=INPUT_CLASS rows="2" maxlength="500" prop:value=move || description.get() on:input=move |event| description.set(event_target_value(&event))></textarea>
+                        <label for=format!("queue-edit-description-{id}") class="block text-sm font-medium text-crono-text">"Description"</label>
+                        <textarea id=format!("queue-edit-description-{id}") class=FIELD_CLASS rows="2" maxlength="500" prop:value=move || description.get() on:input=move |event| description.set(event_target_value(&event))></textarea>
                     </div>
                     <label class="flex items-center gap-2 text-sm font-medium text-crono-text">
                         <input type="checkbox" disabled=system prop:checked=move || enabled.get() on:change=move |event| enabled.set(event_target_checked(&event)) />

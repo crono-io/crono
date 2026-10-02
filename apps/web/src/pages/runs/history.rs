@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     api,
-    components::{EmptyState, Icon, PageHeader, ResourceSelect},
+    components::{EmptyState, Icon, PageHeader, ResourceSelect, forms::FIELD_CLASS},
     navigation::{AppRoute, MaterialSymbol, run_details_path},
     pages::resource_options,
 };
@@ -86,8 +86,8 @@ pub fn RunsPage() -> impl IntoView {
             <CreatedRunNotice notice=created_run_id />
             <section class="grid gap-3 rounded-xl border border-crono-border bg-crono-surface p-4 sm:grid-cols-2 lg:grid-cols-5">
                 <ResourceSelect id="runs-namespace-filter" label="Namespace" placeholder="All namespaces" options=namespace_choices.options selected=namespace_id loading=namespace_choices.loading load_error=namespace_choices.load_error optional=true />
-                <div><label for="runs-status-filter" class="mb-2 block text-sm font-medium text-crono-text">"Status"</label>
-                    <select id="runs-status-filter" class="w-full rounded-md border border-crono-border bg-white px-3 py-2 text-sm text-crono-text" on:change=move |event| { status.set(parse_status(&event_target_value(&event))); reset_page(); }>
+                <div><label for="runs-status-filter" class="block text-sm font-medium text-crono-text">"Status"</label>
+                    <select id="runs-status-filter" class=FIELD_CLASS on:change=move |event| { status.set(parse_status(&event_target_value(&event))); reset_page(); }>
                         <option value="">"All statuses"</option>
                         <option value="pending_dispatch">"Pending dispatch"</option><option value="queued">"Queued"</option>
                         <option value="running">"Running"</option><option value="retry_wait">"Retry wait"</option>

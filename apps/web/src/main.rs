@@ -8,6 +8,9 @@
 #[cfg(any(target_arch = "wasm32", test))]
 mod navigation;
 
+#[cfg(any(target_arch = "wasm32", test))]
+mod workflow_layout;
+
 #[cfg(target_arch = "wasm32")]
 mod api;
 #[cfg(target_arch = "wasm32")]

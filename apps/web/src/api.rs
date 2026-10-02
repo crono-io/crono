@@ -11,12 +11,13 @@
 
 use crono_api::{
     CreateJobRequest, CreateNamespaceRequest, CreateQueueRequest, CreateRunRequest,
-    CreateScheduleRequest, CreateTargetRequest, CreateTargetSetRequest, ErrorEnvelope,
-    ExecutionTarget, JobResource, MonitorResource, NamespaceResource, OverviewResource, Page,
-    QueueResource, RerunRequest, RunAttemptResource, RunBatchResource, RunEventResource,
-    RunResource, RunStatus, ScheduleResource, TargetResource, TargetSetResource, UpdateJobRequest,
-    UpdateQueueRequest, UpdateScheduleRequest, UpdateTargetRequest, UpdateTargetSetRequest,
-    WorkerResource,
+    CreateScheduleRequest, CreateTargetRequest, CreateTargetSetRequest, CreateWorkflowRequest,
+    ErrorEnvelope, ExecutionTarget, JobResource, MonitorResource, NamespaceResource,
+    OverviewResource, Page, QueueResource, RerunRequest, RunAttemptResource, RunBatchResource,
+    RunEventResource, RunResource, RunStatus, ScheduleResource, StartWorkflowRequest,
+    TargetResource, TargetSetResource, UpdateJobRequest, UpdateQueueRequest, UpdateScheduleRequest,
+    UpdateTargetRequest, UpdateTargetSetRequest, UpdateWorkflowRequest, WorkerResource,
+    WorkflowResource, WorkflowRunResource,
 };
 use gloo_net::http::{Headers, Request, RequestBuilder, Response};
 use serde::{Serialize, de::DeserializeOwned};
@@ -110,6 +111,82 @@ pub async fn list_jobs(namespace_id: Uuid) -> ApiResult<Page<JobResource>> {
 
 pub async fn all_jobs(namespace_id: Uuid) -> ApiResult<Vec<JobResource>> {
     get_all(&jobs_path(namespace_id)).await
+}
+
+/// Browse one bounded page of visible Workflows using the server's name cursor.
+pub async fn list_workflows(
+    namespace_id: Uuid,
+    after: Option<&str>,
+) -> ApiResult<Page<WorkflowResource>> {
+    let mut url = format!("{API_ROOT}/namespaces/{namespace_id}/workflows?limit=25");
+    if let Some(cursor) = after {
+        let _ = write!(url, "&after={cursor}");
+    }
+    get(&url).await
+}
+
+/// Load an authorized graph by identity, independently of browser list state.
+pub async fn get_workflow(id: Uuid) -> ApiResult<WorkflowResource> {
+    get(&format!("{API_ROOT}/workflows/{id}")).await
+}
+
+/// Submit references and dependencies for authoritative server DAG validation.
+pub async fn create_workflow(
+    namespace_id: Uuid,
+    request: &CreateWorkflowRequest,
+) -> ApiResult<WorkflowResource> {
+    post(
+        &format!("{API_ROOT}/namespaces/{namespace_id}/workflows"),
+        request,
+    )
+    .await
+}
+
+/// Replace the requested revision; conflicts leave the editor's input intact.
+pub async fn update_workflow(
+    id: Uuid,
+    request: &UpdateWorkflowRequest,
+) -> ApiResult<WorkflowResource> {
+    put(&format!("{API_ROOT}/workflows/{id}"), request).await
+}
+
+/// Delete an unused definition; the server protects existing invocation history.
+pub async fn delete_workflow(id: Uuid) -> ApiResult<()> {
+    delete_empty(&format!("{API_ROOT}/workflows/{id}")).await
+}
+
+/// Launch with a retained request UUID so a transport retry cannot duplicate work.
+pub async fn create_workflow_run(
+    id: Uuid,
+    request: &StartWorkflowRequest,
+) -> ApiResult<WorkflowRunResource> {
+    post(&format!("{API_ROOT}/workflows/{id}/runs"), request).await
+}
+
+/// Browse server-ordered history with the returned newest-first UUID cursor.
+pub async fn list_workflow_runs(
+    id: Uuid,
+    before: Option<Uuid>,
+) -> ApiResult<Page<WorkflowRunResource>> {
+    let mut url = format!("{API_ROOT}/workflows/{id}/runs?limit=25");
+    if let Some(cursor) = before {
+        let _ = write!(url, "&before={cursor}");
+    }
+    get(&url).await
+}
+
+/// Read the launch snapshot and durable node progress, without Attempt output.
+pub async fn get_workflow_run(id: Uuid) -> ApiResult<WorkflowRunResource> {
+    get(&format!("{API_ROOT}/workflow-runs/{id}")).await
+}
+
+/// Stop future nodes; existing child Runs drain according to server semantics.
+pub async fn cancel_workflow_run(id: Uuid) -> ApiResult<WorkflowRunResource> {
+    post(
+        &format!("{API_ROOT}/workflow-runs/{id}/cancel"),
+        &serde_json::json!({}),
+    )
+    .await
 }
 
 /// Fetch one authorized Job so an edit URL works without prior list state.

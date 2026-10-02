@@ -11,6 +11,7 @@ use uuid::Uuid;
 /// Reactive state for one searchable resource collection.
 #[derive(Clone, Copy)]
 pub(super) struct ResourceOptions {
+    pub reload: Callback<()>,
     pub options: Signal<Vec<ResourceOption>>,
     pub loading: Signal<bool>,
     pub load_error: Signal<Option<String>>,
@@ -20,6 +21,7 @@ pub(super) struct ResourceOptions {
 pub(super) fn namespaces() -> ResourceOptions {
     let resources = LocalResource::new(api::all_namespaces);
     ResourceOptions {
+        reload: Callback::new(move |()| resources.refetch()),
         options: Signal::derive(move || {
             resources
                 .get()
@@ -46,6 +48,7 @@ pub(super) fn namespaces() -> ResourceOptions {
 pub(super) fn queues(current: Option<Uuid>) -> ResourceOptions {
     let resources = LocalResource::new(api::all_queues);
     ResourceOptions {
+        reload: Callback::new(move |()| resources.refetch()),
         options: Signal::derive(move || {
             resources
                 .get()
@@ -81,6 +84,7 @@ pub(super) fn jobs(namespace_id: RwSignal<Option<Uuid>>) -> ResourceOptions {
         }
     });
     ResourceOptions {
+        reload: Callback::new(move |()| resources.refetch()),
         options: Signal::derive(move || {
             resources
                 .get()
@@ -115,6 +119,7 @@ pub(super) fn targets(namespace_id: RwSignal<Option<Uuid>>) -> ResourceOptions {
         }
     });
     ResourceOptions {
+        reload: Callback::new(move |()| resources.refetch()),
         options: Signal::derive(move || {
             resources
                 .get()
@@ -149,6 +154,7 @@ pub(super) fn target_sets(namespace_id: RwSignal<Option<Uuid>>) -> ResourceOptio
         }
     });
     ResourceOptions {
+        reload: Callback::new(move |()| resources.refetch()),
         options: Signal::derive(move || {
             resources
                 .get()

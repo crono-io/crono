@@ -73,6 +73,16 @@ selected UUID rather than a display name. Target Sets use the same pattern for
 multi-selection, and Job creation selects an enabled Queue by UUID. Loading,
 empty, stale-selection, API, and field validation
 states remain in the form so failed submissions do not discard entered values.
+Text fields, native selects, searchable resource selectors, and timezone
+selectors share one `crono-input` style: a 44 px control height, consistent
+padding, and visible focus and disabled states. Every block label leaves a
+6 px gap before its control, keeping fields aligned in multi-column forms and
+Run filters. Textareas grow independently, and narrow screens stack fields
+without shrinking their text or widening the page. Retry settings use fewer
+columns until there is enough room to keep labels readable.
+Fixed Namespace fields keep the same minimum height, dropdown arrows remain
+centered, and high-contrast mode retains native select arrows and an explicit
+keyboard focus outline.
 Recurring Schedules select an IANA timezone from a searchable list that starts
 at UTC and displays current signed UTC offsets. The selected zone name is sent
 to the API; offsets are display-only and can change with daylight saving time.
@@ -120,7 +130,8 @@ values and credentials are never shown.
 
 Install a stable Rust toolchain, the `wasm32-unknown-unknown` target, and Trunk
 0.21.14. The complete `dev-start` workflow also requires Podman and `curl` for
-its local PostgreSQL and NATS containers:
+its local PostgreSQL and NATS containers, and OpenSSL to generate its initial
+development credential:
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -131,11 +142,8 @@ From the workspace root, the development recipe listens on every network
 interface by default so the UI can be tested from another machine:
 
 ```sh
-just web
-just web 127.0.0.1 3001
-export CRONO_AUTH_MODE=development
-export CRONO_AUTH_DEVELOPMENT_TOKEN="$(openssl rand -hex 32)"
 just dev-start
+just dev-start 127.0.0.1 3001 8081
 ```
 
 Open `http://<development-host>:3000` from the remote browser when using the
@@ -143,7 +151,12 @@ default port. Binding to `0.0.0.0` exposes the development server to reachable
 networks; use `just web 127.0.0.1` when remote access is not wanted, and keep
 host firewall rules appropriate for the environment. `just dev-start` runs the
 frontend and `crono-server` together, using ports `3000` and `8080`
-respectively. The server recipe also ensures the local PostgreSQL 18 and NATS
+respectively. It generates and reuses a private token in ignored
+`target/dev-auth/token`; the private Trunk proxy configuration supplies it to API
+requests automatically. No token export or browser setup is needed. Anyone who
+can reach this development web proxy has full development access; use it on a
+trusted testing network. An explicit `CRONO_AUTH_DEVELOPMENT_TOKEN` overrides
+the saved default. The server recipe also ensures the local PostgreSQL 18 and NATS
 JetStream containers are initialized and running. `Trunk.toml` proxies
 same-origin `/api` requests to `http://127.0.0.1:8080`, avoiding development
 CORS configuration while preserving the independently deployed client boundary.
@@ -153,6 +166,11 @@ any local worker from this checkout, and the two development containers without
 deleting their volumes. An unrelated listener on either port is not killed.
 The launcher requires Linux `/proc`, `flock`, and `ss`; `ss` catches IPv6-only
 listeners that would otherwise prevent the API's dual-stack bind.
+
+`just web` serves the frontend independently. Its checked-in `Trunk.toml`
+does not supply credentials; configure a separately launched server and use
+browser session storage as described below. `just web 127.0.0.1 3001` restricts
+that standalone frontend to local access on a different port.
 
 `trunk serve`, used by both `just web` and `just dev-start`, already watches the
 frontend's Rust, HTML, CSS, and asset inputs. Saving a change triggers a WASM
@@ -223,8 +241,10 @@ Transport-only wire types are shared through `crono-api`.
 
 The server verifies a configured development Bearer token through an injected
 AuthProvider before assigning `development/local`; the independently injected
-PermitAllAuthorizer still checks every application operation. Set
-`CRONO_AUTH_DEVELOPMENT_TOKEN` before starting the API. In the frontend tab's
+PermitAllAuthorizer still checks every application operation. The `dev-start`
+launcher supplies a private token to the server and development proxy. Outside
+that automatic proxy, set `CRONO_AUTH_DEVELOPMENT_TOKEN` before starting the API.
+In the frontend tab's
 DevTools console, set `sessionStorage.setItem('crono.access_token', '<configured
 development token>')` on one line and reload. The shared API client attaches this
 credential to every request without embedding it in the bundle or URLs. Remove it
@@ -234,3 +254,45 @@ for startup configuration, trust boundaries, and the future external provider se
 There is no login UI, OAuth/OIDC flow, JWT processing, refresh-token handling,
 or RBAC in the web client. Disabled toolbar placeholders do not imply a user
 session contract.
+
+## Workflows
+
+Execution → Workflows contains All Workflows and Create Workflow. Select a
+Namespace to browse definitions, then add existing Jobs and typed dependencies
+in the structured create/edit form. A live read-only graph shows parallel paths
+and joins. Server validation errors retain the draft; updates carry its loaded
+revision and affect future invocations only. Reload latest requires confirmation
+before replacing the draft, and offers its JSON for copying first. Failed
+reloads keep the draft available for retry. Definitions with history cannot be
+deleted, and deletion requires confirmation.
+
+Run Workflow selects a Target or Target Set and normal JSON invocation inputs,
+then opens the created WorkflowRun. Its immutable graph displays current node
+states, expected skipped branches, and links to every ordinary child Run.
+Active runs refresh every five seconds without overlapping status requests;
+polling stops on completion or navigation. Refresh failures visibly mark the
+retained snapshot as stale. Cancellation stops pending Jobs while active Runs
+finish normally. See [WORKFLOWS.md](../../WORKFLOWS.md) for execution semantics.
+
+Pure layout and navigation tests run with native workspace tests. Browser/WASM
+tests cover the structured draft and graph states, labels, ordinary Run links,
+launch request identity, and keyboard focus across graph updates. The complete
+page checks use built assets and an isolated API fixture, without real data or
+credentials:
+
+```sh
+cd apps/web
+trunk build --release
+python3 tests/workflows_browser.py
+```
+
+The page checks require ChromeDriver and Chromium. They exercise creation,
+editing, validation errors, namespace changes, connected-node removal, launch
+retries, Target Set child links, polling cleanup, stale snapshots, guarded
+deletion, and narrow-screen overflow. They also measure label/control alignment
+and 44 px heights across resource forms and Run filters, verify keyboard
+selection and focus, and check mobile stacking. Set `CRONO_WEB_FORMS_ONLY=1`
+to run just those form checks. Screenshots are written to
+`/tmp/crono-workflow-desktop.png`, `/tmp/crono-workflow-mobile.png`,
+`/tmp/crono-job-form-desktop.png`, `/tmp/crono-job-form-mobile.png`, and
+`/tmp/crono-run-filters-desktop.png`.

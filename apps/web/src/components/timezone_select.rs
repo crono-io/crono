@@ -5,13 +5,11 @@
 //! labels describe the current instant only; the server applies each region's
 //! rules when it calculates future occurrences.
 
-use super::Icon;
+use super::{Icon, forms::INPUT_CLASS};
 use crate::navigation::MaterialSymbol;
 use chrono::{DateTime, Offset, Utc};
 use chrono_tz::{TZ_VARIANTS, Tz};
 use leptos::prelude::*;
-
-const INPUT_CLASS: &str = "w-full rounded-md border border-crono-border bg-white px-3 py-2.5 pr-10 text-sm text-crono-text shadow-sm outline-none transition focus:border-crono-primary focus:ring-2 focus:ring-crono-primary-soft focus-visible:ring-2 focus-visible:ring-crono-primary";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TimezoneOption {
@@ -59,7 +57,7 @@ pub fn TimezoneSelect(selected: RwSignal<String>) -> impl IntoView {
             <div class="relative mt-1.5">
                 <input
                     id="schedule-timezone"
-                    class=INPUT_CLASS
+                    class=format!("pr-10 {INPUT_CLASS}")
                     type="text"
                     role="combobox"
                     autocomplete="off"
@@ -85,7 +83,7 @@ pub fn TimezoneSelect(selected: RwSignal<String>) -> impl IntoView {
                     on:keydown=move |event| timezone_keydown(&event, filtered, active, open, choose)
                     on:blur=move |_| open.set(false)
                 />
-                <Icon symbol=MaterialSymbol::ExpandMore class="pointer-events-none absolute right-3 top-2.5 text-lg text-crono-muted" />
+                <Icon symbol=MaterialSymbol::ExpandMore class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-lg text-crono-muted" />
                 <Show when=move || open.get()>
                     <TimezoneOptions filtered active selected choose />
                 </Show>

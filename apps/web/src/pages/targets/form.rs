@@ -11,8 +11,8 @@ use crate::{
     api,
     components::{
         ArgumentListInput, FormActions, JsonObjectInput, PageHeader, ResourceFeedback,
-        ResourceFeedbackModal, ResourceNameInput, ResourceSelect, name_validation_message,
-        parse_input_object, visible_name_validation,
+        ResourceFeedbackModal, ResourceNameInput, ResourceSelect, forms::READ_ONLY_FIELD_CLASS,
+        name_validation_message, parse_input_object, visible_name_validation,
     },
 };
 use crono_api::{CreateTargetRequest, TargetResource, UpdateTargetRequest};
@@ -200,7 +200,7 @@ fn target_view(state: &TargetViewState) -> impl IntoView + use<> {
                 <form class="mt-5 space-y-5" on:submit=move |event| state.submit.run(event) novalidate>
                     {match state.namespace_name.get_untracked() {
                         Some(namespace) => view! {
-                            <div><p class="text-sm font-medium text-crono-text">"Namespace"</p><p class="mt-1.5 rounded-md border border-crono-border bg-zinc-50 px-3 py-2.5 text-sm text-crono-muted">{namespace}</p></div>
+                            <div><p class="text-sm font-medium text-crono-text">"Namespace"</p><p class=READ_ONLY_FIELD_CLASS>{namespace}</p></div>
                         }.into_any(),
                         None => view! {
                             <div>

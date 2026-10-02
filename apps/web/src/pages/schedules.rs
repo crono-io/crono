@@ -12,7 +12,8 @@ use crate::{
     components::{
         FormActions, JsonObjectInput, PageHeader, QUIET_ACTION_CLASS, ResourceFeedback,
         ResourceFeedbackModal, ResourceNameInput, ResourceOption, ResourceSelect, TimezoneSelect,
-        focus_heading, name_validation_message, parse_input_object, visible_name_validation,
+        focus_heading, forms::FIELD_CLASS, name_validation_message, parse_input_object,
+        visible_name_validation,
     },
 };
 use crono_api::{
@@ -20,8 +21,6 @@ use crono_api::{
     UpdateScheduleRequest,
 };
 use leptos::{prelude::*, task::spawn_local};
-
-const FIELD_CLASS: &str = "mt-1.5 w-full rounded-md border border-crono-border bg-white px-3 py-2.5 text-sm text-crono-text shadow-sm outline-none focus:border-crono-primary focus:ring-2 focus:ring-crono-primary-soft";
 
 /// Create schedules and toggle existing schedule activity.
 #[component]
@@ -321,7 +320,7 @@ fn schedules_view(state: &ScheduleViewState) -> impl IntoView + use<> {
                     <ResourceSelect id="schedule-namespace" label="Namespace" placeholder="Search/select namespace…" options=state.namespace_choices.options selected=state.namespace_id loading=state.namespace_choices.loading load_error=state.namespace_choices.load_error field_error=state.namespace_error select_single=true />
                     <ResourceNameInput id="schedule-name" label="Name" value=state.name error=state.name_error />
                     <div class="grid gap-4 md:grid-cols-2"><ResourceSelect id="schedule-job" label="Job" placeholder="Search/select Job…" options=state.job_choices.options selected=state.job_id loading=state.job_choices.loading load_error=state.job_choices.load_error field_error=state.job_error /><ResourceSelect id="schedule-destination" label="Destination" placeholder="Search/select Target or Target Set…" options=state.destinations selected=state.destination_id loading=Signal::derive(move || state.target_choices.loading.get() || state.set_choices.loading.get()) load_error=Signal::derive(move || state.target_choices.load_error.get().or_else(|| state.set_choices.load_error.get())) field_error=state.destination_error select_single=true /></div>
-                    <div class="grid gap-4 md:grid-cols-3"><label class="text-sm font-medium text-crono-text">"Timing"<select class=FIELD_CLASS prop:value=move || state.timing.get() on:change=move |event| state.timing.set(event_target_value(&event))><option value="cron">"Cron"</option><option value="once">"One shot"</option></select></label><Show when=move || state.timing.get() == "cron" fallback=move || view! { <label class="text-sm font-medium text-crono-text md:col-span-2">"Execute at (RFC 3339)"<input class=FIELD_CLASS type="text" placeholder="2026-09-25T12:00:00Z" prop:value=move || state.execute_at.get() on:input=move |event| state.execute_at.set(event_target_value(&event))/><p class="mt-1 text-sm text-crono-failed" role="alert">{move || schedule_server_error(state.server_field, "execute_at").unwrap_or_default()}</p></label> }><label class="text-sm font-medium text-crono-text">"Cron expression"<input class=FIELD_CLASS type="text" prop:value=move || state.cron_expression.get() on:input=move |event| state.cron_expression.set(event_target_value(&event))/><p class="mt-1 text-sm text-crono-failed" role="alert">{move || schedule_server_error(state.server_field, "cron_expression").unwrap_or_default()}</p></label><div><TimezoneSelect selected=state.timezone /><p class="mt-1 text-sm text-crono-failed" role="alert">{move || schedule_server_error(state.server_field, "timezone").unwrap_or_default()}</p></div></Show></div>
+                    <div class="grid gap-4 md:grid-cols-3"><label class="block text-sm font-medium text-crono-text">"Timing"<select class=FIELD_CLASS prop:value=move || state.timing.get() on:change=move |event| state.timing.set(event_target_value(&event))><option value="cron">"Cron"</option><option value="once">"One shot"</option></select></label><Show when=move || state.timing.get() == "cron" fallback=move || view! { <label class="block text-sm font-medium text-crono-text md:col-span-2">"Execute at (RFC 3339)"<input class=FIELD_CLASS type="text" placeholder="2026-09-25T12:00:00Z" prop:value=move || state.execute_at.get() on:input=move |event| state.execute_at.set(event_target_value(&event))/><p class="mt-1 text-sm text-crono-failed" role="alert">{move || schedule_server_error(state.server_field, "execute_at").unwrap_or_default()}</p></label> }><label class="block text-sm font-medium text-crono-text">"Cron expression"<input class=FIELD_CLASS type="text" prop:value=move || state.cron_expression.get() on:input=move |event| state.cron_expression.set(event_target_value(&event))/><p class="mt-1 text-sm text-crono-failed" role="alert">{move || schedule_server_error(state.server_field, "cron_expression").unwrap_or_default()}</p></label><div><TimezoneSelect selected=state.timezone /><p class="mt-1 text-sm text-crono-failed" role="alert">{move || schedule_server_error(state.server_field, "timezone").unwrap_or_default()}</p></div></Show></div>
                     <JsonObjectInput id="schedule-inputs" label="Invocation inputs" value=state.inputs error=state.input_error />
                     <FormActions submit_label="Create Schedule" disabled=state.disabled on_cancel=state.reset />
                 </form>
