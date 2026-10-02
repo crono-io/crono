@@ -10,7 +10,8 @@ The application uses a dark infrastructure-style sidebar, compact top toolbar,
 and light routed workspace as its baseline visual language. Overview displays
 authorized live counts with Material Symbols plus Recent Runs and Workers.
 Namespaces, Queues, Jobs, Targets, and Target Sets provide creation and list
-workflows. Queues additionally support rename, enable/disable, and guarded
+workflows. Empty Namespaces support guarded deletion; the bootstrap `default`
+Namespace is protected. Queues additionally support rename, enable/disable, and guarded
 deletion; the bootstrap `default` Queue is visibly protected while its
 description remains editable. Runs selects existing resources and displays
 durable dispatch state; Workers shows heartbeat-derived presence and capacity.
@@ -32,13 +33,37 @@ sidebar submenu offers All Targets and Create Target. A saved creation clears
 the form for another Target; a saved edit remains attached to its original ID.
 Both forms retain the Ansible and echo examples and return to the list on
 Cancel.
+Namespaces, Queues, Jobs, Targets, Target Sets, and Schedules use one shared
+save-result modal. Creation offers Create another and View resources; Job and
+Target edits offer Continue editing, while completed inline updates offer Done.
+View resources navigates to the Job or Target index or focuses the current list
+heading. Schedule enable/disable actions use the same outcome dialog. API
+failures retain entered values and field-specific guidance, and duplicate Job
+names also offer View Jobs.
+
+Namespace, Queue, and Target rows offer Delete directly, opening a shared
+confirmation with the resource name, Confirm delete, and Cancel. Controls are
+borderless and gray at rest, turning red on hover with a visible keyboard focus
+ring. Cancel receives initial focus; Escape and cancellation are blocked while
+deletion is pending, and repeated confirmation cannot submit another request.
+Errors remain in the confirmation. Success refreshes the list, announces the
+deleted resource, and focuses its stable heading. Target cursor navigation
+remains available when deleting the last item on a later page.
+
+The bootstrap default Namespace, system Queue, and default/default Target are
+visibly protected and independently guarded by the server. Namespace deletion
+requires no contained resources or Run-request references. Queue deletion
+rejects Job, Run-history, and worker-presence references; Target deletion rejects
+Target Set, Schedule, Run-request, and Run-history references. These failures
+preserve all related records. Dialogs contain focus and restore it to the opener
+on cancellation. Run creation and re-run feedback retain their existing flow.
 Monitor links to Schedules, Runs, and Workers with the same Material Symbols used
 in the sidebar, keeping the destination names visible beside each icon. These
 links are gray at rest, with a light background and blue text on hover and a
 visible focus ring for keyboard navigation.
 Overview's View all links, list row actions, refresh and pagination controls,
-and detail back links use the same quiet treatment. Creation, submission, and
-destructive controls keep their stronger action styling.
+and detail back links use the same quiet treatment. Creation and submission
+controls keep their stronger action styling.
 Reserved pages use truthful empty states.
 
 Resource creation uses the shared DNS-1123 label rule from `crono-api` and
@@ -52,9 +77,8 @@ Recurring Schedules select an IANA timezone from a searchable list that starts
 at UTC and displays current signed UTC offsets. The selected zone name is sent
 to the API; offsets are display-only and can change with daylight saving time.
 One-shot Schedules continue to use an explicit UTC timestamp.
-Submission feedback sits beside the Save action: success uses a status notice,
-while API failures use a visible alert. A duplicate Job name also appears beside
-the Name field, and the alert links back to All Jobs.
+Submission outcomes use the shared modal's status or alert semantics. A duplicate
+Job name also appears beside the Name field and offers View Jobs in the modal.
 The Resources sidebar's Jobs submenu links to All Jobs (`/jobs`) and Create Job
 (`/jobs/new`), never to individual Job records. Browsing requires a selected
 Namespace and offers a Create Job action and an actionable empty state. Each
@@ -132,6 +156,11 @@ listeners that would otherwise prevent the API's dual-stack bind.
 frontend's Rust, HTML, CSS, and asset inputs. Saving a change triggers a WASM
 rebuild and automatically reloads connected browsers, so this workflow does not
 need `cargo-watch` or a second compilation process.
+
+Server Rust changes require restarting the API. Run `just dev-start` again after
+adding or changing API routes so the browser and server use the same contract.
+A newer frontend calling an older server can otherwise receive `405 Method Not
+Allowed`, including when deleting a Target before restarting the updated API.
 
 The equivalent direct commands from `apps/web` are:
 

@@ -163,6 +163,7 @@ pub enum MaterialSymbol {
     CalendarMonth,
     Check,
     Dashboard,
+    Delete,
     Dns,
     Error,
     ExpandMore,
@@ -191,6 +192,7 @@ impl MaterialSymbol {
             Self::CalendarMonth => "calendar_month",
             Self::Check => "check",
             Self::Dashboard => "dashboard",
+            Self::Delete => "delete",
             Self::Dns => "dns",
             Self::Error => "error",
             Self::ExpandMore => "expand_more",
@@ -469,6 +471,7 @@ mod tests {
     fn shell_symbols_are_explicit() {
         let shell_symbols = [
             MaterialSymbol::Check,
+            MaterialSymbol::Delete,
             MaterialSymbol::ExpandMore,
             MaterialSymbol::LightMode,
             MaterialSymbol::SearchOff,

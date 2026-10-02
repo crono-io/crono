@@ -1,4 +1,8 @@
 //! Authorized orchestration of domain parsing and persistence operations.
+//!
+//! Namespace deletion protects bootstrap and referenced resources. Scoped lists
+//! establish authorization before checking parent existence, so removing an
+//! empty Namespace also removes access to its child collection routes.
 
 use super::{
     ApplicationError, Authorizer, Capability, ControlPlaneStore, CreateJobInput, CreateQueueInput,
@@ -107,6 +111,38 @@ impl Application {
             )
             .await?;
         Ok(self.store.get_namespace(id).await?)
+    }
+
+    /// Delete an empty Namespace after authorizing its immutable scope.
+    ///
+    /// Authorization precedes existence and bootstrap checks to avoid disclosing
+    /// unauthorized resource data. The authoritative name protects `default`;
+    /// persistence rejects references atomically without cascading removal.
+    ///
+    /// # Errors
+    ///
+    /// Returns authorization, protected-default, not-found, in-use, or dependency failures.
+    pub async fn delete_namespace(
+        &self,
+        context: &RequestContext,
+        id: Uuid,
+    ) -> Result<(), ApplicationError> {
+        let id = NamespaceId::new(id);
+        self.authorizer
+            .authorize(
+                context,
+                Capability::NamespaceDelete,
+                &ResourceScope::Namespace(id),
+            )
+            .await?;
+        let namespace = self.store.get_namespace(id).await?;
+        if namespace.name().as_str() == "default" {
+            return Err(ApplicationError::InvalidInput {
+                field: None,
+                message: "The default Namespace cannot be deleted".to_string(),
+            });
+        }
+        Ok(self.store.delete_namespace(id).await?)
     }
 
     /// Authorize, validate, and persist one global worker Queue.
@@ -359,6 +395,9 @@ impl Application {
 
     /// List visible Jobs from one authorized Namespace.
     ///
+    /// After scoped authorization and pagination validation, a missing Namespace
+    /// returns not-found rather than an empty collection. No Namespace name is exposed.
+    ///
     /// # Errors
     ///
     /// Returns validation, pagination, authorization, or dependency failures.
@@ -381,14 +420,12 @@ impl Application {
             .authorizer
             .visibility(context, Capability::JobRead)
             .await?;
+        let limit = page_limit(limit)?;
+        let after = page_cursor(after)?;
+        self.store.get_namespace(namespace_id).await?;
         Ok(self
             .store
-            .list_jobs(
-                namespace_id,
-                &visibility,
-                page_limit(limit)?,
-                page_cursor(after)?,
-            )
+            .list_jobs(namespace_id, &visibility, limit, after)
             .await?)
     }
 
@@ -442,6 +479,9 @@ impl Application {
 
     /// List visible Targets from one authorized Namespace.
     ///
+    /// After scoped authorization and pagination validation, a missing Namespace
+    /// returns not-found rather than an empty collection. No Namespace name is exposed.
+    ///
     /// # Errors
     ///
     /// Returns validation, pagination, authorization, or dependency failures.
@@ -464,14 +504,12 @@ impl Application {
             .authorizer
             .visibility(context, Capability::TargetRead)
             .await?;
+        let limit = page_limit(limit)?;
+        let after = page_cursor(after)?;
+        self.store.get_namespace(namespace_id).await?;
         Ok(self
             .store
-            .list_targets(
-                namespace_id,
-                &visibility,
-                page_limit(limit)?,
-                page_cursor(after)?,
-            )
+            .list_targets(namespace_id, &visibility, limit, after)
             .await?)
     }
 
@@ -529,6 +567,37 @@ impl Application {
         }
         let definition = TargetDefinition { arguments, inputs };
         Ok(self.store.update_target(id, &name, &definition).await?)
+    }
+
+    /// Authorize Target deletion before reading its server-owned Namespace and name.
+    ///
+    /// The starter `default/default` Target is protected. PostgreSQL foreign
+    /// keys reject deletion while Target Sets, Schedules, or Run history refer
+    /// to the Target, including references created concurrently.
+    ///
+    /// # Errors
+    ///
+    /// Returns authorization, protected-Target, not-found, in-use, or storage failures.
+    pub async fn delete_target(
+        &self,
+        context: &RequestContext,
+        id: Uuid,
+    ) -> Result<(), ApplicationError> {
+        let id = TargetId::new(id);
+        self.authorizer
+            .authorize(
+                context,
+                Capability::TargetDelete,
+                &ResourceScope::Target(id),
+            )
+            .await?;
+        let current = self.store.get_target(id).await?;
+        if current.namespace.as_str() == "default" && current.target.name().as_str() == "default" {
+            return Err(ApplicationError::invalid_request(
+                "the default Target cannot be deleted",
+            ));
+        }
+        Ok(self.store.delete_target(id).await?)
     }
 
     /// Create a non-empty Target Set from explicit same-Namespace Target IDs.
@@ -597,6 +666,9 @@ impl Application {
 
     /// List visible Target Sets from one authorized Namespace.
     ///
+    /// After scoped authorization and pagination validation, a missing Namespace
+    /// returns not-found rather than an empty collection. No Namespace name is exposed.
+    ///
     /// # Errors
     ///
     /// Returns invalid pagination, authorization, or storage failures.
@@ -619,14 +691,12 @@ impl Application {
             .authorizer
             .visibility(context, Capability::TargetSetRead)
             .await?;
+        let limit = page_limit(limit)?;
+        let after = page_cursor(after)?;
+        self.store.get_namespace(namespace_id).await?;
         Ok(self
             .store
-            .list_target_sets(
-                namespace_id,
-                &visibility,
-                page_limit(limit)?,
-                page_cursor(after)?,
-            )
+            .list_target_sets(namespace_id, &visibility, limit, after)
             .await?)
     }
 
@@ -774,6 +844,9 @@ impl Application {
 
     /// List Schedules visible within one Namespace.
     ///
+    /// After scoped authorization and pagination validation, a missing Namespace
+    /// returns not-found rather than an empty collection. No Namespace name is exposed.
+    ///
     /// # Errors
     ///
     /// Returns validation, authorization, pagination, or storage failures.
@@ -796,14 +869,12 @@ impl Application {
             .authorizer
             .visibility(context, Capability::ScheduleRead)
             .await?;
+        let limit = page_limit(limit)?;
+        let after = page_cursor(after)?;
+        self.store.get_namespace(namespace_id).await?;
         Ok(self
             .store
-            .list_schedules(
-                namespace_id,
-                &visibility,
-                page_limit(limit)?,
-                page_cursor(after)?,
-            )
+            .list_schedules(namespace_id, &visibility, limit, after)
             .await?)
     }
 

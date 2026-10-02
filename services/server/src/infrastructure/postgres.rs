@@ -436,6 +436,19 @@ impl ControlPlaneStore for PostgresStore {
         queue_from_row(row)
     }
 
+    /// Rely on restrictive foreign keys to serialize deletion with dependent writes.
+    async fn delete_namespace(&self, id: NamespaceId) -> Result<(), StoreError> {
+        let result = sqlx::query("DELETE FROM crono.namespaces WHERE id = $1")
+            .bind(id.get())
+            .execute(&self.pool)
+            .await
+            .map_err(store_error)?;
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
     async fn delete_queue(&self, id: QueueId) -> Result<(), StoreError> {
         let result = sqlx::query("DELETE FROM crono.queues WHERE id = $1")
             .bind(id.get())
@@ -705,6 +718,19 @@ impl ControlPlaneStore for PostgresStore {
         .map_err(store_error)?
         .ok_or(StoreError::NotFound)?;
         target_from_row(row)
+    }
+
+    /// Atomically remove one Target, retaining every existing reference on conflict.
+    async fn delete_target(&self, id: TargetId) -> Result<(), StoreError> {
+        let result = sqlx::query("DELETE FROM crono.targets WHERE id = $1")
+            .bind(id.get())
+            .execute(&self.pool)
+            .await
+            .map_err(store_error)?;
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
     }
 
     async fn create_target_set(

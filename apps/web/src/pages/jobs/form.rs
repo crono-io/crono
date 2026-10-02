@@ -3,6 +3,8 @@
 //! Jobs own the executor, executable, base argv templates, retry policy, and
 //! least-specific input layer. Existing Namespaces and Queues remain UUID-
 //! backed selections; preview destinations are transient and never persisted.
+//! Shared result modals announce API outcomes without removing entered values
+//! or field guidance; duplicate names also offer navigation to existing Jobs.
 
 use super::super::resource_options;
 use super::preview::{
@@ -11,10 +13,10 @@ use super::preview::{
 use crate::{
     api,
     components::{
-        ArgumentListInput, FormActions, Icon, JsonObjectInput, PageHeader, ResourceNameInput,
-        ResourceSelect, name_validation_message, parse_input_object, visible_name_validation,
+        ArgumentListInput, FormActions, JsonObjectInput, PageHeader, ResourceFeedback,
+        ResourceFeedbackModal, ResourceNameInput, ResourceSelect, name_validation_message,
+        parse_input_object, visible_name_validation,
     },
-    navigation::MaterialSymbol,
 };
 use crono_api::{CreateJobRequest, ExecutorKind, JobResource, UpdateJobRequest};
 use leptos::{prelude::*, task::spawn_local};
@@ -120,10 +122,10 @@ pub(super) fn JobForm(#[prop(optional)] initial_job: Option<JobResource>) -> imp
                         <div class="mt-3"><ResourceSelect id="job-preview-target" label="Preview destination" placeholder="Select a Target or Target Set…" options=preview_options selected=preview_target loading=Signal::derive(move || namespace_id.get().is_some() && (targets.get().is_none() || target_sets.get().is_none())) load_error=Signal::derive(|| None) optional=true /></div>
                         <pre class="mt-3 overflow-auto whitespace-pre-wrap rounded-md bg-zinc-900 p-3 text-xs text-zinc-100">{move || preview.get()}</pre>
                     </div>
-                    <JobFeedbackNotice feedback />
                     <FormActions submit_label="Save Job" disabled=disabled on_cancel=cancel />
                 </form>
             </section>
+            <ResourceFeedbackModal id="job-save-result" resource="Job" plural="Jobs" feedback on_view=cancel />
         </div>
     }
 }
@@ -164,57 +166,24 @@ struct JobState {
     attempted: RwSignal<bool>,
     submitting: RwSignal<bool>,
     server_field: RwSignal<Option<(String, String)>>,
-    feedback: RwSignal<Option<JobFeedback>>,
+    feedback: RwSignal<Option<ResourceFeedback>>,
     namespace_choices: resource_options::ResourceOptions,
     queue_choices: resource_options::ResourceOptions,
     targets: LocalResource<api::ApiResult<Vec<crono_api::TargetResource>>>,
     target_sets: LocalResource<api::ApiResult<Vec<crono_api::TargetSetResource>>>,
 }
 
-/// Keep successful submissions distinct from errors for visible, accessible feedback.
-#[derive(Clone)]
-enum JobFeedback {
-    Saved(String),
-    Error { message: String, duplicate: bool },
-}
-
-/// Announce the latest submission outcome at the action point, not below the form.
-#[component]
-fn JobFeedbackNotice(feedback: RwSignal<Option<JobFeedback>>) -> impl IntoView {
-    move || {
-        feedback.get().map(|notice| match notice {
-            JobFeedback::Saved(message) => view! {
-                <div class="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800" role="status">
-                    <Icon symbol=MaterialSymbol::Check class="mt-0.5 shrink-0 text-lg" />
-                    <p class="font-medium">{message}</p>
-                </div>
-            }.into_any(),
-            JobFeedback::Error { message, duplicate } => view! {
-                <div class="flex items-start gap-3 rounded-lg border border-crono-failed/30 bg-red-50 p-4 text-sm text-crono-failed" role="alert">
-                    <Icon symbol=MaterialSymbol::Error class="mt-0.5 shrink-0 text-lg" />
-                    <div>
-                        <p class="font-semibold">"Job was not saved"</p>
-                        <p class="mt-1">{message}</p>
-                        {duplicate.then(|| view! { <A href="/jobs" attr:class="mt-2 inline-block font-medium underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">"View all Jobs"</A> })}
-                    </div>
-                </div>
-            }.into_any(),
-        })
-    }
-}
-
-impl JobFeedback {
-    /// Translate a name conflict into an actionable message without
-    /// treating unrelated API failures as duplicate Jobs.
-    fn from_error(error: api::ApiError) -> Self {
-        let duplicate = error.code == "already_exists";
-        let message = if duplicate {
-            "A Job with this name already exists in the selected Namespace. Choose another name or edit the existing Job.".to_string()
-        } else {
-            error.message
-        };
-        Self::Error { message, duplicate }
-    }
+/// Make duplicate-name failures actionable while preserving other server messages.
+fn job_feedback_error(error: api::ApiError) -> ResourceFeedback {
+    let duplicate = error.code == "already_exists";
+    let message = if duplicate {
+        "A Job with this name already exists in the selected Namespace. Choose another name or edit the existing Job.".to_string()
+    } else {
+        error.message
+    };
+    let mut feedback = ResourceFeedback::failed(message);
+    feedback.view_on_error = duplicate;
+    feedback
 }
 
 impl JobState {
@@ -441,6 +410,7 @@ fn job_reset(state: &JobState) -> Callback<()> {
     })
 }
 
+/// Submit validated fields once; API failures retain inputs and also open the result modal.
 fn job_submit(
     state: &JobState,
     fields: JobFields,
@@ -450,6 +420,9 @@ fn job_submit(
     let reset = job_reset(&state);
     Callback::new(move |event: leptos::ev::SubmitEvent| {
         event.prevent_default();
+        if state.submitting.get_untracked() {
+            return;
+        }
         state.attempted.set(true);
         state.server_field.set(None);
         state.feedback.set(None);
@@ -470,27 +443,27 @@ fn job_submit(
                     if edit_id.is_none() {
                         reset.run(());
                     }
-                    state.feedback.set(Some(JobFeedback::Saved(format!(
-                        "Saved {}.",
-                        job.qualified_name
-                    ))));
+                    state.feedback.set(Some(ResourceFeedback::saved(
+                        format!("Saved {}.", job.qualified_name),
+                        if edit_id.is_some() {
+                            "Continue editing"
+                        } else {
+                            "Create another Job"
+                        },
+                    )));
                 }
                 Err(error) => {
-                    if let Some(field) = error.field {
-                        state.server_field.set(Some((field, error.message)));
-                    } else {
-                        let notice = JobFeedback::from_error(error);
-                        if let JobFeedback::Error {
-                            duplicate: true, ..
-                        } = notice
-                        {
-                            state.server_field.set(Some((
-                                "name".to_string(),
-                                "This name is already used in the selected Namespace.".to_string(),
-                            )));
-                        }
-                        state.feedback.set(Some(notice));
+                    if let Some(field) = &error.field {
+                        state
+                            .server_field
+                            .set(Some((field.clone(), error.message.clone())));
+                    } else if error.code == "already_exists" {
+                        state.server_field.set(Some((
+                            "name".to_string(),
+                            "This name is already used in the selected Namespace.".to_string(),
+                        )));
                     }
+                    state.feedback.set(Some(job_feedback_error(error)));
                 }
             }
             state.submitting.set(false);
@@ -575,8 +548,9 @@ fn NumberField(label: &'static str, value: RwSignal<String>) -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::{JobFeedback, JobFeedbackNotice};
+    use super::job_feedback_error;
     use crate::api::ApiError;
+    use crate::components::{ResourceFeedback, ResourceFeedbackModal};
     use leptos::prelude::*;
     use leptos_router::components::Router;
     use wasm_bindgen::JsCast;
@@ -590,12 +564,11 @@ mod tests {
             message: "resource already exists".to_string(),
             field: None,
         };
-        assert!(matches!(
-            JobFeedback::from_error(error),
-            JobFeedback::Error { message, duplicate: true }
-                if message.contains("Job with this name")
-                    && message.contains("selected Namespace")
-        ));
+        let feedback = job_feedback_error(error);
+        assert!(!feedback.succeeded);
+        assert!(feedback.view_on_error);
+        assert!(feedback.message.contains("Job with this name"));
+        assert!(feedback.message.contains("selected Namespace"));
     }
 
     #[wasm_bindgen_test]
@@ -605,15 +578,14 @@ mod tests {
             message: "a required service is unavailable".to_string(),
             field: None,
         };
-        assert!(matches!(
-            JobFeedback::from_error(error),
-            JobFeedback::Error { message, duplicate: false }
-                if message == "a required service is unavailable"
-        ));
+        let feedback = job_feedback_error(error);
+        assert!(!feedback.succeeded);
+        assert!(!feedback.view_on_error);
+        assert_eq!(feedback.message, "a required service is unavailable");
     }
 
     #[wasm_bindgen_test]
-    fn duplicate_submission_renders_an_actionable_alert() {
+    async fn duplicate_submission_renders_an_actionable_alert() {
         let document = web_sys::window().and_then(|window| window.document());
         assert!(document.is_some(), "browser test requires a document");
         let Some(document) = document else {
@@ -638,23 +610,22 @@ mod tests {
         let handle = leptos::mount::mount_to(host.clone(), move || {
             view! {
                 <Router>
-                    <JobFeedbackNotice feedback=RwSignal::new(Some(JobFeedback::Error {
+                    <ResourceFeedbackModal id="job-test-result" resource="Job" plural="Jobs" feedback=RwSignal::new(Some(ResourceFeedback {
                         message: "A Job with this name already exists.".to_string(),
-                        duplicate: true,
-                    })) />
+                        succeeded: false,
+                        continue_label: "Back to form",
+                        view_on_error: true,
+                    })) on_view=Callback::new(|()| {}) />
                 </Router>
             }
         });
+        leptos::task::tick().await;
         let alert = host.query_selector("[role='alert']").ok().flatten();
         assert!(alert.is_some(), "failed submission must expose an alert");
-        assert!(host.inner_text().contains("Job was not saved"));
+        assert!(host.inner_text().contains("Job could not be saved"));
         assert!(host.inner_text().contains("already exists"));
-        assert!(
-            host.query_selector("a[href='/jobs']")
-                .ok()
-                .flatten()
-                .is_some()
-        );
+        assert!(host.inner_text().contains("View Jobs"));
+        assert!(host.query_selector("dialog[open]").ok().flatten().is_some());
         drop(handle);
         host.remove();
     }

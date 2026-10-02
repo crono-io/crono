@@ -90,6 +90,8 @@ impl DevelopmentIdentity {
 pub enum Capability {
     NamespaceCreate,
     NamespaceRead,
+    /// Delete an empty Namespace after resource-specific authorization.
+    NamespaceDelete,
     QueueCreate,
     QueueRead,
     QueueUpdate,
@@ -101,6 +103,8 @@ pub enum Capability {
     TargetCreate,
     TargetRead,
     TargetUpdate,
+    /// Delete one Target after resource-specific authorization.
+    TargetDelete,
     TargetUse,
     TargetSetCreate,
     TargetSetRead,
@@ -226,6 +230,7 @@ mod tests {
         let capabilities = [
             Capability::NamespaceCreate,
             Capability::NamespaceRead,
+            Capability::NamespaceDelete,
             Capability::QueueCreate,
             Capability::QueueRead,
             Capability::QueueUpdate,
@@ -235,6 +240,7 @@ mod tests {
             Capability::JobExecute,
             Capability::TargetCreate,
             Capability::TargetRead,
+            Capability::TargetDelete,
             Capability::TargetUse,
             Capability::TargetSetCreate,
             Capability::TargetSetRead,

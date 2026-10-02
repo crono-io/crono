@@ -2,15 +2,16 @@
 //!
 //! A Target Set is an explicit, UUID-backed fan-out selection plus one JSON
 //! input layer shared by all members. Editing replaces metadata and membership
-//! without changing the Target Set's identity.
+//! without changing the Target Set's identity. Shared modals report every API
+//! outcome while failures retain field guidance and entered membership choices.
 
 use super::resource_options;
 use crate::{
     api,
     components::{
-        FormActions, JsonObjectInput, PageHeader, QUIET_ACTION_CLASS, ResourceMultiSelect,
-        ResourceNameInput, ResourceSelect, name_validation_message, parse_input_object,
-        visible_name_validation,
+        FormActions, JsonObjectInput, PageHeader, QUIET_ACTION_CLASS, ResourceFeedback,
+        ResourceFeedbackModal, ResourceMultiSelect, ResourceNameInput, ResourceSelect,
+        focus_heading, name_validation_message, parse_input_object, visible_name_validation,
     },
 };
 use crono_api::{CreateTargetSetRequest, UpdateTargetSetRequest};
@@ -28,7 +29,7 @@ pub fn TargetSetsPage() -> impl IntoView {
     let attempted = RwSignal::new(false);
     let submitting = RwSignal::new(false);
     let server_field = RwSignal::new(None::<(String, String)>);
-    let feedback = RwSignal::new(None::<String>);
+    let feedback = RwSignal::new(None::<ResourceFeedback>);
     let namespace_choices = resource_options::namespaces();
     let target_choices = resource_options::targets(namespace_id);
     let target_sets = LocalResource::new(move || async move {
@@ -144,7 +145,7 @@ struct TargetSetViewState {
     name: RwSignal<String>,
     target_ids: RwSignal<Vec<uuid::Uuid>>,
     inputs: RwSignal<String>,
-    feedback: RwSignal<Option<String>>,
+    feedback: RwSignal<Option<ResourceFeedback>>,
     namespace_choices: resource_options::ResourceOptions,
     target_choices: resource_options::ResourceOptions,
     target_sets: LocalResource<api::ApiResult<crono_api::Page<crono_api::TargetSetResource>>>,
@@ -159,6 +160,7 @@ struct TargetSetViewState {
 
 fn target_sets_view(state: &TargetSetViewState) -> impl IntoView + use<> {
     let state = *state;
+    let heading = NodeRef::<leptos::html::H2>::new();
     view! {
         <div class="space-y-8">
             <PageHeader title="Target Sets" description="Target Sets fan a Job out to explicit Targets and add shared variables." />
@@ -172,13 +174,14 @@ fn target_sets_view(state: &TargetSetViewState) -> impl IntoView + use<> {
                     <JsonObjectInput id="target-set-inputs" label="Shared inputs" value=state.inputs error=state.input_error />
                     <FormActions submit_label="Save Target Set" disabled=state.disabled on_cancel=state.reset />
                 </form>
-                <p class="mt-3 text-sm text-crono-muted" role="status">{move || state.feedback.get().unwrap_or_default()}</p>
+
             </section>
-            <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface"><header class="border-b border-crono-border px-5 py-4 sm:px-6"><h2 class="font-semibold text-crono-text">"Target Sets in Namespace"</h2></header>{move || state.target_sets.map(|result| match result {
+            <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface"><header class="border-b border-crono-border px-5 py-4 sm:px-6"><h2 node_ref=heading tabindex="-1" class="font-semibold text-crono-text">"Target Sets in Namespace"</h2></header>{move || state.target_sets.map(|result| match result {
                 Ok(page) if page.items.is_empty() => view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Select a Namespace or create its first Target Set."</p> }.into_any(),
                 Ok(page) => view! { <ul class="divide-y divide-crono-border">{page.items.iter().cloned().map(|set| { let edit_set = set.clone(); view! { <li class="flex items-center justify-between gap-4 px-5 py-4 sm:px-6"><div><p class="font-medium text-crono-text">{set.qualified_name}</p><p class="mt-1 text-sm text-crono-muted">{set.targets.iter().map(|target| target.name.clone()).collect::<Vec<_>>().join(", ")}</p></div><button type="button" class=QUIET_ACTION_CLASS on:click=move |_| { state.editing_id.set(Some(edit_set.id)); state.namespace_id.set(Some(edit_set.namespace_id)); state.name.set(edit_set.name.clone()); state.target_ids.set(edit_set.targets.iter().map(|target| target.id).collect()); state.inputs.set(pretty_json(&edit_set.inputs)); }>"Edit"</button></li> } }).collect_view()}</ul> }.into_any(),
                 Err(error) => view! { <p class="px-6 py-10 text-center text-sm text-crono-failed">{error.message.clone()}</p> }.into_any(),
             }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Target Sets…"</p> }.into_any())}</section>
+        <ResourceFeedbackModal id="target-set-save-result" resource="Target Set" plural="Target Sets" feedback=state.feedback on_view=Callback::new(move |()| focus_heading(heading)) />
         </div>
     }
 }
@@ -193,10 +196,11 @@ struct TargetSetSubmitState {
     attempted: RwSignal<bool>,
     submitting: RwSignal<bool>,
     server_field: RwSignal<Option<(String, String)>>,
-    feedback: RwSignal<Option<String>>,
+    feedback: RwSignal<Option<ResourceFeedback>>,
     target_sets: LocalResource<api::ApiResult<crono_api::Page<crono_api::TargetSetResource>>>,
 }
 
+/// Submit validated fields once; API failures retain inputs and also open the result modal.
 fn target_set_submit(
     state: &TargetSetSubmitState,
     reset: Callback<()>,
@@ -204,6 +208,9 @@ fn target_set_submit(
     let state = *state;
     Callback::new(move |event: leptos::ev::SubmitEvent| {
         event.prevent_default();
+        if state.submitting.get_untracked() {
+            return;
+        }
         state.attempted.set(true);
         state.server_field.set(None);
         state.feedback.set(None);
@@ -241,15 +248,28 @@ fn target_set_submit(
             match result {
                 Ok(set) => {
                     reset.run(());
-                    state
-                        .feedback
-                        .set(Some(format!("Saved {}.", set.qualified_name)));
+                    state.feedback.set(Some(ResourceFeedback::saved(
+                        format!("Saved {}.", set.qualified_name),
+                        if current_edit.is_some() {
+                            "Done"
+                        } else {
+                            "Create another Target Set"
+                        },
+                    )));
                     state.target_sets.refetch();
                 }
-                Err(error) => match error.field {
-                    Some(field) => state.server_field.set(Some((field, error.message))),
-                    None => state.feedback.set(Some(error.message)),
-                },
+                Err(error) => {
+                    if let Some(field) = error.field {
+                        state.server_field.set(Some((field, error.message.clone())));
+                    } else if error.code == "already_exists" {
+                        state
+                            .server_field
+                            .set(Some(("name".to_string(), error.message.clone())));
+                    }
+                    state
+                        .feedback
+                        .set(Some(ResourceFeedback::failed(error.message)));
+                }
             }
             state.submitting.set(false);
         });

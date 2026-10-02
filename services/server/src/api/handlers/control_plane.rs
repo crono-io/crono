@@ -141,6 +141,31 @@ pub async fn get_namespace(
     Ok(Json(namespace_resource(&namespace)?))
 }
 
+/// Delete an authorized, empty Namespace; success has no response body.
+#[utoipa::path(
+    delete,
+    path = "/api/namespaces/{namespace_id}",
+    params(("namespace_id" = Uuid, Path, description = "Immutable Namespace ID")),
+    responses(
+        (status = 204, description = "The Namespace was deleted."),
+        (status = 400, description = "The default Namespace cannot be deleted.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The Namespace was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "The Namespace still contains Jobs, Targets, Target Sets, Schedules, or Run requests.", body = crono_api::ErrorEnvelope),
+    ),
+    tag = "control-plane"
+)]
+pub async fn delete_namespace(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    ApiPath(namespace_id): ApiPath<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .application()
+        .delete_namespace(&context, namespace_id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[utoipa::path(
     post,
     path = "/api/queues",
@@ -320,6 +345,7 @@ pub async fn create_job(
     params(("namespace_id" = Uuid, Path), PageQuery),
     responses(
         (status = 200, description = "One page of Jobs.", body = Page<JobResource>),
+        (status = 404, description = "The Namespace was not found.", body = crono_api::ErrorEnvelope),
     ),
     tag = "control-plane"
 )]
@@ -438,6 +464,7 @@ pub async fn create_target(
     params(("namespace_id" = Uuid, Path), PageQuery),
     responses(
         (status = 200, description = "One page of Targets.", body = Page<TargetResource>),
+        (status = 404, description = "The Namespace was not found.", body = crono_api::ErrorEnvelope),
     ),
     tag = "control-plane"
 )]
@@ -505,6 +532,31 @@ pub async fn update_target(
     Ok(Json(target_resource(&target)?))
 }
 
+/// Delete an authorized, unreferenced Target; success has no response body.
+#[utoipa::path(
+    delete,
+    path = "/api/targets/{target_id}",
+    params(("target_id" = Uuid, Path, description = "Immutable Target ID")),
+    responses(
+        (status = 204, description = "The Target was deleted."),
+        (status = 400, description = "The starter default/default Target cannot be deleted.", body = crono_api::ErrorEnvelope),
+        (status = 404, description = "The Target was not found.", body = crono_api::ErrorEnvelope),
+        (status = 409, description = "The Target is still referenced by a Target Set, Schedule, Run request, or Run history.", body = crono_api::ErrorEnvelope),
+    ),
+    tag = "control-plane"
+)]
+pub async fn delete_target(
+    State(state): State<AppState>,
+    Extension(context): Extension<RequestContext>,
+    ApiPath(target_id): ApiPath<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .application()
+        .delete_target(&context, target_id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[utoipa::path(
     post,
     path = "/api/namespaces/{namespace_id}/target-sets",
@@ -543,6 +595,7 @@ pub async fn create_target_set(
     params(("namespace_id" = Uuid, Path), PageQuery),
     responses(
         (status = 200, description = "One page of Target Sets.", body = Page<TargetSetResource>),
+        (status = 404, description = "The Namespace was not found.", body = crono_api::ErrorEnvelope),
     ),
     tag = "control-plane"
 )]
@@ -681,6 +734,7 @@ pub async fn create_schedule(
     params(("namespace_id" = Uuid, Path), PageQuery),
     responses(
         (status = 200, description = "One page of Schedules.", body = Page<ScheduleResource>),
+        (status = 404, description = "The Namespace was not found.", body = crono_api::ErrorEnvelope),
     ),
     tag = "control-plane"
 )]

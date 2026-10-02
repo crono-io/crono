@@ -62,6 +62,11 @@ pub async fn list_queues() -> ApiResult<Page<QueueResource>> {
     get(&format!("{API_ROOT}/queues?limit=100")).await
 }
 
+/// Delete an empty Namespace; the server protects bootstrap and referenced resources.
+pub async fn delete_namespace(id: Uuid) -> ApiResult<()> {
+    delete_empty(&format!("{API_ROOT}/namespaces/{id}")).await
+}
+
 pub async fn all_queues() -> ApiResult<Vec<QueueResource>> {
     get_all(&format!("{API_ROOT}/queues")).await
 }
@@ -144,6 +149,11 @@ pub async fn create_target(
 
 pub async fn update_target(id: Uuid, request: &UpdateTargetRequest) -> ApiResult<TargetResource> {
     put(&format!("{API_ROOT}/targets/{id}"), request).await
+}
+
+/// Delete an unused Target, preserving the server's protection and in-use errors.
+pub async fn delete_target(id: Uuid) -> ApiResult<()> {
+    delete_empty(&format!("{API_ROOT}/targets/{id}")).await
 }
 
 pub async fn list_target_sets(namespace_id: Uuid) -> ApiResult<Page<TargetSetResource>> {

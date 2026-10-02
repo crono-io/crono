@@ -396,12 +396,8 @@ mod browser_tests {
             trigger.get_attribute("aria-expanded").as_deref(),
             Some("false")
         );
-        assert!(
-            host.query_selector("[role='group']")
-                .ok()
-                .flatten()
-                .is_none()
-        );
+        let confirmation = host.query_selector("[role='group']").ok().flatten();
+        assert!(confirmation.is_none());
         drop(handle);
         host.remove();
     }

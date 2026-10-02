@@ -372,6 +372,72 @@
             "$ref": "#/components/responses/DependencyUnavailable"
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "control-plane"
+        ],
+        "summary": "Delete an authorized, empty Namespace; success has no response body.",
+        "operationId": "delete_namespace",
+        "parameters": [
+          {
+            "name": "namespace_id",
+            "in": "path",
+            "description": "Immutable Namespace ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The Namespace was deleted."
+          },
+          "400": {
+            "description": "The default Namespace cannot be deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "The Namespace was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The Namespace still contains Jobs, Targets, Target Sets, Schedules, or Run requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DependencyUnavailable"
+          }
+        }
       }
     },
     "/api/namespaces/{namespace_id}/jobs": {
@@ -431,6 +497,16 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "The Namespace was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -586,6 +662,16 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
+          "404": {
+            "description": "The Namespace was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "500": {
             "$ref": "#/components/responses/InternalError"
           },
@@ -740,6 +826,16 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
+          "404": {
+            "description": "The Namespace was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "500": {
             "$ref": "#/components/responses/InternalError"
           },
@@ -893,6 +989,16 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "The Namespace was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -2240,6 +2346,72 @@
           },
           "415": {
             "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/DependencyUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "control-plane"
+        ],
+        "summary": "Delete an authorized, unreferenced Target; success has no response body.",
+        "operationId": "delete_target",
+        "parameters": [
+          {
+            "name": "target_id",
+            "in": "path",
+            "description": "Immutable Target ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The Target was deleted."
+          },
+          "400": {
+            "description": "The starter default/default Target cannot be deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "The Target was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The Target is still referenced by a Target Set, Schedule, Run request, or Run history.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           },
           "500": {
             "$ref": "#/components/responses/InternalError"

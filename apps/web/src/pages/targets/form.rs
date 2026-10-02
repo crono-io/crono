@@ -3,13 +3,16 @@
 //! The Job chooses the executor. This form stores the Target's argv suffix and
 //! JSON inputs. An edit starts with an authorized Target loaded by its route,
 //! keeps its Namespace and ID fixed, and preserves values after API failures.
+//! Completed saves show a modal result. API failures retain field-level guidance
+//! and entered values; successful creation clears the form for another Target.
 
 use super::super::resource_options;
 use crate::{
     api,
     components::{
-        ArgumentListInput, FormActions, JsonObjectInput, PageHeader, ResourceNameInput,
-        ResourceSelect, name_validation_message, parse_input_object, visible_name_validation,
+        ArgumentListInput, FormActions, JsonObjectInput, PageHeader, ResourceFeedback,
+        ResourceFeedbackModal, ResourceNameInput, ResourceSelect, name_validation_message,
+        parse_input_object, visible_name_validation,
     },
 };
 use crono_api::{CreateTargetRequest, TargetResource, UpdateTargetRequest};
@@ -46,7 +49,7 @@ pub(super) fn TargetForm(
     let attempted = RwSignal::new(false);
     let submitting = RwSignal::new(false);
     let server_field = RwSignal::new(None::<(String, String)>);
-    let feedback = RwSignal::new(None::<String>);
+    let feedback = RwSignal::new(None::<ResourceFeedback>);
     let namespace_choices = resource_options::namespaces();
     let TargetErrors {
         namespace: namespace_error,
@@ -173,7 +176,7 @@ struct TargetViewState {
     name: RwSignal<String>,
     arguments: RwSignal<Vec<String>>,
     inputs: RwSignal<String>,
-    feedback: RwSignal<Option<String>>,
+    feedback: RwSignal<Option<ResourceFeedback>>,
     namespace_choices: resource_options::ResourceOptions,
     namespace_error: Signal<Option<String>>,
     name_error: Signal<Option<String>>,
@@ -187,6 +190,8 @@ struct TargetViewState {
 /// Keep create and edit presentation aligned while fixing edit-only fields.
 fn target_view(state: &TargetViewState) -> impl IntoView + use<> {
     let state = *state;
+    let navigate = use_navigate();
+    let view_targets = Callback::new(move |()| navigate("/targets", NavigateOptions::default()));
     view! {
         <div class="space-y-8">
             <PageHeader title=if state.is_edit { "Edit Target" } else { "Create Target" } description="Targets supply destination-specific arguments and variables to a Job." />
@@ -233,7 +238,7 @@ fn target_view(state: &TargetViewState) -> impl IntoView + use<> {
                     </div>
                     <FormActions submit_label="Save Target" disabled=state.disabled on_cancel=state.cancel />
                 </form>
-                <p class="mt-3 text-sm text-crono-muted" role="status">{move || state.feedback.get().unwrap_or_default()}</p>
+                <ResourceFeedbackModal id="target-save-result" resource="Target" plural="Targets" feedback=state.feedback on_view=view_targets />
             </section>
         </div>
     }
@@ -249,7 +254,7 @@ struct TargetSubmitState {
     attempted: RwSignal<bool>,
     submitting: RwSignal<bool>,
     server_field: RwSignal<Option<(String, String)>>,
-    feedback: RwSignal<Option<String>>,
+    feedback: RwSignal<Option<ResourceFeedback>>,
     argument_error: Signal<Option<String>>,
 }
 
@@ -260,6 +265,9 @@ fn target_submit(
 ) -> Callback<leptos::ev::SubmitEvent> {
     Callback::new(move |event: leptos::ev::SubmitEvent| {
         event.prevent_default();
+        if state.submitting.get_untracked() {
+            return;
+        }
         state.attempted.set(true);
         state.server_field.set(None);
         state.feedback.set(None);
@@ -304,14 +312,23 @@ fn target_submit(
                     } else {
                         clear_after_create.run(());
                     }
+                    state.feedback.set(Some(ResourceFeedback::saved(
+                        format!("Saved Target {}.", target.qualified_name),
+                        if state.edit_id.is_some() {
+                            "Continue editing"
+                        } else {
+                            "Create another Target"
+                        },
+                    )));
+                }
+                Err(error) => {
+                    if let Some(field) = error.field {
+                        state.server_field.set(Some((field, error.message.clone())));
+                    }
                     state
                         .feedback
-                        .set(Some(format!("Saved {}.", target.qualified_name)));
+                        .set(Some(ResourceFeedback::failed(error.message)));
                 }
-                Err(error) => match error.field {
-                    Some(field) => state.server_field.set(Some((field, error.message))),
-                    None => state.feedback.set(Some(error.message)),
-                },
             }
             state.submitting.set(false);
         });

@@ -3,21 +3,25 @@
 //! The API lists one Namespace at a time in name order. The page keeps only
 //! opaque cursors needed for Previous and Next navigation; changing Namespace
 //! discards that history so no cursor crosses a resource scope.
+//! Each row confirms deletion in a modal before submitting its UUID, then refreshes the
+//! current page. The server protects the starter Target and rejects targets in use.
 
 use super::super::resource_options;
 use crate::{
     api,
-    components::{EmptyState, PageHeader, QUIET_ACTION_CLASS, ResourceSelect},
+    components::{
+        DeleteControl, EmptyState, PageHeader, QUIET_ACTION_CLASS, ResourceSelect, focus_heading,
+    },
     navigation::{AppRoute, MaterialSymbol, target_edit_path},
 };
 use crono_api::{Page, TargetResource};
-use leptos::prelude::*;
+use leptos::{prelude::*, task::spawn_local};
 use leptos_router::components::A;
 use uuid::Uuid;
 
 const ACTION_CLASS: &str = "inline-flex items-center justify-center rounded-md bg-crono-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-crono-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary focus-visible:ring-offset-2";
 
-/// Browse Targets and open explicit create or edit routes.
+/// Browse, edit, and confirm deletion of Targets within the selected Namespace.
 #[component]
 pub fn TargetsPage() -> impl IntoView {
     let namespace_id = RwSignal::new(None);
@@ -73,8 +77,19 @@ fn TargetResults(
     after: RwSignal<Option<String>>,
     page_stack: RwSignal<Vec<Option<String>>>,
 ) -> impl IntoView {
+    let feedback = RwSignal::new(None::<String>);
+    let heading = NodeRef::<leptos::html::H2>::new();
+    let on_deleted = Callback::new(move |name: String| {
+        feedback.set(Some(format!("Deleted Target {name}.")));
+        targets.refetch();
+        focus_heading(heading);
+    });
     view! {
         <div>
+            <h2 node_ref=heading tabindex="-1" class="sr-only">"Targets in Namespace"</h2>
+            <Show when=move || feedback.get().is_some()>
+                <p class="px-5 py-3 text-sm text-crono-muted sm:px-6" role="status">{move || feedback.get().unwrap_or_default()}</p>
+            </Show>
             {move || targets.map(|result| match result {
                 Ok(page) if page.items.is_empty() && page_stack.get().is_empty() => view! {
                     <EmptyState icon=MaterialSymbol::Dns title="No Targets yet" description="Create the first Target in this Namespace to provide destination-specific inputs.">
@@ -84,18 +99,18 @@ fn TargetResults(
                 Ok(page) if page.items.is_empty() => view! {
                     <p class="px-6 py-10 text-center text-sm text-crono-muted">"No Targets on this page. Go back to the previous page."</p>
                 }.into_any(),
-                Ok(page) => view! { <TargetRows page=page.clone() /> }.into_any(),
+                Ok(page) => view! { <TargetRows page=page.clone() on_deleted /> }.into_any(),
                 Err(error) => view! { <p class="px-6 py-10 text-center text-sm text-crono-failed" role="alert">{error.message.clone()}</p> }.into_any(),
             }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Targets…"</p> }.into_any())}
             <div class="flex items-center justify-between border-t border-crono-border px-4 py-2 sm:px-5">
-                <button type="button" class=QUIET_ACTION_CLASS disabled=move || page_stack.get().is_empty() on:click=move |_| {
+                <button type="button" aria-label="Previous page" class=QUIET_ACTION_CLASS disabled=move || page_stack.get().is_empty() on:click=move |_| {
                     let previous = page_stack.get_untracked().last().cloned().flatten();
                     page_stack.update(|stack| { stack.pop(); });
                     after.set(previous);
                 }>"← Previous"</button>
                 <span class="text-xs text-crono-muted">{move || format!("Page {}", page_stack.get().len() + 1)}</span>
                 {move || targets.get().and_then(Result::ok).and_then(|page| page.next_cursor).map(|cursor| view! {
-                    <button type="button" class=QUIET_ACTION_CLASS on:click=move |_| {
+                    <button type="button" aria-label="Next page" class=QUIET_ACTION_CLASS on:click=move |_| {
                         page_stack.update(|stack| stack.push(after.get_untracked()));
                         after.set(Some(cursor.clone()));
                     }>"Next →"</button>
@@ -107,23 +122,67 @@ fn TargetResults(
 
 /// Render only the current page so the list stays bounded as Targets grow.
 #[component]
-fn TargetRows(page: Page<TargetResource>) -> impl IntoView {
+fn TargetRows(page: Page<TargetResource>, on_deleted: Callback<String>) -> impl IntoView {
     view! {
         <ul class="divide-y divide-crono-border">
-            {page.items.into_iter().map(|target| {
-                let edit_path = target_edit_path(target.id);
-                view! {
-                    <li class="flex flex-wrap items-center justify-between gap-4 px-5 py-4 sm:px-6">
-                        <div class="min-w-0">
-                            <p class="font-medium text-crono-text">{target.name}</p>
-                            <p class="text-sm text-crono-muted">{target.qualified_name}</p>
-                            <p class="mt-1 text-xs text-crono-muted">{format!("{} additional argv items", target.arguments.len())}</p>
-                        </div>
-                        <A href=edit_path attr:class=QUIET_ACTION_CLASS>"Edit"</A>
-                    </li>
-                }
+            {page.items.into_iter().map(|target| view! {
+                <TargetRow target on_deleted />
             }).collect_view()}
         </ul>
+    }
+}
+
+/// Confirm deletion in a modal, keeping errors visible there and preventing repeat requests.
+#[component]
+fn TargetRow(target: TargetResource, on_deleted: Callback<String>) -> impl IntoView {
+    let id = target.id;
+    let protected = target.namespace == "default" && target.name == "default";
+    let qualified_name = StoredValue::new(target.qualified_name.clone());
+    let confirming = RwSignal::new(false);
+    let busy = RwSignal::new(false);
+    let error = RwSignal::new(None::<String>);
+    let on_confirm = Callback::new(move |()| {
+        if busy.get_untracked() || !confirming.get_untracked() {
+            return;
+        }
+        error.set(None);
+        busy.set(true);
+        spawn_local(async move {
+            let result = api::delete_target(id).await;
+            busy.set(false);
+            match result {
+                Ok(()) => {
+                    confirming.set(false);
+                    on_deleted.run(qualified_name.get_value());
+                }
+                Err(api_error) => {
+                    error.set(Some(if api_error.code == "resource_in_use" {
+                        "This Target is still referenced by a Target Set, Schedule, Run request, or Run history and cannot be deleted.".to_string()
+                    } else {
+                        api_error.message
+                    }));
+                }
+            }
+        });
+    });
+    view! {
+        <li class="px-5 py-4 sm:px-6">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+                <div class="min-w-0 break-words">
+                    <p class="font-medium text-crono-text">{target.name}</p>
+                    <p class="text-sm text-crono-muted">{target.qualified_name}</p>
+                    <p class="mt-1 text-xs text-crono-muted">{format!("{} additional argv items", target.arguments.len())}</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-3">
+                    <A href=target_edit_path(id) attr:class=QUIET_ACTION_CLASS>"Edit"</A>
+                    <Show when=move || !protected fallback=|| view! {
+                        <span class="text-xs text-crono-muted">"Protected default Target"</span>
+                    }>
+                        <DeleteControl id=format!("delete-target-{id}") resource="Target" name=qualified_name.get_value() description="This permanently removes the Target and cannot be undone. Targets referenced by a Target Set, Schedule, Run request, or Run history cannot be deleted." open=confirming busy error on_confirm />
+                    </Show>
+                </div>
+            </div>
+        </li>
     }
 }
 
@@ -216,7 +275,10 @@ mod browser_tests {
             host.text_content()
                 .is_some_and(|text| text.contains("alpha"))
         );
-        let next = host.query_selector("button:not([disabled])").ok().flatten();
+        let next = host
+            .query_selector("button[aria-label='Next page']")
+            .ok()
+            .flatten();
         assert!(next.is_some());
         let next = next.and_then(|element| element.dyn_into::<HtmlElement>().ok());
         if let Some(next) = next {
@@ -230,7 +292,10 @@ mod browser_tests {
         leptos::task::tick().await;
         let page_text = host.text_content().unwrap_or_default();
         assert!(page_text.contains("beta"), "{page_text}");
-        let previous = host.query_selector("button").ok().flatten();
+        let previous = host
+            .query_selector("button[aria-label='Previous page']")
+            .ok()
+            .flatten();
         let previous = previous.and_then(|element| element.dyn_into::<HtmlElement>().ok());
         assert!(previous.is_some());
         if let Some(previous) = previous {

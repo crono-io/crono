@@ -122,6 +122,53 @@ fn generated_document() -> Result<Value> {
     Ok(serde_json::to_value(crono_server::api::openapi())?)
 }
 
+#[test]
+fn target_deletion_documents_empty_success_and_guard_failures() -> Result<()> {
+    let document = generated_document()?;
+    let deletion = document
+        .get("paths")
+        .and_then(|paths| paths.get("/api/targets/{target_id}"))
+        .and_then(|path| path.get("delete"))
+        .ok_or_else(|| anyhow::anyhow!("Target DELETE operation is missing"))?;
+    let statuses = documented_statuses(deletion);
+    for status in ["204", "400", "401", "403", "404", "409", "500", "503"] {
+        assert!(statuses.contains(&status), "Target DELETE omits {status}");
+    }
+    assert!(
+        deletion
+            .get("responses")
+            .and_then(|responses| responses.get("204"))
+            .is_some_and(|response| response.get("content").is_none())
+    );
+    assert!(deletion.get("requestBody").is_none());
+    Ok(())
+}
+
+#[test]
+fn namespace_deletion_documents_empty_success_and_guard_failures() -> Result<()> {
+    let document = generated_document()?;
+    let deletion = document
+        .get("paths")
+        .and_then(|paths| paths.get("/api/namespaces/{namespace_id}"))
+        .and_then(|path| path.get("delete"))
+        .ok_or_else(|| anyhow::anyhow!("Namespace DELETE operation is missing"))?;
+    let statuses = documented_statuses(deletion);
+    for status in ["204", "400", "401", "403", "404", "409", "500", "503"] {
+        assert!(
+            statuses.contains(&status),
+            "Namespace DELETE omits {status}"
+        );
+    }
+    assert!(
+        deletion
+            .get("responses")
+            .and_then(|responses| responses.get("204"))
+            .is_some_and(|response| response.get("content").is_none())
+    );
+    assert!(deletion.get("requestBody").is_none());
+    Ok(())
+}
+
 fn documented_statuses(operation: &Value) -> Vec<&str> {
     operation
         .get("responses")

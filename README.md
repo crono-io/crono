@@ -151,6 +151,33 @@ Enable Dry run on a Job to inspect its future manual and scheduled Runs without 
 
 A Job defines what runs: `noop`, direct `process`, or explicit `shell`; an absolute executable/interpreter for executing Jobs; ordered argument templates; default inputs; dry-run mode; and retry behavior. A Target defines where or with what destination-specific argument suffixes and inputs. A Target Set is an explicit collection of Targets plus inputs shared by every member; selecting one fans out to one Run per Target. Schedules and manual Runs can add a final invocation input layer.
 
+Namespaces, Queues, Jobs, Targets, Target Sets, and Schedules share modal save
+results in the web client. API failures retain entered values and field guidance;
+creation offers another resource or the list, and updates offer continuation.
+Namespace, Queue, and Target rows share guarded Delete confirmations. Controls
+are borderless and gray until hover turns them red. Errors remain inside the
+confirmation; success refreshes the list and announces the deletion.
+
+An empty Namespace can be removed with `DELETE /api/namespaces/{namespace_id}`
+under the scoped `NamespaceDelete` capability. Authorization precedes existence
+and default protection checks. Success returns `204` without a body; missing
+UUIDs return `404`, the bootstrap `default` Namespace returns `400`, and existing
+resource or Run-request references return `409` (`resource_in_use`). PostgreSQL
+performs deletion atomically with restrictive foreign keys, preserving child
+resources and Run history. The system `default` Queue remains protected by its
+existing deletion policy. Namespace-scoped collection routes return `404`
+after their Namespace has been removed.
+
+Delete an unused Target from its row on the Targets page, then select Confirm
+delete in the modal dialog. Saving a Target also shows its result in a modal
+with actions to continue or return to the list. The API exposes deletion as `DELETE /api/targets/{target_id}`
+under the resource-specific `TargetDelete` capability. Success returns `204`
+with no body, an unknown UUID returns `404`, and the starter `default/default`
+Target is protected with `400`. PostgreSQL rejects deletion with `409`
+(`resource_in_use`) while a Target Set, Schedule, Run request, or Run history
+references the Target. Deletion preserves those relationships and execution
+history; remove editable references before deleting an unused Target.
+
 Input objects merge from least to most specific:
 
 ```text

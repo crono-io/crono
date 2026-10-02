@@ -3,12 +3,14 @@
 //! Queue names remain convenient operator lookup keys while every Job and
 //! worker relationship submits the immutable UUID. Disabling is reversible;
 //! deletion is server-guarded and succeeds only when no durable relationship
-//! still references the Queue.
+//! still references the Queue. Shared modals report creates and edits, while
+//! deletion requires explicit confirmation and retains failures for retry.
 
 use crate::{
     api,
     components::{
-        FormActions, PageHeader, QUIET_ACTION_CLASS, ResourceNameInput, name_validation_message,
+        DeleteControl, FormActions, PageHeader, QUIET_ACTION_CLASS, ResourceFeedback,
+        ResourceFeedbackModal, ResourceNameInput, focus_heading, name_validation_message,
         visible_name_validation,
     },
 };
@@ -26,7 +28,9 @@ pub fn QueuesPage() -> impl IntoView {
     let submitting = RwSignal::new(false);
     let name_server_error = RwSignal::new(None::<String>);
     let description_server_error = RwSignal::new(None::<String>);
-    let feedback = RwSignal::new(None::<String>);
+    let feedback = RwSignal::new(None::<ResourceFeedback>);
+    let deleted = RwSignal::new(None::<String>);
+    let heading = NodeRef::<leptos::html::H2>::new();
     let queues = LocalResource::new(api::list_queues);
     let name_error = Signal::derive(move || {
         name_server_error
@@ -53,6 +57,9 @@ pub fn QueuesPage() -> impl IntoView {
     });
     let submit = Callback::new(move |event: leptos::ev::SubmitEvent| {
         event.prevent_default();
+        if submitting.get_untracked() {
+            return;
+        }
         attempted.set(true);
         name_server_error.set(None);
         description_server_error.set(None);
@@ -73,19 +80,26 @@ pub fn QueuesPage() -> impl IntoView {
                     name.set(String::new());
                     description.set(String::new());
                     attempted.set(false);
-                    feedback.set(Some(format!("Created Queue {}.", queue.name)));
+                    feedback.set(Some(ResourceFeedback::saved(
+                        format!("Created Queue {}.", queue.name),
+                        "Create another Queue",
+                    )));
                     queues.refetch();
                 }
-                Err(error) => match error.field.as_deref() {
-                    Some("name") => name_server_error.set(Some(error.message)),
-                    Some("description") => description_server_error.set(Some(error.message)),
-                    _ => feedback.set(Some(error.message)),
-                },
+                Err(error) => {
+                    queue_create_error(&error, name_server_error, description_server_error);
+                    feedback.set(Some(ResourceFeedback::failed(error.message)));
+                }
             }
             submitting.set(false);
         });
     });
     let changed = Callback::new(move |()| queues.refetch());
+    let on_deleted = Callback::new(move |name: String| {
+        deleted.set(Some(format!("Deleted Queue {name}.")));
+        queues.refetch();
+        focus_heading(heading);
+    });
     queue_page(QueuePageState {
         name,
         description,
@@ -97,6 +111,9 @@ pub fn QueuesPage() -> impl IntoView {
         submit,
         queues,
         changed,
+        deleted,
+        heading,
+        on_deleted,
     })
 }
 
@@ -104,7 +121,7 @@ pub fn QueuesPage() -> impl IntoView {
 struct QueuePageState {
     name: RwSignal<String>,
     description: RwSignal<String>,
-    feedback: RwSignal<Option<String>>,
+    feedback: RwSignal<Option<ResourceFeedback>>,
     name_error: Signal<Option<String>>,
     description_error: Signal<Option<String>>,
     disabled: Signal<bool>,
@@ -112,6 +129,9 @@ struct QueuePageState {
     submit: Callback<leptos::ev::SubmitEvent>,
     queues: LocalResource<api::ApiResult<crono_api::Page<QueueResource>>>,
     changed: Callback<()>,
+    deleted: RwSignal<Option<String>>,
+    heading: NodeRef<leptos::html::H2>,
+    on_deleted: Callback<String>,
 }
 
 fn queue_page(state: QueuePageState) -> impl IntoView {
@@ -141,12 +161,13 @@ fn queue_page(state: QueuePageState) -> impl IntoView {
                     </div>
                     <FormActions submit_label="Create Queue" disabled=state.disabled on_cancel=state.reset />
                 </form>
-                <p class="mt-3 text-sm text-crono-muted" role="status">{move || state.feedback.get().unwrap_or_default()}</p>
+
             </section>
             <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface">
                 <header class="border-b border-crono-border px-5 py-4 sm:px-6">
-                    <h2 class="font-semibold text-crono-text">"Worker Queues"</h2>
+                    <h2 node_ref=state.heading tabindex="-1" class="font-semibold text-crono-text">"Worker Queues"</h2>
                 </header>
+                <p class="px-5 text-sm text-crono-muted sm:px-6" role="status">{move || state.deleted.get().unwrap_or_default()}</p>
                 {move || state.queues.map(|result| match result {
                     Ok(page) if page.items.is_empty() => view! {
                         <p class="px-6 py-10 text-center text-sm text-crono-muted">"No Queues exist yet."</p>
@@ -154,7 +175,7 @@ fn queue_page(state: QueuePageState) -> impl IntoView {
                     Ok(page) => view! {
                         <ul class="divide-y divide-crono-border">
                             {page.items.clone().into_iter().map(|queue| view! {
-                                <QueueRow queue=queue on_changed=state.changed />
+                                <QueueRow queue=queue on_changed=state.changed on_deleted=state.on_deleted feedback=state.feedback />
                             }).collect_view()}
                         </ul>
                     }.into_any(),
@@ -165,12 +186,19 @@ fn queue_page(state: QueuePageState) -> impl IntoView {
                     <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Queues…"</p>
                 }.into_any())}
             </section>
+            <ResourceFeedbackModal id="queue-save-result" resource="Queue" plural="Queues" feedback=state.feedback on_view=Callback::new(move |()| focus_heading(state.heading)) />
         </div>
     }
 }
 
+/// Keep API failures in the editor and the page-owned result modal after refresh.
 #[component]
-fn QueueRow(queue: QueueResource, on_changed: Callback<()>) -> impl IntoView {
+fn QueueRow(
+    queue: QueueResource,
+    on_changed: Callback<()>,
+    on_deleted: Callback<String>,
+    feedback: RwSignal<Option<ResourceFeedback>>,
+) -> impl IntoView {
     let id = queue.id;
     let original_name = StoredValue::new(queue.name.clone());
     let original_description = StoredValue::new(queue.description.clone().unwrap_or_default());
@@ -183,7 +211,12 @@ fn QueueRow(queue: QueueResource, on_changed: Callback<()>) -> impl IntoView {
     let confirming_delete = RwSignal::new(false);
     let busy = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
+    let delete_error = RwSignal::new(None::<String>);
     let save = move |_| {
+        if busy.get_untracked() {
+            return;
+        }
+        feedback.set(None);
         error.set(None);
         let requested_name = name.get_untracked();
         let requested_description = description.get_untracked();
@@ -203,32 +236,42 @@ fn QueueRow(queue: QueueResource, on_changed: Callback<()>) -> impl IntoView {
             )
             .await
             {
-                Ok(_) => {
+                Ok(queue) => {
                     editing.set(false);
+                    feedback.set(Some(ResourceFeedback::saved(
+                        format!("Saved Queue {}.", queue.name),
+                        "Done",
+                    )));
                     on_changed.run(());
                 }
-                Err(api_error) => error.set(Some(api_error.message)),
+                Err(api_error) => {
+                    error.set(Some(api_error.message.clone()));
+                    feedback.set(Some(ResourceFeedback::failed(api_error.message)));
+                }
             }
             busy.set(false);
         });
     };
-    let delete = move |_| {
-        if !confirming_delete.get_untracked() {
-            confirming_delete.set(true);
-            return;
-        }
-        error.set(None);
+    let on_confirm = Callback::new(move |()| {
+        delete_error.set(None);
         busy.set(true);
         spawn_local(async move {
-            match api::delete_queue(id).await {
-                Ok(()) => on_changed.run(()),
-                Err(api_error) => {
-                    error.set(Some(api_error.message));
-                    confirming_delete.set(false);
-                }
-            }
+            let result = api::delete_queue(id).await;
             busy.set(false);
+            match result {
+                Ok(()) => { confirming_delete.set(false); on_deleted.run(original_name.get_value()); }
+                Err(api_error) => delete_error.set(Some(if api_error.code == "resource_in_use" {
+                    "This Queue is still referenced by Jobs, Run history, or worker presence and cannot be deleted.".to_string()
+                } else { api_error.message })),
+            }
         });
+    });
+    let delete_control = move || {
+        view! {
+            <Show when=move || !system fallback=|| view! { <span class="self-center text-xs text-crono-muted">"Protected system Queue"</span> }>
+                <DeleteControl id=format!("delete-queue-{id}") resource="Queue" name=original_name.get_value() description="This permanently removes the Queue and cannot be undone. Queues referenced by Jobs, Run history, or worker presence cannot be deleted." open=confirming_delete busy error=delete_error on_confirm />
+            </Show>
+        }
     };
 
     view! {
@@ -252,7 +295,7 @@ fn QueueRow(queue: QueueResource, on_changed: Callback<()>) -> impl IntoView {
                                 if value.is_empty() { "No description".to_string() } else { value }
                             }}</p>
                         </div>
-                        <button type="button" class=QUIET_ACTION_CLASS on:click=move |_| editing.set(true)>"Edit"</button>
+                        <div class="flex flex-wrap items-center gap-3"><button type="button" class=QUIET_ACTION_CLASS on:click=move |_| { error.set(None); editing.set(true); }>"Edit"</button>{delete_control()}</div>
                     </div>
                 }
             >
@@ -274,19 +317,7 @@ fn QueueRow(queue: QueueResource, on_changed: Callback<()>) -> impl IntoView {
                     </label>
                     <p class="text-sm text-crono-failed" role="alert">{move || error.get().unwrap_or_default()}</p>
                     <div class="flex flex-wrap justify-between gap-3">
-                        <Show
-                            when=move || !system
-                            fallback=move || view! { <span class="self-center text-xs text-crono-muted">"Protected system Queue"</span> }
-                        >
-                            <button
-                                type="button"
-                                class=move || format!("rounded-md border px-3 py-2 text-sm font-medium {}", if confirming_delete.get() { "border-crono-failed bg-red-50 text-crono-failed" } else { "border-crono-border text-crono-failed hover:bg-red-50" })
-                                disabled=move || busy.get()
-                                on:click=delete
-                            >
-                                {move || if confirming_delete.get() { "Confirm delete" } else { "Delete" }}
-                            </button>
-                        </Show>
+                        {delete_control()}
                         <div class="flex gap-3">
                             <button type="button" class="rounded-md border border-crono-border px-3 py-2 text-sm font-medium text-crono-text hover:bg-zinc-50" disabled=move || busy.get() on:click=move |_| {
                                 name.set(original_name.get_value());
@@ -312,4 +343,18 @@ fn description_validation(value: &str) -> Option<String> {
 
 fn optional_description(value: String) -> Option<String> {
     (!value.is_empty()).then_some(value)
+}
+
+/// Preserve field-specific API guidance alongside the page's error modal.
+fn queue_create_error(
+    error: &api::ApiError,
+    name_error: RwSignal<Option<String>>,
+    description_error: RwSignal<Option<String>>,
+) {
+    match error.field.as_deref() {
+        Some("name") => name_error.set(Some(error.message.clone())),
+        Some("description") => description_error.set(Some(error.message.clone())),
+        _ if error.code == "already_exists" => name_error.set(Some(error.message.clone())),
+        _ => {}
+    }
 }

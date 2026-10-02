@@ -168,6 +168,8 @@ pub trait ControlPlaneStore: Send + Sync {
         after: Option<&str>,
     ) -> Result<Page<Namespace>, StoreError>;
     async fn get_namespace(&self, id: NamespaceId) -> Result<Namespace, StoreError>;
+    /// Delete one Namespace atomically; references return `InUse` without removing data.
+    async fn delete_namespace(&self, id: NamespaceId) -> Result<(), StoreError>;
     async fn create_queue(
         &self,
         name: &QueueName,
@@ -225,6 +227,8 @@ pub trait ControlPlaneStore: Send + Sync {
         name: &ResourceName,
         definition: &TargetDefinition,
     ) -> Result<TargetRecord, StoreError>;
+    /// Delete an unreferenced Target; foreign keys reject concurrent or existing use.
+    async fn delete_target(&self, id: TargetId) -> Result<(), StoreError>;
     async fn create_target_set(
         &self,
         namespace_id: NamespaceId,

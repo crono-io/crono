@@ -76,7 +76,10 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
             control_plane::create_namespace,
             control_plane::list_namespaces
         ))
-        .routes(routes!(control_plane::get_namespace))
+        .routes(routes!(
+            control_plane::get_namespace,
+            control_plane::delete_namespace
+        ))
         .routes(routes!(
             control_plane::create_queue,
             control_plane::list_queues
@@ -94,7 +97,8 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         ))
         .routes(routes!(
             control_plane::get_target,
-            control_plane::update_target
+            control_plane::update_target,
+            control_plane::delete_target
         ))
         .routes(routes!(
             control_plane::create_target_set,

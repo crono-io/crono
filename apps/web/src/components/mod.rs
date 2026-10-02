@@ -9,7 +9,9 @@ pub mod empty_state;
 pub mod forms;
 pub mod icon;
 pub mod layout;
+pub mod modal;
 pub mod page_header;
+pub mod resource_dialogs;
 pub mod timezone_select;
 
 pub use card::Card;
@@ -20,7 +22,9 @@ pub use forms::{
     visible_name_validation,
 };
 pub use icon::Icon;
+pub use modal::Modal;
 pub use page_header::PageHeader;
+pub use resource_dialogs::{DeleteControl, ResourceFeedback, ResourceFeedbackModal, focus_heading};
 pub use timezone_select::TimezoneSelect;
 
 /// Style secondary links and controls as quiet navigation with clear hover and focus states.
