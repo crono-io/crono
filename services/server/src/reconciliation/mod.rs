@@ -1,7 +1,9 @@
-//! Bounded repair loop for expired leases and abandoned claims.
+//! Bounded repair and Workflow completion-event processing.
 //!
-//! This is a safety net rather than the dispatch hot path. Each pass delegates
-//! an indexed, bounded transaction to PostgreSQL and can run on every server.
+//! Every five seconds a pass repairs leases/retries, then consumes durable
+//! Workflow completion events. Only invocations with queued events are visited;
+//! DAGs are not rescanned continuously. Transactions and row locks make both
+//! paths safe on multiple servers and preserve progress across process restarts.
 
 use crate::application::ControlPlaneStore;
 use std::{sync::Arc, time::Duration};
@@ -21,7 +23,7 @@ pub async fn run_reconciler(store: Arc<dyn ControlPlaneStore>, cancellation: Can
             }
             _ = interval.tick() => {
                 match store.reconcile(100).await {
-                    Ok(repaired) if repaired > 0 => info!(repaired, "reconciled stale execution state"),
+                    Ok(repaired) if repaired > 0 => info!(repaired, "reconciled execution and workflow state"),
                     Ok(_) => {}
                     Err(error) => warn!(%error, "reconciliation pass failed"),
                 }

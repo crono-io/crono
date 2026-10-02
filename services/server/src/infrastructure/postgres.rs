@@ -7,6 +7,8 @@
 //! and conditional updates; uniqueness constraints remain the final duplicate
 //! boundary.
 
+mod workflows;
+
 use super::DatabasePoolConfig;
 use crate::{
     application::{
@@ -210,6 +212,7 @@ struct ExecutionRow {
 
 #[derive(Debug, sqlx::FromRow)]
 struct RunRequestRow {
+    workflow_owned: bool,
     job_id: Uuid,
     target_id: Option<Uuid>,
     target_set_id: Option<Uuid>,
@@ -294,6 +297,73 @@ impl PostgresStore {
 
 #[async_trait]
 impl ControlPlaneStore for PostgresStore {
+    async fn write_workflow(
+        &self,
+        namespace_id: NamespaceId,
+        existing: Option<(crate::domain::WorkflowId, u64)>,
+        definition: &crate::domain::WorkflowDefinition,
+    ) -> Result<crate::application::WorkflowRecord, StoreError> {
+        workflows::write(&self.pool, namespace_id, existing, definition).await
+    }
+    async fn get_workflow(
+        &self,
+        id: crate::domain::WorkflowId,
+    ) -> Result<crate::application::WorkflowRecord, StoreError> {
+        workflows::get(&self.pool, id).await
+    }
+    async fn list_workflows(
+        &self,
+        namespace_id: NamespaceId,
+        visibility: &VisibilityScope,
+        limit: u16,
+        after: Option<&str>,
+    ) -> Result<Page<crate::application::WorkflowRecord>, StoreError> {
+        workflows::list(&self.pool, namespace_id, visibility, limit, after).await
+    }
+    async fn delete_workflow(&self, id: crate::domain::WorkflowId) -> Result<(), StoreError> {
+        workflows::delete(&self.pool, id).await
+    }
+    async fn start_workflow(
+        &self,
+        launch: &crate::application::WorkflowLaunch,
+    ) -> Result<(crate::application::WorkflowRunRecord, bool), StoreError> {
+        workflows::start(&self.pool, launch).await
+    }
+    async fn workflow_run_for_request(
+        &self,
+        request_id: Uuid,
+        inputs: &serde_json::Value,
+    ) -> Result<Option<crate::application::WorkflowRunRecord>, StoreError> {
+        workflows::for_request(&self.pool, request_id, inputs).await
+    }
+    async fn workflow_run_targets(
+        &self,
+        id: crate::domain::WorkflowRunId,
+    ) -> Result<Vec<TargetId>, StoreError> {
+        workflows::targets(&self.pool, id).await
+    }
+    async fn get_workflow_run(
+        &self,
+        id: crate::domain::WorkflowRunId,
+        visibility: &VisibilityScope,
+    ) -> Result<crate::application::WorkflowRunRecord, StoreError> {
+        workflows::get_run(&self.pool, id, visibility).await
+    }
+    async fn list_workflow_runs(
+        &self,
+        id: crate::domain::WorkflowId,
+        visibility: &VisibilityScope,
+        limit: u16,
+        before: Option<Uuid>,
+    ) -> Result<Page<crate::application::WorkflowRunRecord>, StoreError> {
+        workflows::list_runs(&self.pool, id, visibility, limit, before).await
+    }
+    async fn cancel_workflow_run(
+        &self,
+        id: crate::domain::WorkflowRunId,
+    ) -> Result<crate::application::WorkflowRunRecord, StoreError> {
+        workflows::cancel(&self.pool, id).await
+    }
     async fn create_namespace(&self, name: &NamespaceName) -> Result<Namespace, StoreError> {
         let row = sqlx::query_as::<_, (Uuid, String, OffsetDateTime)>(
             "INSERT INTO crono.namespaces (name) VALUES ($1)
@@ -1062,7 +1132,7 @@ impl ControlPlaneStore for PostgresStore {
         inputs: &serde_json::Value,
     ) -> Result<(Vec<RunRecord>, bool), StoreError> {
         if let Some(existing) = find_run_request(&self.pool, request_id).await? {
-            compare_run_request(&existing, job_id, target, inputs)?;
+            compare_run_request(&self.pool, &existing, job_id, target, inputs).await?;
             return Ok((runs_for_request(&self.pool, request_id).await?, false));
         }
         let mut transaction = self.pool.begin().await.map_err(store_error)?;
@@ -1111,33 +1181,25 @@ impl ControlPlaneStore for PostgresStore {
                 let existing = find_run_request(&self.pool, request_id)
                     .await?
                     .ok_or(StoreError::Internal)?;
-                compare_run_request(&existing, job_id, target, inputs)?;
+                compare_run_request(&self.pool, &existing, job_id, target, inputs).await?;
                 return Ok((runs_for_request(&self.pool, request_id).await?, false));
             }
             return Err(store_error(error));
         }
-        let now = OffsetDateTime::now_utc();
         for (execution, (run_id, snapshot)) in executions.iter().zip(snapshots) {
-            sqlx::query(
-                "INSERT INTO crono.runs (
-                     id, request_id, job_id, target_id, queue_id, scheduled_at,
-                     execution_snapshot, attempt_count, max_attempts
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8)",
+            create_normal_run(
+                &mut transaction,
+                &PreparedRun {
+                    id: run_id,
+                    request_id,
+                    job_id: execution.job_id,
+                    target_id: execution.target_id,
+                    queue_id: execution.queue_id,
+                    max_attempts: execution.max_attempts,
+                    snapshot,
+                },
             )
-            .bind(run_id)
-            .bind(request_id)
-            .bind(execution.job_id)
-            .bind(execution.target_id)
-            .bind(execution.queue_id)
-            .bind(now)
-            .bind(snapshot)
-            .bind(execution.max_attempts)
-            .execute(&mut *transaction)
-            .await
-            .map_err(store_error)?;
-            create_attempt_and_outbox(&mut transaction, run_id, 1, execution.queue_id, None)
-                .await?;
-            insert_run_event(&mut transaction, run_id, "created", serde_json::json!({})).await?;
+            .await?;
         }
         transaction.commit().await.map_err(store_error)?;
         Ok((runs_for_request(&self.pool, request_id).await?, true))
@@ -1870,13 +1932,15 @@ impl ControlPlaneStore for PostgresStore {
         .await
         .map_err(store_error)?;
         transaction.commit().await.map_err(store_error)?;
-        u64::try_from(
+        let workflow_changes = workflows::reconcile(&self.pool, limit).await?;
+        let repaired = u64::try_from(
             expired_leases
                 .saturating_add(due_retries)
                 .saturating_add(expired_dispatches)
                 .saturating_add(expired_workers),
         )
-        .map_err(|_| StoreError::Internal)
+        .map_err(|_| StoreError::Internal)?;
+        Ok(repaired.saturating_add(workflow_changes))
     }
 
     async fn ready(&self) -> bool {
@@ -2282,6 +2346,34 @@ fn execution_snapshot_with_inputs(
     .map_err(|error| error.to_string())
 }
 
+/// Immutable values prepared by the existing input merge/rendering boundary.
+struct PreparedRun {
+    id: Uuid,
+    request_id: Uuid,
+    job_id: Uuid,
+    target_id: Uuid,
+    queue_id: Uuid,
+    max_attempts: i32,
+    snapshot: serde_json::Value,
+}
+
+/// Persist ordinary manual/workflow Run intent, its first Attempt, and outbox atomically.
+///
+/// The caller owns the idempotent invocation and transaction. No workflow data
+/// enters the dispatch envelope; workers consume the same immutable snapshot.
+async fn create_normal_run(
+    transaction: &mut Transaction<'_, Postgres>,
+    prepared: &PreparedRun,
+) -> Result<(), StoreError> {
+    sqlx::query("INSERT INTO crono.runs (id, request_id, job_id, target_id, queue_id, scheduled_at, execution_snapshot, attempt_count, max_attempts) VALUES ($1,$2,$3,$4,$5,statement_timestamp(),$6,1,$7)")
+        .bind(prepared.id).bind(prepared.request_id).bind(prepared.job_id).bind(prepared.target_id)
+        .bind(prepared.queue_id).bind(&prepared.snapshot).bind(prepared.max_attempts)
+        .execute(&mut **transaction).await.map_err(store_error)?;
+    create_attempt_and_outbox(transaction, prepared.id, 1, prepared.queue_id, None).await?;
+    insert_run_event(transaction, prepared.id, "created", serde_json::json!({})).await?;
+    Ok(())
+}
+
 async fn create_attempt_and_outbox(
     transaction: &mut Transaction<'_, Postgres>,
     run_id: Uuid,
@@ -2472,7 +2564,8 @@ async fn find_run_request(
     request_id: Uuid,
 ) -> Result<Option<RunRequestRow>, StoreError> {
     sqlx::query_as::<_, RunRequestRow>(
-        "SELECT job_id, target_id, target_set_id, inputs
+        "SELECT job_id, target_id, target_set_id, inputs,
+                EXISTS (SELECT 1 FROM crono.workflow_node_runs WHERE id = $1) AS workflow_owned
            FROM crono.run_requests
           WHERE request_id = $1",
     )
@@ -2623,21 +2716,50 @@ async fn runs_for_request(pool: &PgPool, request_id: Uuid) -> Result<Vec<RunReco
     .collect()
 }
 
-fn compare_run_request(
+/// Compare only manual invocation identities; committed Workflow node UUIDs are reserved.
+/// Public requests cannot adopt a pending node's identity or create its children early.
+async fn compare_run_request(
+    pool: &PgPool,
     existing: &RunRequestRow,
     job_id: JobId,
     target: TargetSelection,
     inputs: &serde_json::Value,
 ) -> Result<(), StoreError> {
     let (target_id, target_set_id) = selection_ids(target);
-    if existing.job_id == job_id.get()
+    if !existing.workflow_owned
+        && existing.job_id == job_id.get()
         && existing.target_id == target_id
         && existing.target_set_id == target_set_id
-        && existing.inputs == *inputs
+        && json_inputs_equal(pool, &existing.inputs, inputs).await?
     {
         return Ok(());
     }
     Err(StoreError::IdempotencyConflict)
+}
+
+/// Compare JSON values exactly as PostgreSQL stores them, without lossy float coercion.
+///
+/// JSONB may expand integral exponent values into integer text; `serde_json` then
+/// reads a different Number variant. SQL numeric equality preserves identical
+/// retries and still distinguishes adjacent large integer values. Equal Rust
+/// values need no round trip; differing structures use the authoritative rule.
+async fn json_inputs_equal<'e, E>(
+    executor: E,
+    stored: &serde_json::Value,
+    incoming: &serde_json::Value,
+) -> Result<bool, StoreError>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    if stored == incoming {
+        return Ok(true);
+    }
+    sqlx::query_scalar("SELECT $1::jsonb = $2::jsonb")
+        .bind(stored)
+        .bind(incoming)
+        .fetch_one(executor)
+        .await
+        .map_err(store_error)
 }
 
 fn namespace_from_row(

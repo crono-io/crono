@@ -35,6 +35,13 @@ identifier!(TargetId, "Stable internal identity of a Target.");
 identifier!(TargetSetId, "Stable internal identity of a `TargetSet`.");
 identifier!(ScheduleId, "Stable internal identity of a Schedule.");
 identifier!(RunId, "Stable internal identity of a Run.");
+identifier!(WorkflowId, "Stable internal identity of a Workflow.");
+identifier!(
+    WorkflowNodeId,
+    "Stable identity of a Workflow definition node."
+);
+identifier!(WorkflowRunId, "Stable identity of a Workflow invocation.");
+identifier!(WorkflowNodeRunId, "Stable identity of one node invocation.");
 identifier!(AttemptId, "Stable internal identity of a Run attempt.");
 identifier!(
     DispatchId,

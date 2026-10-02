@@ -10,6 +10,11 @@ mod error;
 mod model;
 mod service;
 mod store;
+mod workflows;
+pub use workflows::{
+    WorkflowChildRun, WorkflowInput, WorkflowLaunch, WorkflowNodeRunRecord, WorkflowRecord,
+    WorkflowRunRecord,
+};
 
 pub use auth::{
     AuthorizationError, Authorizer, Capability, PermitAllAuthorizer, Principal, PrincipalKind,

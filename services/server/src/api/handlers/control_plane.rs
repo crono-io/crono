@@ -52,9 +52,9 @@ use uuid::Uuid;
 pub struct PageQuery {
     /// Maximum resources to return, from 1 through 100.
     #[param(minimum = 1, maximum = 100)]
-    limit: Option<u16>,
+    pub(super) limit: Option<u16>,
     /// Opaque continuation cursor returned by a previous request.
-    after: Option<String>,
+    pub(super) after: Option<String>,
 }
 
 /// Run history paging and filters; unknown parameters are rejected like
@@ -1208,7 +1208,7 @@ const fn domain_executor(value: ExecutorKind) -> DomainExecutor {
     }
 }
 
-const fn domain_target(value: ExecutionTarget) -> TargetSelection {
+pub(super) const fn domain_target(value: ExecutionTarget) -> TargetSelection {
     match value {
         ExecutionTarget::Target { id } => TargetSelection::Target(crate::domain::TargetId::new(id)),
         ExecutionTarget::TargetSet { id } => {
@@ -1376,14 +1376,14 @@ fn worker_status(last_seen: time::OffsetDateTime, now: time::OffsetDateTime) -> 
     }
 }
 
-fn timestamp(value: time::OffsetDateTime) -> Result<String, ApiError> {
+pub(super) fn timestamp(value: time::OffsetDateTime) -> Result<String, ApiError> {
     value.format(&Rfc3339).map_err(|error| {
         tracing::error!(%error, "failed to encode a persisted timestamp");
         ApiError::from(crate::application::ApplicationError::Internal)
     })
 }
 
-fn map_page<T, U, F>(page: ApplicationPage<T>, mapper: F) -> Result<Page<U>, ApiError>
+pub(super) fn map_page<T, U, F>(page: ApplicationPage<T>, mapper: F) -> Result<Page<U>, ApiError>
 where
     F: Fn(T) -> Result<U, ApiError>,
 {

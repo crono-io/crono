@@ -40,8 +40,8 @@ pub struct CreateRunOutcome {
 
 #[derive(Clone)]
 pub struct Application {
-    store: Arc<dyn ControlPlaneStore>,
-    authorizer: Arc<dyn Authorizer>,
+    pub(super) store: Arc<dyn ControlPlaneStore>,
+    pub(super) authorizer: Arc<dyn Authorizer>,
 }
 
 impl Application {
@@ -1248,7 +1248,7 @@ impl Application {
         Ok(())
     }
 
-    async fn execution_targets(
+    pub(super) async fn execution_targets(
         &self,
         context: &RequestContext,
         selection: TargetSelection,
@@ -1311,7 +1311,7 @@ fn ensure_queue_name_available(
 /// could have issued is always a canonical resource name. Rejecting anything
 /// else keeps arbitrary text (including NUL, which PostgreSQL `text` rejects)
 /// out of queries and reports a caller error instead of a server failure.
-fn page_cursor(after: Option<&str>) -> Result<Option<&str>, ApplicationError> {
+pub(super) fn page_cursor(after: Option<&str>) -> Result<Option<&str>, ApplicationError> {
     match after {
         Some(cursor) if validate_resource_name(cursor).is_err() => Err(ApplicationError::invalid(
             "after",
@@ -1330,7 +1330,7 @@ fn stored_worker_id(worker_id: &str) -> Result<&str, ApplicationError> {
         .map_err(|_| ApplicationError::NotFound)
 }
 
-fn page_limit(limit: Option<u16>) -> Result<u16, ApplicationError> {
+pub(super) fn page_limit(limit: Option<u16>) -> Result<u16, ApplicationError> {
     let limit = limit.unwrap_or(DEFAULT_LIMIT);
     if limit == 0 || limit > MAX_LIMIT {
         Err(ApplicationError::invalid(
@@ -1342,7 +1342,7 @@ fn page_limit(limit: Option<u16>) -> Result<u16, ApplicationError> {
     }
 }
 
-fn invalid_name(error: crate::domain::NameError) -> ApplicationError {
+pub(super) fn invalid_name(error: crate::domain::NameError) -> ApplicationError {
     ApplicationError::invalid("name", error.to_string())
 }
 
@@ -1375,7 +1375,7 @@ fn validate_arguments(arguments: &[String]) -> Result<(), ApplicationError> {
         .map_err(|error| ApplicationError::invalid("arguments", error.to_string()))
 }
 
-fn validate_input_object(inputs: &serde_json::Value) -> Result<(), ApplicationError> {
+pub(super) fn validate_input_object(inputs: &serde_json::Value) -> Result<(), ApplicationError> {
     validate_inputs(inputs).map_err(|error| ApplicationError::invalid("inputs", error.to_string()))
 }
 
@@ -1396,7 +1396,7 @@ fn validate_target_ids(target_ids: &[Uuid]) -> Result<(), ApplicationError> {
     Ok(())
 }
 
-fn validate_rendered_execution(
+pub(super) fn validate_rendered_execution(
     job: &Job,
     target_set_inputs: Option<&serde_json::Value>,
     target: &Target,

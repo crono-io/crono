@@ -7,6 +7,8 @@
 //! This layer contains no persistence or transport representations. Jobs and
 //! Targets are directly editable while Crono is a draft; Runs snapshot their
 //! exact execution definition before dispatch.
+//! Workflows add pure acyclic Job references and typed dependency decisions;
+//! invocation persistence and ordinary Run creation remain outside the domain.
 
 mod id;
 mod job;
@@ -17,9 +19,11 @@ mod run;
 mod schedule;
 mod target;
 mod target_set;
+mod workflow;
 
 pub use id::{
     AttemptId, DispatchId, JobId, NamespaceId, QueueId, RunId, ScheduleId, TargetId, TargetSetId,
+    WorkflowId, WorkflowNodeId, WorkflowNodeRunId, WorkflowRunId,
 };
 pub use job::{ExecutorKind, Job, JobData};
 pub use name::{NameError, NamespaceName, QueueName, ResourceName};
@@ -29,3 +33,7 @@ pub use run::{Run, RunData, RunStatus};
 pub use schedule::{CatchupPolicy, MisfirePolicy, Schedule, ScheduleTiming, TargetSelection};
 pub use target::Target;
 pub use target_set::TargetSet;
+pub use workflow::{
+    DependencyCondition, DependencyDecision, WorkflowDefinition, WorkflowEdge, WorkflowNode,
+    WorkflowNodeState, WorkflowState, dependency_decision,
+};

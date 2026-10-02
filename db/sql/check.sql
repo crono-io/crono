@@ -99,7 +99,10 @@ BEGIN
         'crono.worker_presence',
         'crono.outbox',
         'crono.run_events',
-        'crono.schedule_events'
+        'crono.schedule_events',
+        'crono.workflows', 'crono.workflow_nodes', 'crono.workflow_edges',
+        'crono.workflow_runs', 'crono.workflow_node_runs', 'crono.workflow_run_edges',
+        'crono.workflow_node_executions', 'crono.workflow_completion_events'
     ] LOOP
         IF to_regclass(relation) IS NULL THEN
             RAISE EXCEPTION 'Missing relation: %', relation;
@@ -189,6 +192,30 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'Missing default Target name protection';
     END IF;
+END;
+$$;
+
+
+DO $$
+DECLARE
+    required_trigger text;
+BEGIN
+    FOREACH required_trigger IN ARRAY ARRAY[
+        'workflows.workflows_valid_graph',
+        'workflow_nodes.workflow_nodes_valid_graph',
+        'workflow_edges.workflow_edges_valid_graph',
+        'runs.runs_workflow_completion'
+    ] LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_trigger t
+            JOIN pg_class c ON c.oid = t.tgrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = 'crono' AND c.relname = split_part(required_trigger, '.', 1)
+              AND t.tgname = split_part(required_trigger, '.', 2)
+              AND NOT t.tgisinternal AND t.tgenabled = 'O'
+        ) THEN RAISE EXCEPTION 'Missing Workflow durability trigger: %', required_trigger;
+        END IF;
+    END LOOP;
 END;
 $$;
 

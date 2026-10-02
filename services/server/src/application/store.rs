@@ -136,6 +136,8 @@ pub enum StoreError {
     QueueDisabled,
     /// PostgreSQL refused a value it cannot represent, such as NUL in text.
     InvalidData,
+    /// Preparing the complete invocation exceeded a documented execution or byte budget.
+    WorkflowLaunchTooLarge,
     Unavailable,
     Internal,
 }
@@ -150,6 +152,9 @@ impl fmt::Display for StoreError {
             Self::StaleRevision => "resource revision is stale",
             Self::QueueDisabled => "the original Run's Queue is disabled",
             Self::InvalidData => "request contains data that cannot be stored",
+            Self::WorkflowLaunchTooLarge => {
+                "Workflow launch exceeds its execution or snapshot budget"
+            }
             Self::Unavailable => "persistence is unavailable",
             Self::Internal => "persistence failed",
         })
@@ -160,6 +165,58 @@ impl Error for StoreError {}
 
 #[async_trait]
 pub trait ControlPlaneStore: Send + Sync {
+    /// Persist a validated DAG atomically; replacements require the expected revision.
+    async fn write_workflow(
+        &self,
+        namespace_id: NamespaceId,
+        existing: Option<(crate::domain::WorkflowId, u64)>,
+        definition: &crate::domain::WorkflowDefinition,
+    ) -> Result<super::WorkflowRecord, StoreError>;
+    async fn get_workflow(
+        &self,
+        id: crate::domain::WorkflowId,
+    ) -> Result<super::WorkflowRecord, StoreError>;
+    async fn list_workflows(
+        &self,
+        namespace_id: NamespaceId,
+        visibility: &VisibilityScope,
+        limit: u16,
+        after: Option<&str>,
+    ) -> Result<Page<super::WorkflowRecord>, StoreError>;
+    async fn delete_workflow(&self, id: crate::domain::WorkflowId) -> Result<(), StoreError>;
+    /// Pin authorized graph/membership and create root Runs with their normal outbox.
+    async fn start_workflow(
+        &self,
+        launch: &super::WorkflowLaunch,
+    ) -> Result<(super::WorkflowRunRecord, bool), StoreError>;
+    /// Look up a replay and compare Inputs using authoritative JSON value semantics.
+    /// Numeric storage normalization must not turn identical retries into conflicts.
+    async fn workflow_run_for_request(
+        &self,
+        request_id: Uuid,
+        inputs: &serde_json::Value,
+    ) -> Result<Option<super::WorkflowRunRecord>, StoreError>;
+    async fn workflow_run_targets(
+        &self,
+        id: crate::domain::WorkflowRunId,
+    ) -> Result<Vec<TargetId>, StoreError>;
+    async fn get_workflow_run(
+        &self,
+        id: crate::domain::WorkflowRunId,
+        visibility: &VisibilityScope,
+    ) -> Result<super::WorkflowRunRecord, StoreError>;
+    async fn list_workflow_runs(
+        &self,
+        id: crate::domain::WorkflowId,
+        visibility: &VisibilityScope,
+        limit: u16,
+        before: Option<Uuid>,
+    ) -> Result<Page<super::WorkflowRunRecord>, StoreError>;
+    /// Set the stop flag under the same lock used by dependency transitions.
+    async fn cancel_workflow_run(
+        &self,
+        id: crate::domain::WorkflowRunId,
+    ) -> Result<super::WorkflowRunRecord, StoreError>;
     async fn create_namespace(&self, name: &NamespaceName) -> Result<Namespace, StoreError>;
     async fn list_namespaces(
         &self,
@@ -369,6 +426,11 @@ pub trait ControlPlaneStore: Send + Sync {
     async fn claim_attempt(&self, request: &ClaimRequest) -> Result<ClaimResponse, StoreError>;
     async fn renew_lease(&self, request: &LeaseRequest) -> Result<bool, StoreError>;
     async fn complete_attempt(&self, request: &CompletionRequest) -> Result<bool, StoreError>;
+    /// Repair a bounded execution batch, then drain a bounded Workflow event batch.
+    ///
+    /// Terminal Run changes enqueue Workflow events atomically. Each affected
+    /// invocation commits separately under a row lock; failure leaves its events
+    /// available for replay, and no caller identity is synthesized for orchestration.
     async fn reconcile(&self, limit: u16) -> Result<u64, StoreError>;
     async fn metrics_snapshot(&self) -> Result<MetricsSnapshot, StoreError>;
     async fn monitor_snapshot(&self) -> Result<MonitorSnapshot, StoreError>;

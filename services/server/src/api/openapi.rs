@@ -10,7 +10,7 @@
 //! that contract tests such as Schemathesis would report.
 
 use super::{
-    handlers::{control_plane, health, monitor},
+    handlers::{control_plane, health, monitor, workflows},
     state::AppState,
 };
 use utoipa::openapi::{
@@ -126,14 +126,30 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(control_plane::list_workers))
         .routes(routes!(control_plane::get_worker))
         .routes(routes!(control_plane::overview))
-        .routes(routes!(monitor::monitor));
+        .routes(routes!(monitor::monitor))
+        .routes(routes!(
+            workflows::create_workflow,
+            workflows::list_workflows
+        ))
+        .routes(routes!(
+            workflows::get_workflow,
+            workflows::update_workflow,
+            workflows::delete_workflow
+        ))
+        .routes(routes!(
+            workflows::start_workflow,
+            workflows::list_workflow_runs
+        ))
+        .routes(routes!(workflows::get_workflow_run))
+        .routes(routes!(workflows::cancel_workflow_run));
 
     let mut health_tag = Tag::new("health");
     health_tag.description = Some("Process liveness, readiness, and health".to_string());
     let mut control_plane_tag = Tag::new("control-plane");
     control_plane_tag.description =
         Some("Authorization-checked resources, Runs, and worker presence".to_string());
-    router.get_openapi_mut().tags = Some(vec![health_tag, control_plane_tag]);
+    router.get_openapi_mut().tags =
+        Some(vec![health_tag, control_plane_tag, Tag::new("workflows")]);
     document_common_responses(router.get_openapi_mut());
 
     router

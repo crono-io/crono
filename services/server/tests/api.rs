@@ -9,7 +9,7 @@ fn openapi_contains_health_and_control_plane_contracts() -> Result<()> {
     let document = crono_server::api::openapi();
     assert_eq!(document.info.title, "crono-server");
     assert_eq!(document.info.version, env!("CARGO_PKG_VERSION"));
-    assert_eq!(document.paths.paths.len(), 25);
+    assert_eq!(document.paths.paths.len(), 30);
     for path in [
         "/live",
         "/ready",
@@ -36,6 +36,11 @@ fn openapi_contains_health_and_control_plane_contracts() -> Result<()> {
         "/api/runs/{run_id}/attempts",
         "/api/workers",
         "/api/workers/{worker_id}",
+        "/api/namespaces/{namespace_id}/workflows",
+        "/api/workflows/{workflow_id}",
+        "/api/workflows/{workflow_id}/runs",
+        "/api/workflow-runs/{workflow_run_id}",
+        "/api/workflow-runs/{workflow_run_id}/cancel",
     ] {
         assert!(document.paths.paths.contains_key(path));
     }
@@ -144,9 +149,9 @@ fn list_query_parameters_are_documented_in_query() -> Result<()> {
             }
         }
     }
-    // Seven name-cursor lists expose `limit` and `after`; Runs expose `limit` and `before`.
+    // Eight name-cursor lists expose `limit`/`after`; two Run lists expose `limit`/`before`.
     assert_eq!(
-        checked, 16,
+        checked, 20,
         "every list endpoint exposes its paging parameters"
     );
     Ok(())
@@ -322,7 +327,7 @@ fn list_limit_parameters_declare_documented_bounds() -> Result<()> {
             }
         }
     }
-    assert_eq!(checked, 8, "every list endpoint documents its limit");
+    assert_eq!(checked, 10, "every list endpoint documents its limit");
     Ok(())
 }
 
@@ -356,7 +361,7 @@ fn request_names_declare_resource_name_constraints() -> Result<()> {
         }
     }
     assert_eq!(
-        checked, 10,
+        checked, 13,
         "every named create or update request is constrained"
     );
     Ok(())

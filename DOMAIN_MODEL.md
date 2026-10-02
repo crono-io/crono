@@ -8,6 +8,7 @@ Namespace
    +-- Target
    +-- Target Set --> Target membership
    +-- Schedule -> occurrence
+   +-- Workflow -> Job nodes + dependency edges -> WorkflowRun
 
 Job + Target + inputs
          |
@@ -42,11 +43,20 @@ only when no durable relationship references the Queue. The bootstrap `default`
 Queue is system-managed: its description may change, but it remains enabled
 and cannot be renamed or deleted because the worker CLI uses it as its default.
 
-A manual Run uses the request UUID as an idempotency key: replaying the same request and definition returns the existing Run, while reusing the key for different work is a conflict. Manual Run and Schedule requests refer to Jobs and Targets by UUID, while API responses also include derived qualified names for display.
+A manual Run uses the request UUID as an idempotency key: replaying the same request and definition returns the existing Run, while reusing the key for different work is a conflict. Inputs compare by PostgreSQL JSON value equality, preserving numeric precision and tolerating storage normalization of exponent notation. Manual Run and Schedule requests refer to Jobs and Targets by UUID, while API responses also include derived qualified names for display.
 
 A scheduled occurrence is identified by `(schedule_id, scheduled_at)`. PostgreSQL enforces that pair as unique. Scheduler claims improve concurrency, but this constraint is the final correctness boundary during failover or competing scheduler instances.
 
 Each logical Run can have multiple Attempts. Message redelivery for an existing Attempt never allocates another Attempt. Execution retry does: the old Attempt remains immutable audit history and a transaction creates the next Attempt plus its outbox event.
+
+## Workflow state
+
+Workflows are bounded DAGs of existing Jobs, with success/failure/always edges
+and AND joins. Each WorkflowRun snapshots its graph and execution context;
+eligible node invocations create ordinary Runs and preserve Target Set fan-out.
+PostgreSQL completion events drive dependency decisions through the existing
+reconciler. Workers and NATS remain unaware of the graph. See
+[WORKFLOWS.md](WORKFLOWS.md) for execution, cancellation, and API details.
 
 ## Schedule state
 

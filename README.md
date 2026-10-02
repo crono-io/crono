@@ -414,7 +414,7 @@ project's database on 5432; set `CRONO_TEST_DATABASE_URL` to an initialized data
 your own to use that instead. Only the NATS outage test (`just integration-test`) and the
 scheduler load test (`just load-test`) stay manual.
 
-The canonical draft schema and reset guidance are in [db/sql/README.md](db/sql/README.md). Domain invariants are in [DOMAIN_MODEL.md](DOMAIN_MODEL.md), authorization boundaries in [AUTHORIZATION.md](AUTHORIZATION.md), and CLI layering rules in [CLI_ARCHITECTURE.md](CLI_ARCHITECTURE.md).
+The canonical draft schema and reset guidance are in [db/sql/README.md](db/sql/README.md). Domain invariants are in [DOMAIN_MODEL.md](DOMAIN_MODEL.md), Job dependency graphs and durable execution in [WORKFLOWS.md](WORKFLOWS.md), authorization boundaries in [AUTHORIZATION.md](AUTHORIZATION.md), and CLI layering rules in [CLI_ARCHITECTURE.md](CLI_ARCHITECTURE.md).
 
 ## Deployment
 

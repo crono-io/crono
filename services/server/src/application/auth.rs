@@ -6,7 +6,9 @@
 //! resource scope that a future RBAC or external policy adapter will evaluate.
 //! Decisions are side-effect free and never trust client-provided roles.
 
-use crate::domain::{JobId, NamespaceId, QueueId, ScheduleId, TargetId, TargetSetId};
+use crate::domain::{
+    JobId, NamespaceId, QueueId, ScheduleId, TargetId, TargetSetId, WorkflowId, WorkflowRunId,
+};
 use async_trait::async_trait;
 use std::{collections::BTreeSet, error::Error, fmt};
 use uuid::Uuid;
@@ -127,6 +129,13 @@ pub enum Capability {
     ScheduleCreate,
     ScheduleRead,
     ScheduleUpdate,
+    WorkflowCreate,
+    WorkflowRead,
+    WorkflowUpdate,
+    WorkflowDelete,
+    WorkflowExecute,
+    WorkflowRunRead,
+    WorkflowRunCancel,
     RunCreate,
     RunRead,
     WorkerRead,
@@ -144,6 +153,8 @@ pub enum ResourceScope {
     Target(TargetId),
     TargetSet(TargetSetId),
     Schedule(ScheduleId),
+    Workflow(WorkflowId),
+    WorkflowRun(WorkflowRunId),
     Run(Uuid),
 }
 

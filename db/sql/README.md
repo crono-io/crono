@@ -10,6 +10,8 @@
   worker Queues, direct Job and Target definitions, explicit Target Sets,
   Schedules, Runs, Attempts, worker presence, audit events, leases, and the
   transactional outbox.
+- `02_workflows.sql` adds bounded Job DAGs, immutable invocation snapshots,
+  durable node state, and Run completion events.
 - `container-entrypoint.sql` lets the official PostgreSQL image run the canonical
   bootstrap while keeping relative includes working.
 - `check.sql` verifies database ownership, role safety, schema ownership, and
@@ -46,6 +48,7 @@ just db-verify 'postgres://admin@db.example.test:5432/postgres'
 
 The bootstrap is idempotent. It defaults the `crono_runtime` password to
 `change-me` for local development. For any non-local environment, run the SQL
+
 directly and provide a secret through a psql variable:
 
 ```sh
@@ -58,6 +61,13 @@ psql "postgres://<admin>@<host>:5432/postgres" \
 The application role is `crono_runtime`. It can connect and manipulate objects
 created by `crono_owner`, but it cannot create schema objects. `crono_owner` is a
 non-login role reserved for bootstrap and migrations.
+
+`02_workflows.sql` adds Workflow definitions, immutable invocation snapshots,
+node/Target execution links, and a durable completion queue. Bootstrap loads it
+after `01_crono.sql` under the same owner and applies runtime grants. Reapplying
+the schema preserves graph IDs and history. Deferred constraints reject invalid
+catalog DAGs; an ordinary Run terminal trigger commits workflow completion
+intent with its outcome. `check.sql` verifies the new relations and grants.
 
 Canonical names are DNS-1123 labels. Workload names are unique inside their
 owning Namespace; Queue and Namespace names are globally unique. UUIDs are the

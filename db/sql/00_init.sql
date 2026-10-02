@@ -51,6 +51,7 @@ SELECT pg_advisory_unlock(hashtext('crono-initdb'));
 -- superuser. Future migrations should follow the same ownership boundary.
 SET ROLE crono_owner;
 \ir 01_crono.sql
+\ir 02_workflows.sql
 RESET ROLE;
 
 REVOKE ALL ON SCHEMA public FROM PUBLIC;

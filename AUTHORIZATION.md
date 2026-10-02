@@ -135,6 +135,17 @@ An authenticated denial remains 403, or the existing 404 visibility semantics.
 Authorization outages remain 503. No failure establishes a development identity
 or falls back to PermitAll.
 
+## Workflow authorization
+
+Workflow catalog operations and invocation reads/cancellation use typed Workflow
+capabilities in the same Authorizer. Launch requires WorkflowExecute, every
+referenced JobExecute, each pinned TargetUse, TargetSetUse where selected, and
+Namespace RunCreate. The graph revision and exact authorized membership are
+checked transactionally before immutable intent commits. Orchestration then
+consumes that intent without granting new authority. WorkflowRead/WorkflowRunRead
+visibility hides other Namespaces; child Attempt output independently requires
+RunRead. See [WORKFLOWS.md](WORKFLOWS.md).
+
 ## Future external authentication
 
 ```text

@@ -76,6 +76,9 @@ impl From<StoreError> for ApplicationError {
             StoreError::InvalidData => Self::invalid_request(
                 "request contains text that cannot be stored; remove NUL characters or invalid encoding",
             ),
+            StoreError::WorkflowLaunchTooLarge => Self::invalid_request(
+                "Workflow launch exceeds 4,096 child executions or 8 MiB of prepared snapshots; reduce the graph, Target Set, or Inputs",
+            ),
             StoreError::Unavailable => Self::Unavailable,
             StoreError::Internal => Self::Internal,
         }

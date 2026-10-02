@@ -8,6 +8,14 @@ use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt};
 use uuid::Uuid;
 
+mod workflow;
+pub use workflow::{
+    CreateWorkflowRequest, DependencyCondition, StartWorkflowRequest, UpdateWorkflowRequest,
+    WorkflowChildRunResource, WorkflowEdgeRequest, WorkflowNodeRequest, WorkflowNodeResource,
+    WorkflowNodeRunResource, WorkflowNodeRunState, WorkflowResource, WorkflowRunResource,
+    WorkflowRunState,
+};
+
 /// Maximum byte length of a canonical DNS-1123 resource label.
 pub const RESOURCE_NAME_MAX_LENGTH: usize = 63;
 
