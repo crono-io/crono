@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Manage only this checkout's local development processes. Never kill an
 # arbitrary listener merely because it happens to use a Crono port.
+# Provision a private, reusable development credential for Trunk to supply to
+# the API, which still verifies Bearer credentials normally. Every client that
+# can reach this development web proxy receives full development access.
+set +x
 set -euo pipefail
 
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -196,6 +200,75 @@ valid_port() {
   [[ "$1" =~ ^[0-9]+$ ]] && ((10#$1 >= 1 && 10#$1 <= 65535))
 }
 
+# Match the server's development-token length and RFC 6750 alphabet before
+# stopping a working stack. Errors and shell traces must never contain a token.
+validate_development_token() {
+  local LC_ALL=C
+  [[ ${#CRONO_AUTH_DEVELOPMENT_TOKEN} -ge 32 \
+    && ${#CRONO_AUTH_DEVELOPMENT_TOKEN} -le 8192 \
+    && "$CRONO_AUTH_DEVELOPMENT_TOKEN" =~ ^[a-zA-Z0-9._~+/-]+=*$ ]] || {
+    echo "CRONO_AUTH_DEVELOPMENT_TOKEN must be a random Bearer token of 32 to 8192 bytes" >&2
+    return 2
+  }
+}
+
+# Called under the checkout lock. An explicit environment token takes priority;
+# otherwise reuse the private file or generate 256 random bits once. Existing
+# invalid credentials fail closed instead of being silently replaced. Only the
+# ignored owner-only directory contains secrets; neither argv nor assets do.
+prepare_development_auth() {
+  local server_port="$1"
+  local auth_dir="$project_root/target/dev-auth"
+  local token_file="$auth_dir/token" staged
+  [[ ! -L "$auth_dir" ]] || { echo "Development authentication directory must not be a symbolic link" >&2; return 2; }
+  (umask 077; mkdir -p -- "$auth_dir")
+  [[ -O "$auth_dir" ]] || { echo "Development authentication directory must belong to the current user" >&2; return 2; }
+  chmod 700 -- "$auth_dir"
+
+  if [[ ! ${CRONO_AUTH_DEVELOPMENT_TOKEN+x} ]]; then
+    if [[ -e "$token_file" || -L "$token_file" ]]; then
+      [[ -f "$token_file" && ! -L "$token_file" && -O "$token_file" ]] || {
+        echo "Development token must be a regular file owned by the current user" >&2
+        return 2
+      }
+      chmod 600 -- "$token_file"
+      CRONO_AUTH_DEVELOPMENT_TOKEN="$(cat -- "$token_file")"
+    else
+      CRONO_AUTH_DEVELOPMENT_TOKEN="$(openssl rand -hex 32)"
+      validate_development_token
+      staged="$(mktemp "$auth_dir/token.XXXXXX")"
+      printf '%s\n' "$CRONO_AUTH_DEVELOPMENT_TOKEN" > "$staged"
+      mv -f -- "$staged" "$token_file"
+    fi
+  fi
+  validate_development_token
+  export CRONO_AUTH_DEVELOPMENT_TOKEN
+
+  # Inherit the checked-in Trunk configuration, overriding only its API proxy.
+  # The launch supplies absolute target/dist paths because this private config
+  # lives outside apps/web. Disable redirects/system proxies to keep the secret
+  # on the configured loopback API. This development-only proxy supplies the
+  # configured credential for local and remote browsers; deployment hosting
+  # continues to require credentials supplied by its caller.
+  staged="$(mktemp "$auth_dir/Trunk.XXXXXX")"
+  if ! awk -v api_port="$server_port" '
+    /^\[\[proxy\]\]/ { in_proxy = 1; print; next }
+    /^\[/ { in_proxy = 0 }
+    in_proxy && /^backend[[:space:]]*=/ {
+      print "backend = \"http://127.0.0.1:" api_port "/api/\""
+      print "no_system_proxy = true"
+      print "no_redirect = true"
+      print "request_headers = { Authorization = \"Bearer " ENVIRON["CRONO_AUTH_DEVELOPMENT_TOKEN"] "\" }"
+      next
+    }
+    { print }
+  ' "$project_root/apps/web/Trunk.toml" > "$staged"; then
+    rm -f -- "$staged"
+    return 1
+  fi
+  mv -f -- "$staged" "$auth_dir/Trunk.toml"
+}
+
 start_stack() {
   local address="$1"
   local web_port="$2"
@@ -204,17 +277,12 @@ start_stack() {
   local server_pid web_pid status attempt
   local ready=false
 
-  # Reject missing credentials before stopping a working stack. The server
-  # validates token syntax/length and mode before connecting to dependencies.
-  case "${CRONO_AUTH_MODE:-development}" in
+  # Unsupported providers fail before touching a working development stack.
+  case "${CRONO_AUTH_MODE-development}" in
     development) ;;
     oidc) echo "OIDC authentication is not implemented" >&2; return 2 ;;
     *) echo "CRONO_AUTH_MODE must be development or oidc" >&2; return 2 ;;
   esac
-  [[ -n "${CRONO_AUTH_DEVELOPMENT_TOKEN:-}" ]] || {
-    echo "Set CRONO_AUTH_DEVELOPMENT_TOKEN to a random development Bearer token before starting Crono" >&2
-    return 2
-  }
 
   valid_port "$web_port" && valid_port "$server_port" && [[ "$web_port" != "$server_port" ]] || {
     echo "Web and API ports must be distinct integers from 1 through 65535" >&2
@@ -230,6 +298,7 @@ start_stack() {
   # The lock covers preparation, cleanup, and readiness, not stack lifetime.
   # A second start replaces the first; stop works from another shell.
   flock -w 130 -x 9 || { echo "Timed out waiting for Crono development lock" >&2; return 1; }
+  prepare_development_auth "$server_port"
   stop_apps apps
   just dev-infra
   cargo build --locked -p crono-server --bin crono-server
@@ -260,8 +329,14 @@ start_stack() {
 
   check_port_free "$web_port" Web
   cd -- "$project_root/apps/web"
+  # Trunk 0.21 logs configured proxy headers at info level. Force a filter that
+  # disables that module, including when the parent shell requests trace logs.
+  # The credential stays in the private config, never in command-line arguments.
   setsid env CRONO_DEV_STACK_ROOT="$project_root" CRONO_DEV_ROLE=web \
-    NO_COLOR=true trunk serve --address "$address" --port "$web_port" 9>&- &
+    NO_COLOR=true RUST_LOG=info,trunk::serve::proxy=off \
+    trunk serve --config "$project_root/target/dev-auth/Trunk.toml" \
+    --address "$address" --port "$web_port" \
+    --dist "$project_root/apps/web/dist" "$project_root/apps/web/index.html" 9>&- &
   web_pid=$!
   child_pids+=("$web_pid")
   cd -- "$project_root"
@@ -285,6 +360,12 @@ start_stack() {
   [[ "$ready" == true ]] || { echo "Crono web did not become ready within 120 seconds" >&2; return 1; }
   flock -u 9
   echo "Crono development stack is ready: API :$server_port, web :$web_port"
+  if [[ "$address" == 0.0.0.0 ]]; then
+    echo "Open http://127.0.0.1:$web_port locally or http://<server-ip>:$web_port from your laptop"
+  else
+    echo "Open http://$address:$web_port"
+  fi
+  echo "Development web requests are authenticated automatically; clients reaching this web port have full development access"
 
   set +e
   wait -n "$server_pid" "$web_pid"

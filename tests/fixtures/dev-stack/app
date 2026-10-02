@@ -3,9 +3,13 @@
 set -euo pipefail
 
 port=""
+address="127.0.0.1"
 while (($# > 0)); do
   if [[ "$1" == --port ]]; then
     port="${2-}"
+    shift 2
+  elif [[ "$1" == --address ]]; then
+    address="${2-}"
     shift 2
   else
     shift
@@ -13,5 +17,5 @@ while (($# > 0)); do
 done
 [[ -n "$port" ]] || exit 2
 
-exec python3 -m http.server "$port" --bind 127.0.0.1 \
+exec python3 -m http.server "$port" --bind "$address" \
   --directory "$CRONO_DEV_STACK_ROOT/public"

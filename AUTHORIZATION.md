@@ -63,20 +63,51 @@ development policy. Use it only in a controlled development/test environment.
 GET/HEAD on `/live`, `/ready`, `/health`, and `/metrics` remain public for probes
 and monitoring. They do not execute resource use cases. All other requests,
 including API fallbacks, require authentication. Keep operational endpoints behind
-an appropriate deployment network boundary. Public HTTP requires TLS termination;
-cleartext loopback is only a local development convenience.
+an appropriate deployment network boundary. Public deployments require TLS termination;
+the cleartext development stack is intended for a trusted testing network.
 
 ## Configuration and development clients
 
 `--auth-mode` / `CRONO_AUTH_MODE` selects the provider and defaults to `development`.
 `CRONO_AUTH_DEVELOPMENT_TOKEN` is mandatory, with no default or command-line token
-argument. Set it to a randomly generated Bearer value of 32–8192 bytes before
-starting the server or `just dev-start`, for example:
+argument in the server. For the local stack, simply run:
+
+```sh
+just dev-start
+```
+
+The web listener binds `0.0.0.0` by default. Open `http://127.0.0.1:3000` locally
+or `http://<server-ip>:3000` from a laptop on the testing network. The launcher
+generates 256 random bits using OpenSSL
+when no token is configured, saves the hex value in `target/dev-auth/token`, and
+reuses it across restarts. The ignored directory has mode 0700; the token and
+generated Trunk configuration have mode 0600. An explicitly supplied environment
+token takes priority without replacing the persisted default. An existing invalid
+token fails startup; it is never silently regenerated. Invalid authentication
+configuration is checked before stopping a working stack.
+
+For local and remote development browsers, Trunk adds the configured Bearer header to
+proxied `/api` requests. The API still uses `DevelopmentAuthProvider`, RequestContext,
+and the independent Authorizer; direct API calls without a token still return 401.
+The credential stays outside browser assets and URLs. Proxy header logging is
+disabled even if the parent shell requests trace logging, and the proxy neither
+uses system HTTP proxies nor follows redirects. The generated configuration follows
+the selected API port. It is private runtime configuration, not a deployment artifact.
+
+Every client that can reach the development web port receives the configured
+development identity and its current full-access authorization. Keep this proxy
+on a trusted testing network. Use `just dev-start 127.0.0.1` when only local
+access is needed. Binding changes where the web client can be reached; it does
+not change the API authentication provider or its independent Authorizer.
+Production web hosting never supplies a development credential.
+
+When launching the server separately, set a randomly generated Bearer value of
+32–8192 bytes yourself, for example:
 
 ```sh
 export CRONO_AUTH_MODE=development
 export CRONO_AUTH_DEVELOPMENT_TOKEN="$(openssl rand -hex 32)"
-just dev-start
+just server
 ```
 
 Keep the value private; do not commit it or enable shell tracing while handling
@@ -85,8 +116,9 @@ PostgreSQL, NATS, or the listener is opened. Selecting `oidc` fails explicitly
 because that provider is not implemented, even if a development token is present.
 There are no unused issuer/audience/discovery placeholders in configuration.
 
-The web client reads the opaque credential centrally from browser **session
-storage**, scoped to the frontend origin and tab. Set it in that tab's DevTools
+Outside the automatic local proxy, the web client reads the opaque credential
+centrally from browser **session storage**, scoped to the frontend origin and tab.
+Set it in that tab's DevTools
 console using the actual configured secret, then reload:
 
 ```js

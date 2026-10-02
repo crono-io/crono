@@ -276,7 +276,7 @@ web address="0.0.0.0" port="3000":
 worker queue="default" worker-id="" concurrency="3" verbosity="-v" log-format="pretty":
   if [ -n "$2" ]; then cargo run --locked -p crono-worker -- "$4" --log-format "$5" run --queue "$1" --worker-id "$2" --concurrency "$3"; else cargo run --locked -p crono-worker -- "$4" --log-format "$5" run --queue "$1" --concurrency "$3"; fi
 
-[doc("Start the complete development stack on non-conflicting ports.")]
+[doc("Start the local development stack with automatic Bearer authentication.")]
 [positional-arguments]
 dev-start address="0.0.0.0" web-port="3000" server-port="8080" verbosity="-v":
   bash scripts/dev-stack.sh start "$1" "$2" "$3" "$4"

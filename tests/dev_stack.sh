@@ -23,6 +23,7 @@ trap cleanup EXIT
 mkdir -p "$sandbox/checkout/scripts" "$sandbox/checkout/public" \
   "$sandbox/checkout/apps/web" "$sandbox/checkout/target/debug" "$sandbox/bin"
 cp "$source_root/scripts/dev-stack.sh" "$sandbox/checkout/scripts/dev-stack.sh"
+cp "$source_root/apps/web/Trunk.toml" "$sandbox/checkout/apps/web/Trunk.toml"
 cp "$source_root/tests/fixtures/dev-stack/just" "$sandbox/bin/just"
 cp "$source_root/tests/fixtures/dev-stack/cargo" "$sandbox/bin/cargo"
 cp "$source_root/tests/fixtures/dev-stack/podman" "$sandbox/bin/podman"
@@ -32,7 +33,7 @@ chmod +x "$sandbox/bin/just" "$sandbox/bin/cargo" "$sandbox/bin/podman" \
   "$sandbox/bin/trunk" "$sandbox/checkout/target/debug/crono-server"
 touch "$sandbox/checkout/public/ready"
 export PATH="$sandbox/bin:$PATH"
-export CRONO_AUTH_DEVELOPMENT_TOKEN="test-only-fake-stack-credential-123456789"
+unset CRONO_AUTH_DEVELOPMENT_TOKEN CRONO_AUTH_MODE
 
 read -r web_port api_port < <(python3 -c '
 import socket
@@ -67,6 +68,57 @@ first_pid=$!
 launchers+=("$first_pid")
 wait_for_ready
 
+# Startup works without credentials in the caller's environment and persists a
+# reusable private random token. It never puts the value in startup output.
+token_file="$sandbox/checkout/target/dev-auth/token"
+generated_token="$(cat "$token_file")"
+[[ "$generated_token" =~ ^[a-f0-9]{64}$ ]]
+[[ "$(stat -c %a "$token_file")" == 600 ]]
+[[ "$(stat -c %a "${token_file%/*}")" == 700 ]]
+[[ "$(stat -c %a "${token_file%/*}/Trunk.toml")" == 600 ]]
+if grep -Fq "$generated_token" "$sandbox/start-one.log"; then
+  echo "Development token appeared in startup logs" >&2
+  exit 1
+fi
+grep -Fq 'request_headers = { Authorization = "Bearer ' "${token_file%/*}/Trunk.toml"
+grep -Fq "backend = \"http://127.0.0.1:$api_port/api/\"" "${token_file%/*}/Trunk.toml"
+
+# Configuration failures leave a running stack intact. Reserved OIDC mode
+# cannot silently enable the development provider.
+if CRONO_AUTH_DEVELOPMENT_TOKEN=invalid bash "$sandbox/checkout/scripts/dev-stack.sh" \
+  start 127.0.0.1 "$web_port" "$api_port" -v >"$sandbox/invalid-token.log" 2>&1; then
+  echo "Start accepted an invalid development token" >&2
+  exit 1
+fi
+grep -q 'must be a random Bearer token' "$sandbox/invalid-token.log"
+kill -0 "$first_pid"
+if CRONO_AUTH_MODE=oidc bash "$sandbox/checkout/scripts/dev-stack.sh" \
+  start 127.0.0.1 "$web_port" "$api_port" -v >"$sandbox/oidc.log" 2>&1; then
+  echo "Start silently accepted the unimplemented OIDC provider" >&2
+  exit 1
+fi
+grep -q 'OIDC authentication is not implemented' "$sandbox/oidc.log"
+kill -0 "$first_pid"
+if CRONO_AUTH_MODE='' bash "$sandbox/checkout/scripts/dev-stack.sh" \
+  start 127.0.0.1 "$web_port" "$api_port" -v >"$sandbox/empty-mode.log" 2>&1; then
+  echo "Start accepted an explicitly empty authentication mode" >&2
+  exit 1
+fi
+grep -q 'CRONO_AUTH_MODE must be development or oidc' "$sandbox/empty-mode.log"
+kill -0 "$first_pid"
+
+# A corrupted saved credential fails closed without replacing it or terminating
+# the running API. Restore the saved value before testing a normal restart.
+printf '%s\n' invalid > "$token_file"
+if bash "$sandbox/checkout/scripts/dev-stack.sh" start 127.0.0.1 \
+  "$web_port" "$api_port" -v >"$sandbox/corrupted-token.log" 2>&1; then
+  echo "Start accepted or regenerated a corrupted development token" >&2
+  exit 1
+fi
+[[ "$(cat "$token_file")" == invalid ]]
+kill -0 "$first_pid"
+printf '%s\n' "$generated_token" > "$token_file"
+
 bash "$sandbox/checkout/scripts/dev-stack.sh" start 127.0.0.1 \
   "$web_port" "$api_port" -v >"$sandbox/start-two.log" 2>&1 &
 second_pid=$!
@@ -85,6 +137,8 @@ if ! wait "$first_pid"; then
 fi
 wait_for_ready
 kill -0 "$second_pid"
+[[ "$(cat "$token_file")" == "$generated_token" ]]
+echo "Automatic development authentication regression checks passed"
 
 # Stop must work without relying on the original just launcher or its traps.
 kill -KILL "$second_pid" 2>/dev/null || true
@@ -100,6 +154,61 @@ kill -0 "$outsider_pid"
 # A repeated stop should also be harmless.
 bash "$sandbox/checkout/scripts/dev-stack.sh" stop
 echo "Development stack start/stop regression checks passed"
+
+# Explicit credentials override the generated secret without changing its
+# persisted default. The all-interface proxy supplies the same credential so
+# remote browser testing also needs no session-storage setup.
+explicit_token="test-only-explicit-stack-credential-123456789"
+CRONO_AUTH_DEVELOPMENT_TOKEN="$explicit_token" RUST_LOG=trace \
+  bash "$sandbox/checkout/scripts/dev-stack.sh" start 0.0.0.0 \
+  "$web_port" "$api_port" -v >"$sandbox/network.log" 2>&1 &
+network_pid=$!
+launchers+=("$network_pid")
+wait_for_ready
+if ! grep -q 'request_headers' "${token_file%/*}/Trunk.toml"; then
+  echo "Network-facing development proxy did not supply authentication" >&2
+  exit 1
+fi
+python3 - "$sandbox/checkout" "$explicit_token" "$web_port" <<'PY'
+import pathlib
+import sys
+
+root, token, web_port = sys.argv[1:]
+config = pathlib.Path(root, 'target/dev-auth/Trunk.toml').read_text()
+assert f'Authorization = "Bearer {token}"' in config, 'Remote proxy did not use the explicit token'
+tcp = pathlib.Path('/proc/net/tcp').read_text().splitlines()
+# The all-zero local address denotes an all-interface IPv4 listener.
+assert any(line.split()[1].startswith('00000000:') and line.split()[3] == '0A'
+           and int(line.split()[1].split(':')[1], 16) == int(web_port)
+           for line in tcp[1:]), 'Development web did not listen on all interfaces'
+seen = set()
+for process in pathlib.Path('/proc').iterdir():
+    if not process.name.isdigit():
+        continue
+    try:
+        env = (process / 'environ').read_bytes().split(b'\0')
+        argv = (process / 'cmdline').read_bytes()
+    except OSError:
+        continue
+    if f'CRONO_DEV_STACK_ROOT={root}'.encode() not in env:
+        continue
+    assert token.encode() not in argv, 'Development token appeared in process arguments'
+    if b'CRONO_DEV_ROLE=server' in env:
+        assert f'CRONO_AUTH_DEVELOPMENT_TOKEN={token}'.encode() in env, 'Explicit token not inherited by API'
+        seen.add('server')
+    if b'CRONO_DEV_ROLE=web' in env:
+        assert b'RUST_LOG=info,trunk::serve::proxy=off' in env, 'Unsafe proxy logging filter'
+        seen.add('web')
+assert seen == {'server', 'web'}, 'Development processes not found'
+PY
+[[ "$(cat "$token_file")" == "$generated_token" ]]
+if grep -Fq "$explicit_token" "$sandbox/network.log"; then
+  echo "Explicit development token appeared in startup logs" >&2
+  exit 1
+fi
+bash "$sandbox/checkout/scripts/dev-stack.sh" stop-apps
+wait "$network_pid"
+echo "Explicit credentials and network-facing proxy regression checks passed"
 
 # An unrelated listener must be reported, never terminated to free a port.
 python3 -m http.server "$api_port" --bind 127.0.0.1 \

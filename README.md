@@ -339,17 +339,18 @@ The server, worker, and CLI run on Unix only (Linux and macOS); Windows is not s
 
 Resource routes use `/api` directly; there is no `/api/v1` or draft compatibility layer. `crono-server-openapi` prints the route-derived OpenAPI document; the committed copy and its checks are described in [API contract](#api-contract).
 
-Configure development authentication first: set `CRONO_AUTH_MODE=development` and
-`CRONO_AUTH_DEVELOPMENT_TOKEN` to a private random Bearer value of at least 32 bytes.
-For example, `export CRONO_AUTH_DEVELOPMENT_TOKEN="$(openssl rand -hex 32)"`.
-The server fails startup if the token is missing; `oidc` mode is reserved and fails
-until implemented. All resource API requests require this credential. Set
-`sessionStorage.setItem('crono.access_token', '<configured development token>')`
-in the frontend tab's DevTools console and reload. The token is read at runtime,
-never compiled into the web bundle. See [AUTHORIZATION.md](AUTHORIZATION.md).
-
 Run `just dev-start` to launch the API and live-reloading web application
-together. It stops stale server and web processes from this checkout, prepares
+together. The web listener binds all IPv4 interfaces: open `http://127.0.0.1:3000`
+locally or `http://<server-ip>:3000` from your laptop. No token export or DevTools setup is
+needed: the launcher generates a private random development Bearer token once
+and reuses it from the ignored, owner-only `target/dev-auth/token` file. An
+explicit `CRONO_AUTH_DEVELOPMENT_TOKEN` takes priority. The development Trunk proxy
+supplies the token to the API, which still verifies every request through its
+normal authentication provider and authorizer. The token is never printed or
+compiled into browser assets. OpenSSL is required to generate the initial token.
+See [AUTHORIZATION.md](AUTHORIZATION.md).
+
+The launcher stops stale server and web processes from this checkout, prepares
 PostgreSQL and NATS, builds the API, then launches the built server and Trunk
 directly. It waits for API readiness before starting the web proxy and stops
 the sibling process when either application exits. Running it again replaces
@@ -372,14 +373,29 @@ accepted connection without permitting two live listeners on one port. A
 one-time restart from an older binary that lacked this socket option may still
 need its closed TCP connections to expire.
 
-The common development workflow is:
+Automatic authentication works for both local and remote development browsers.
+Anyone who can reach the development web port has full development access, so
+use a trusted testing network. Run `just dev-start 127.0.0.1` for local-only access.
+Custom web and API ports are supported, for example `just dev-start 127.0.0.1 3001 8081`;
+the generated proxy configuration follows the selected API port.
+
+The common development workflow uses two terminals:
+
+```sh
+just dev-start
+```
+
+```sh
+just worker
+```
+
+When starting the server separately, configure its credential explicitly:
 
 ```sh
 export CRONO_AUTH_MODE=development
 export CRONO_AUTH_DEVELOPMENT_TOKEN="$(openssl rand -hex 32)"
 just dev-infra
 cargo run --locked -p crono-server --bin crono-server -- --port 8080
-just worker
 ```
 
 `just worker` starts a hostname-labeled worker on the `default` Queue with concurrency `3`,
