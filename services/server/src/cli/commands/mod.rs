@@ -1,5 +1,6 @@
 //! Clap definitions only; dispatch validates and selects the action.
 
+use crate::authentication::AuthMode;
 use clap::{
     Arg, ArgAction, ColorChoice, Command,
     builder::styling::{AnsiColor, Effects, Styles},
@@ -29,6 +30,14 @@ pub fn new() -> Command {
         .color(ColorChoice::Auto)
         .styles(styles)
         .about(env!("CARGO_PKG_DESCRIPTION"))
+        .arg(
+            Arg::new("auth-mode")
+                .long("auth-mode")
+                .env("CRONO_AUTH_MODE")
+                .default_value("development")
+                .value_parser(clap::value_parser!(AuthMode))
+                .help("Authentication provider: development requires CRONO_AUTH_DEVELOPMENT_TOKEN; oidc is not implemented"),
+        )
         .arg(
             Arg::new("verbose")
                 .short('v')

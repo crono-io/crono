@@ -37,6 +37,7 @@ serde.workspace = true
 serde_json.workspace = true
 socket2.workspace = true
 sqlx.workspace = true
+subtle.workspace = true
 time.workspace = true
 tokio = { workspace = true, features = ["net", "signal"] }
 tokio-util.workspace = true
@@ -53,6 +54,7 @@ tokio = { workspace = true, features = ["net", "process", "sync", "time"] }
 tokio-stream.workspace = true
 tonic.workspace = true
 tower.workspace = true
+tracing-subscriber.workspace = true
 
 [build-dependencies]
 built.workspace = true

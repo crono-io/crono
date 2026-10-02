@@ -1,5 +1,6 @@
 //! Convert parsed arguments into the service's typed action contract.
 
+use crate::authentication::AuthMode;
 use crate::cli::actions::{Action, server};
 use anyhow::{Context, Result};
 use clap::ArgMatches;
@@ -15,5 +16,9 @@ pub fn handler(matches: &ArgMatches) -> Result<Action> {
         .copied()
         .context("missing server port")?;
 
-    Ok(Action::Server(server::Args { port }))
+    let auth_mode = matches
+        .get_one::<AuthMode>("auth-mode")
+        .copied()
+        .context("missing authentication mode")?;
+    Ok(Action::Server(server::Args { port, auth_mode }))
 }

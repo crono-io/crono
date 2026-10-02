@@ -8,7 +8,10 @@ mod support;
 
 use anyhow::{Result, bail};
 use crono_server::{
-    application::{Application, ApplicationError, DevelopmentIdentity, PermitAllAuthorizer},
+    application::{
+        Application, ApplicationError, PermitAllAuthorizer, Principal, PrincipalKind,
+        RequestContext,
+    },
     infrastructure::{DatabasePoolConfig, PostgresStore},
 };
 use sqlx::PgPool;
@@ -30,7 +33,10 @@ async fn default_target_keeps_its_name_but_accepts_argument_edits() -> Result<()
     .await?;
     let store = PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?;
     let app = Application::new(Arc::new(store), Arc::new(PermitAllAuthorizer));
-    let context = DevelopmentIdentity.context(Uuid::now_v7());
+    let context = RequestContext::new(
+        Uuid::now_v7(),
+        Principal::new("development/local".to_string(), PrincipalKind::Development),
+    );
     assert!(matches!(
         app.update_target(
             &context,

@@ -2,8 +2,9 @@
 //!
 //! Routes are wrapped in three transport layers. Request-ID assignment runs
 //! first and mints a server-owned `UUIDv7` correlation ID; the trace layer then
-//! opens a span carrying the method, matched route, and that ID; identity
-//! runs last and builds the trusted `RequestContext` from the same ID. The ID
+//! opens a span carrying the method, matched route, and that ID; authentication
+//! verifies credentials last and builds `RequestContext` from the Principal and ID.
+//! Operational endpoints remain public and perform no application use case. The ID
 //! is returned to callers in `x-request-id`, and a client-supplied value is
 //! never adopted as the correlation ID (see [`request_id`]).
 //!
@@ -21,6 +22,7 @@
 
 use crate::{
     application::{Application, ControlPlaneStore},
+    authentication::AuthProvider,
     infrastructure::{DispatcherConfig, NatsPublisher, run_dispatcher, run_worker_control},
     reconciliation::run_reconciler,
     scheduler::run_scheduler,
@@ -38,10 +40,10 @@ use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 use utoipa_axum::router::OpenApiRouter;
 
+mod authentication;
 mod error;
 mod extract;
 pub(crate) mod handlers;
-mod identity;
 mod openapi;
 mod request_id;
 mod state;
@@ -58,8 +60,23 @@ fn router(state: state::AppState) -> OpenApiRouter {
 ///
 /// Fallbacks are attached before the transport layers so their responses are
 /// correlated and traced like any routed response.
-fn app(router: Router) -> Router {
-    with_transport_layers(with_fallbacks(router))
+fn app(router: Router, provider: Arc<dyn AuthProvider>) -> Router {
+    with_transport_layers(with_fallbacks(router), provider)
+}
+
+/// Build the complete HTTP boundary with independently injected policy and verifier.
+///
+/// This is the same router used by `serve`; credentials are verified before
+/// any protected handler extracts input or calls its authorization-enforcing use case.
+pub fn build_router(
+    application: Application,
+    store: Arc<dyn ControlPlaneStore>,
+    publisher: NatsPublisher,
+    provider: Arc<dyn AuthProvider>,
+) -> Router {
+    let state = state::AppState::new(application, store, publisher);
+    let (router, _openapi) = router(state).split_for_parts();
+    app(router, provider)
 }
 
 /// Answer unmatched paths and unsupported methods with the error envelope.
@@ -88,16 +105,19 @@ async fn method_not_allowed() -> error::ApiError {
     )
 }
 
-/// Wrap routes in the correlation, tracing, and identity layers.
+/// Wrap routes in the correlation, tracing, and authentication layers.
 ///
 /// Axum runs the last-added layer first, so requests pass through
-/// [`request_id::assign`], then the trace span, then [`identity::establish`].
+/// [`request_id::assign`], then the trace span, then [`authentication::establish`].
 /// Both inner layers read the ID the outer one inserted, so this order is
 /// required. Applying the layers after routing also exposes `MatchedPath` to
 /// the span.
-fn with_transport_layers(router: Router) -> Router {
+fn with_transport_layers(router: Router, provider: Arc<dyn AuthProvider>) -> Router {
     router
-        .layer(middleware::from_fn(identity::establish))
+        .layer(middleware::from_fn_with_state(
+            provider,
+            authentication::establish,
+        ))
         .layer(TraceLayer::new_for_http().make_span_with(request_id::make_span))
         .layer(middleware::from_fn(request_id::assign))
 }
@@ -113,13 +133,17 @@ pub async fn serve(
     store: Arc<dyn ControlPlaneStore>,
     publisher: NatsPublisher,
     dispatcher_config: DispatcherConfig,
+    auth_provider: Arc<dyn AuthProvider>,
 ) -> Result<()> {
     let (listener, listen_addr) = bind_listener(port)?;
     let listener = tokio::net::TcpListener::from_std(listener)
         .context("failed to create asynchronous API listener")?;
-    let state = state::AppState::new(application, Arc::clone(&store), publisher.clone());
-    let (router, _openapi) = router(state).split_for_parts();
-    let app = app(router);
+    let app = build_router(
+        application,
+        Arc::clone(&store),
+        publisher.clone(),
+        auth_provider,
+    );
 
     let cancellation = CancellationToken::new();
     let connection_publisher = publisher.clone();
@@ -283,6 +307,12 @@ mod tests {
     use tower::ServiceExt;
     use uuid::Uuid;
 
+    const TEST_TOKEN: &str = "test-only-credential-for-router-tests-1234";
+
+    fn authenticated_request() -> axum::http::request::Builder {
+        Request::builder().header("authorization", format!("Bearer {TEST_TOKEN}"))
+    }
+
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct ProbeBody {
@@ -313,16 +343,22 @@ mod tests {
     async fn accept_page(ApiQuery(_query): ApiQuery<handlers::control_plane::PageQuery>) {}
 
     /// Probe routes composed exactly as `serve` composes the real API.
-    fn probe_app() -> Router {
-        app(Router::new()
-            .route("/probe", get(echo_request_id).post(echo_body))
-            .route("/probe/{id}", get(echo_path))
-            .route("/probe-query", get(echo_query))
-            .route("/probe-page", get(accept_page)))
+    fn probe_app() -> Result<Router> {
+        let provider = crate::authentication::DevelopmentAuthProvider::new(
+            crate::authentication::BearerToken::new(TEST_TOKEN.to_string())?,
+        )?;
+        Ok(app(
+            Router::new()
+                .route("/probe", get(echo_request_id).post(echo_body))
+                .route("/probe/{id}", get(echo_path))
+                .route("/probe-query", get(echo_query))
+                .route("/probe-page", get(accept_page)),
+            Arc::new(provider),
+        ))
     }
 
     fn json_request(body: impl Into<Body>) -> Result<Request<Body>> {
-        Ok(Request::builder()
+        Ok(authenticated_request()
             .method("POST")
             .uri("/probe")
             .header("content-type", "application/json")
@@ -370,11 +406,11 @@ mod tests {
 
     #[tokio::test]
     async fn responses_carry_server_generated_request_id() -> Result<()> {
-        let request = Request::builder()
+        let request = authenticated_request()
             .uri("/probe")
             .header(REQUEST_ID_HEADER, "client-chosen")
             .body(Body::empty())?;
-        let response = probe_app().oneshot(request).await?;
+        let response = probe_app()?.oneshot(request).await?;
 
         assert_eq!(response.status(), StatusCode::OK);
         let issued = issued_request_id(&response)?;
@@ -386,13 +422,13 @@ mod tests {
 
     #[tokio::test]
     async fn each_request_receives_a_distinct_request_id() -> Result<()> {
-        let app = probe_app();
+        let app = probe_app()?;
         let first = app
             .clone()
-            .oneshot(Request::builder().uri("/probe").body(Body::empty())?)
+            .oneshot(authenticated_request().uri("/probe").body(Body::empty())?)
             .await?;
         let second = app
-            .oneshot(Request::builder().uri("/probe").body(Body::empty())?)
+            .oneshot(authenticated_request().uri("/probe").body(Body::empty())?)
             .await?;
         assert_ne!(issued_request_id(&first)?, issued_request_id(&second)?);
         Ok(())
@@ -400,8 +436,12 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_route_returns_not_found_envelope() -> Result<()> {
-        let response = probe_app()
-            .oneshot(Request::builder().uri("/missing").body(Body::empty())?)
+        let response = probe_app()?
+            .oneshot(
+                authenticated_request()
+                    .uri("/missing")
+                    .body(Body::empty())?,
+            )
             .await?;
         assert_envelope(response, StatusCode::NOT_FOUND, "not_found").await?;
         Ok(())
@@ -410,9 +450,9 @@ mod tests {
     #[tokio::test]
     async fn unsupported_method_returns_method_not_allowed_envelope_with_allow_header() -> Result<()>
     {
-        let response = probe_app()
+        let response = probe_app()?
             .oneshot(
-                Request::builder()
+                authenticated_request()
                     .method("DELETE")
                     .uri("/probe")
                     .body(Body::empty())?,
@@ -435,7 +475,7 @@ mod tests {
 
     #[tokio::test]
     async fn well_formed_requests_pass_through_the_wrappers() -> Result<()> {
-        let app = probe_app();
+        let app = probe_app()?;
         let body = app
             .clone()
             .oneshot(json_request(r#"{"name":"probe"}"#)?)
@@ -445,7 +485,7 @@ mod tests {
         let path = app
             .clone()
             .oneshot(
-                Request::builder()
+                authenticated_request()
                     .uri(format!("/probe/{id}"))
                     .body(Body::empty())?,
             )
@@ -453,7 +493,7 @@ mod tests {
         assert_eq!(path.status(), StatusCode::OK);
         let query = app
             .oneshot(
-                Request::builder()
+                authenticated_request()
                     .uri("/probe-query?limit=7")
                     .body(Body::empty())?,
             )
@@ -464,14 +504,14 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_json_returns_invalid_request_envelope() -> Result<()> {
-        let response = probe_app().oneshot(json_request("{\"name\":")?).await?;
+        let response = probe_app()?.oneshot(json_request("{\"name\":")?).await?;
         assert_envelope(response, StatusCode::BAD_REQUEST, "invalid_request").await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn unknown_json_field_returns_invalid_request_envelope() -> Result<()> {
-        let response = probe_app()
+        let response = probe_app()?
             .oneshot(json_request(r#"{"name":"probe","role":"admin"}"#)?)
             .await?;
         assert_envelope(response, StatusCode::BAD_REQUEST, "invalid_request").await?;
@@ -480,9 +520,9 @@ mod tests {
 
     #[tokio::test]
     async fn missing_content_type_returns_unsupported_media_type_envelope() -> Result<()> {
-        let response = probe_app()
+        let response = probe_app()?
             .oneshot(
-                Request::builder()
+                authenticated_request()
                     .method("POST")
                     .uri("/probe")
                     .body(Body::from(r#"{"name":"probe"}"#))?,
@@ -501,16 +541,16 @@ mod tests {
     async fn oversized_body_returns_payload_too_large_envelope() -> Result<()> {
         // Axum's default body limit is 2 MiB; exceed it by one byte.
         let oversized = vec![b' '; 2 * 1024 * 1024 + 1];
-        let response = probe_app().oneshot(json_request(oversized)?).await?;
+        let response = probe_app()?.oneshot(json_request(oversized)?).await?;
         assert_envelope(response, StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large").await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn non_uuid_path_returns_invalid_request_envelope() -> Result<()> {
-        let response = probe_app()
+        let response = probe_app()?
             .oneshot(
-                Request::builder()
+                authenticated_request()
                     .uri("/probe/not-a-uuid")
                     .body(Body::empty())?,
             )
@@ -521,11 +561,11 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_list_query_parameter_is_rejected() -> Result<()> {
-        let app = probe_app();
+        let app = probe_app()?;
         let known = app
             .clone()
             .oneshot(
-                Request::builder()
+                authenticated_request()
                     .uri("/probe-page?limit=5&after=next")
                     .body(Body::empty())?,
             )
@@ -533,7 +573,7 @@ mod tests {
         assert_eq!(known.status(), StatusCode::OK);
         let unknown = app
             .oneshot(
-                Request::builder()
+                authenticated_request()
                     .uri("/probe-page?limit=5&statis=failed")
                     .body(Body::empty())?,
             )
@@ -544,9 +584,9 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_query_returns_invalid_request_envelope() -> Result<()> {
-        let response = probe_app()
+        let response = probe_app()?
             .oneshot(
-                Request::builder()
+                authenticated_request()
                     .uri("/probe-query?limit=many")
                     .body(Body::empty())?,
             )

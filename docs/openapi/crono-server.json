@@ -63,7 +63,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "put": {
         "tags": [
@@ -150,7 +155,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/monitor": {
@@ -190,7 +200,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/namespaces": {
@@ -248,7 +263,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -314,7 +334,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/namespaces/{namespace_id}": {
@@ -371,7 +396,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -437,7 +467,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/namespaces/{namespace_id}/jobs": {
@@ -514,7 +549,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -601,7 +641,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/namespaces/{namespace_id}/schedules": {
@@ -678,7 +723,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -765,7 +815,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/namespaces/{namespace_id}/target-sets": {
@@ -842,7 +897,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -929,7 +989,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/namespaces/{namespace_id}/targets": {
@@ -1006,7 +1071,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -1093,7 +1163,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/overview": {
@@ -1125,7 +1200,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/queues": {
@@ -1183,7 +1263,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -1249,7 +1334,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/queues/{queue_id}": {
@@ -1306,7 +1396,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "put": {
         "tags": [
@@ -1394,7 +1489,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -1459,7 +1559,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/runs": {
@@ -1562,7 +1667,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -1648,7 +1758,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/runs/{run_id}": {
@@ -1704,7 +1819,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/runs/{run_id}/attempts": {
@@ -1764,7 +1884,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/runs/{run_id}/events": {
@@ -1824,7 +1949,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/runs/{run_id}/rerun": {
@@ -1924,7 +2054,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/schedules/{schedule_id}": {
@@ -1980,7 +2115,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -2067,7 +2207,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/target-sets/{target_set_id}": {
@@ -2123,7 +2268,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "put": {
         "tags": [
@@ -2210,7 +2360,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/targets/{target_id}": {
@@ -2266,7 +2421,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "put": {
         "tags": [
@@ -2353,7 +2513,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -2419,7 +2584,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/workers": {
@@ -2477,7 +2647,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/workers/{worker_id}": {
@@ -2533,7 +2708,12 @@
           "503": {
             "$ref": "#/components/responses/DependencyUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/health": {
@@ -5016,7 +5196,7 @@
     },
     "responses": {
       "DependencyUnavailable": {
-        "description": "A required dependency such as PostgreSQL is unavailable; retry later.",
+        "description": "A required dependency such as the authentication provider, authorization policy, or PostgreSQL is unavailable; retry later.",
         "content": {
           "application/json": {
             "schema": {
@@ -5067,6 +5247,13 @@
       },
       "Unauthenticated": {
         "description": "Authentication is required.",
+        "headers": {
+          "WWW-Authenticate": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
         "content": {
           "application/json": {
             "schema": {
@@ -5084,6 +5271,12 @@
             }
           }
         }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
       }
     }
   },

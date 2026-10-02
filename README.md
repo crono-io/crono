@@ -305,7 +305,7 @@ When reviewing failure behavior, stop NATS after creating the definitions but be
 
 Every HTTP response carries an `x-request-id` header holding a server-issued UUIDv7. The same value appears as `request_id` on the request's log span, alongside the method and the matched route template (for example `/api/runs/{run_id}`), so a failing response can be matched to its server logs. Crono never adopts a client-supplied `x-request-id` as its correlation ID; a short, printable client value is logged separately as `client_request_id`. This header is unrelated to the `request_id` idempotency key in `POST /api/runs` and re-run request bodies.
 
-The System → Monitor page (`/monitor`) calls operator-authorized `GET /api/monitor` for a live, read-only snapshot. It refreshes every 30 seconds while open and can be refreshed manually; it does not retain history. PostgreSQL-backed counts show enabled and due Schedules, the earliest pending occurrence, unpublished outbox depth and age, queued and running Runs, and online worker presence. Database size covers the entire connected PostgreSQL database, not just the `crono` schema. Database connection count is database-wide, while connection-pool usage, JetStream availability, and the scheduler/publisher last successful database-poll times describe only the API instance answering the request. A missing database sample is shown as unavailable rather than reusing stale values. `MonitorRead` is a separate control-plane capability for a future operator policy; the current server-owned development identity grants it. The page does not expose credentials or execution payloads, and `/metrics` remains the source for Prometheus counters and long-term external monitoring.
+The System → Monitor page (`/monitor`) calls operator-authorized `GET /api/monitor` for a live, read-only snapshot. It refreshes every 30 seconds while open and can be refreshed manually; it does not retain history. PostgreSQL-backed counts show enabled and due Schedules, the earliest pending occurrence, unpublished outbox depth and age, queued and running Runs, and online worker presence. Database size covers the entire connected PostgreSQL database, not just the `crono` schema. Database connection count is database-wide, while connection-pool usage, JetStream availability, and the scheduler/publisher last successful database-poll times describe only the API instance answering the request. A missing database sample is shown as unavailable rather than reusing stale values. `MonitorRead` is a separate control-plane capability for a future operator policy; the current authenticated development principal receives it through PermitAllAuthorizer. The page does not expose credentials or execution payloads, and `/metrics` remains the source for Prometheus counters and long-term external monitoring.
 
 ## API contract
 
@@ -321,7 +321,7 @@ Breaking changes are checked with [oasdiff](https://github.com/oasdiff/oasdiff),
 
 Each `X.Y.Z` release publishes the tag's `docs/openapi/` to GitHub Pages from the Release workflow, and only while that tag is the highest promoted release, so the hosted reference always matches the latest released contract rather than whatever is deployed; the `API Docs` workflow republishes the highest promoted release's contract by hand. The page renders the committed JSON with a pinned Redoc bundle guarded by a Subresource Integrity hash. Run `just api-docs` to preview it locally at `http://127.0.0.1:8088`. Publishing requires Pages to use "GitHub Actions" as its source and the `github-pages` environment to allow tag deployments.
 
-[Schemathesis](https://schemathesis.readthedocs.io/) fuzzes the running server against the committed contract. It generates valid and invalid requests for every operation, chains create, read, and delete calls through inferred links, and checks that no request causes a server error, that invalid input is rejected with a documented `4xx`, and that every status, content type, and body matches the document. `schemathesis.toml` holds the tuning, and `scripts/schemathesis.sh` builds and starts the server, waits for `/ready`, and writes JUnit reports and the server log to `target/schemathesis/`. Run `just schemathesis` locally: it starts a disposable PostgreSQL container on port 55432 and the server on port 18080, points NATS at a closed port so no local worker executes fuzzed Jobs, and never touches the development database. The `API Fuzzing` workflow runs nightly with a fresh seed, and a manual run accepts `max-examples` and a `seed` from a previous report to reproduce its failures. Because every endpoint is open under the development authorizer, never point the fuzzer at a shared server.
+[Schemathesis](https://schemathesis.readthedocs.io/) fuzzes the running server against the committed contract. It generates valid and invalid requests for every operation, chains create, read, and delete calls through inferred links, and checks that no request causes a server error, that invalid input is rejected with a documented `4xx`, and that every status, content type, and body matches the document. `schemathesis.toml` holds the tuning, and `scripts/schemathesis.sh` builds and starts the server, waits for `/ready`, and writes JUnit reports and the server log to `target/schemathesis/`. Run `just schemathesis` locally: it starts a disposable PostgreSQL container on port 55432 and the server on port 18080, points NATS at a closed port so no local worker executes fuzzed Jobs, and never touches the development database. The `API Fuzzing` workflow runs nightly with a fresh seed, and a manual run accepts `max-examples` and a `seed` from a previous report to reproduce its failures. Each isolated fuzz run generates its own development Bearer token and supplies it through environment-based configuration with sanitized Authorization output. Authenticated requests receive every capability through the development authorizer; never point the fuzzer at a shared server.
 
 ## Workspace
 
@@ -337,7 +337,16 @@ The server, worker, and CLI run on Unix only (Linux and macOS); Windows is not s
 | `crates/execution` | Deterministic JSON input validation, merging, and argv template rendering |
 | `crates/telemetry` | Structured logging and optional OTLP export |
 
-Public routes use `/api` directly; there is no `/api/v1` or draft compatibility layer. `crono-server-openapi` prints the route-derived OpenAPI document; the committed copy and its checks are described in [API contract](#api-contract).
+Resource routes use `/api` directly; there is no `/api/v1` or draft compatibility layer. `crono-server-openapi` prints the route-derived OpenAPI document; the committed copy and its checks are described in [API contract](#api-contract).
+
+Configure development authentication first: set `CRONO_AUTH_MODE=development` and
+`CRONO_AUTH_DEVELOPMENT_TOKEN` to a private random Bearer value of at least 32 bytes.
+For example, `export CRONO_AUTH_DEVELOPMENT_TOKEN="$(openssl rand -hex 32)"`.
+The server fails startup if the token is missing; `oidc` mode is reserved and fails
+until implemented. All resource API requests require this credential. Set
+`sessionStorage.setItem('crono.access_token', '<configured development token>')`
+in the frontend tab's DevTools console and reload. The token is read at runtime,
+never compiled into the web bundle. See [AUTHORIZATION.md](AUTHORIZATION.md).
 
 Run `just dev-start` to launch the API and live-reloading web application
 together. It stops stale server and web processes from this checkout, prepares
@@ -366,6 +375,8 @@ need its closed TCP connections to expire.
 The common development workflow is:
 
 ```sh
+export CRONO_AUTH_MODE=development
+export CRONO_AUTH_DEVELOPMENT_TOKEN="$(openssl rand -hex 32)"
 just dev-infra
 cargo run --locked -p crono-server --bin crono-server -- --port 8080
 just worker

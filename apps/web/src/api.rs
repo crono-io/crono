@@ -5,6 +5,9 @@
 //! development, while production can route it to the independently deployed
 //! server. Structured error fields are retained so forms can place safe
 //! server-side validation messages beside the relevant control.
+//! The only credential source is `crono.access_token` in browser session storage.
+//! It is attached centrally as a Bearer header, never embedded in a URL, page,
+//! bundle, or error. No login, token issuance, or refresh flow is implemented.
 
 use crono_api::{
     CreateJobRequest, CreateNamespaceRequest, CreateQueueRequest, CreateRunRequest,
@@ -15,13 +18,14 @@ use crono_api::{
     UpdateQueueRequest, UpdateScheduleRequest, UpdateTargetRequest, UpdateTargetSetRequest,
     WorkerResource,
 };
-use gloo_net::http::{Request, Response};
+use gloo_net::http::{Headers, Request, RequestBuilder, Response};
 use serde::{Serialize, de::DeserializeOwned};
 use std::fmt::Write;
 use uuid::Uuid;
 
 const API_ROOT: &str = "/api";
 const MAX_COLLECTION_PAGES: usize = 100;
+const ACCESS_TOKEN_KEY: &str = "crono.access_token";
 
 /// Browser-safe API failure with optional field placement metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -319,7 +323,7 @@ pub async fn get_worker(worker_id: &str) -> ApiResult<crono_api::WorkerDetailsRe
 }
 
 async fn get<T: DeserializeOwned>(url: &str) -> ApiResult<T> {
-    let response = Request::get(url)
+    let response = authenticated(Request::get(url))?
         .send()
         .await
         .map_err(|error| client_error(format!("Crono API is unreachable: {error}")))?;
@@ -331,7 +335,7 @@ where
     T: DeserializeOwned,
     B: Serialize,
 {
-    let request = Request::post(url)
+    let request = authenticated(Request::post(url))?
         .json(body)
         .map_err(|error| client_error(format!("Could not encode the request: {error}")))?;
     let response = request
@@ -346,7 +350,7 @@ where
     T: DeserializeOwned,
     B: Serialize,
 {
-    let request = Request::put(url)
+    let request = authenticated(Request::put(url))?
         .json(body)
         .map_err(|error| client_error(format!("Could not encode the request: {error}")))?;
     let response = request
@@ -361,7 +365,7 @@ where
     T: DeserializeOwned,
     B: Serialize,
 {
-    let request = Request::patch(url)
+    let request = authenticated(Request::patch(url))?
         .json(body)
         .map_err(|error| client_error(format!("Could not encode the request: {error}")))?;
     let response = request
@@ -372,7 +376,7 @@ where
 }
 
 async fn delete_empty(url: &str) -> ApiResult<()> {
-    let response = Request::delete(url)
+    let response = authenticated(Request::delete(url))?
         .send()
         .await
         .map_err(|error| client_error(format!("Crono API is unreachable: {error}")))?;
@@ -433,9 +437,42 @@ fn client_error(message: String) -> ApiError {
     }
 }
 
+/// Attach the session's opaque credential to every API verb before encoding a body.
+///
+/// Missing credentials are sent without a header so the server returns its 401
+/// envelope. Inaccessible storage or invalid header bytes fail with a fixed,
+/// credential-free error. The browser does not verify identity or interpret claims.
+fn authenticated(request: RequestBuilder) -> ApiResult<RequestBuilder> {
+    let storage = web_sys::window()
+        .ok_or_else(|| client_error("Browser session storage is unavailable".to_string()))?
+        .session_storage()
+        .map_err(|_| client_error("Browser session storage is unavailable".to_string()))?;
+    let token = storage
+        .map(|storage| storage.get_item(ACCESS_TOKEN_KEY))
+        .transpose()
+        .map_err(|_| client_error("Could not read the API credential".to_string()))?
+        .flatten();
+    with_bearer(request, token.as_deref())
+}
+
+/// Build a header without propagating browser errors that could contain a secret.
+fn with_bearer(request: RequestBuilder, token: Option<&str>) -> ApiResult<RequestBuilder> {
+    let headers = web_sys::Headers::new()
+        .map_err(|_| client_error("Could not prepare API headers".to_string()))?;
+    if let Some(token) = token {
+        headers
+            .set("Authorization", &format!("Bearer {token}"))
+            .map_err(|_| {
+                client_error("The API credential cannot be used as a header".to_string())
+            })?;
+    }
+    Ok(request.headers(Headers::from_raw(headers)))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{jobs_path, targets_path};
+    use super::{ACCESS_TOKEN_KEY, authenticated, jobs_path, targets_path, with_bearer};
+    use gloo_net::http::Request;
     use uuid::Uuid;
     use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -451,5 +488,63 @@ mod tests {
             targets_path(namespace_id),
             format!("/api/namespaces/{namespace_id}/targets")
         );
+    }
+
+    #[wasm_bindgen_test]
+    fn all_http_verbs_read_session_credentials_without_embedding_them_in_urls() -> Result<(), String>
+    {
+        let window = web_sys::window().ok_or("missing window")?;
+        let storage = window
+            .session_storage()
+            .map_err(|_| "storage unavailable")?
+            .ok_or("storage unavailable")?;
+        let previous = storage
+            .get_item(ACCESS_TOKEN_KEY)
+            .map_err(|_| "could not read storage")?;
+        let token = "test-only-browser-credential-123456789";
+        storage
+            .set_item(ACCESS_TOKEN_KEY, token)
+            .map_err(|_| "could not set storage")?;
+        for builder in [
+            Request::get("/api/probe"),
+            Request::post("/api/probe"),
+            Request::put("/api/probe"),
+            Request::patch("/api/probe"),
+            Request::delete("/api/probe"),
+        ] {
+            let request = authenticated(builder)
+                .map_err(|error| error.message)?
+                .build()
+                .map_err(|_| "request invalid")?;
+            assert_eq!(
+                request.headers().get("authorization"),
+                Some(format!("Bearer {token}"))
+            );
+            assert!(!request.url().contains(token));
+        }
+        storage
+            .remove_item(ACCESS_TOKEN_KEY)
+            .map_err(|_| "could not clear storage")?;
+        let request = authenticated(Request::get("/api/probe"))
+            .map_err(|error| error.message)?
+            .build()
+            .map_err(|_| "request invalid")?;
+        assert_eq!(request.headers().get("authorization"), None);
+        if let Some(previous) = previous {
+            storage
+                .set_item(ACCESS_TOKEN_KEY, &previous)
+                .map_err(|_| "could not restore storage")?;
+        }
+        Ok(())
+    }
+
+    #[wasm_bindgen_test]
+    fn invalid_header_errors_do_not_expose_the_credential() {
+        let secret = "secret-with\ninvalid-header";
+        let result = with_bearer(Request::get("/api/probe"), Some(secret));
+        assert!(result.is_err());
+        if let Err(error) = result {
+            assert!(!error.message.contains(secret));
+        }
     }
 }

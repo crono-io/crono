@@ -8,7 +8,7 @@ use crono_api::OutputSnapshotRequest;
 use crono_server::{
     application::{
         Application, ApplicationError, AuthorizationError, Authorizer, Capability,
-        ControlPlaneStore, DevelopmentIdentity, JobDefinition, RequestContext, ResourceScope,
+        ControlPlaneStore, JobDefinition, Principal, PrincipalKind, RequestContext, ResourceScope,
         StoreError, TargetDefinition, VisibilityScope,
     },
     domain::{ExecutorKind, NamespaceId, NamespaceName, QueueName, ResourceName, RunId},
@@ -213,7 +213,10 @@ async fn attempt_output_is_ordered_and_scoped_to_authorized_runs() -> Result<()>
             visibility: visible.clone(),
         }),
     );
-    let context = DevelopmentIdentity.context(Uuid::now_v7());
+    let context = RequestContext::new(
+        Uuid::now_v7(),
+        Principal::new("development/local".to_string(), PrincipalKind::Development),
+    );
     assert_eq!(
         app.list_run_attempts(&context, run_id.get()).await?.len(),
         2

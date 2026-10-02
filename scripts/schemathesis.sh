@@ -24,6 +24,12 @@ mkdir -p "$report_dir"
 
 cargo build --locked -p crono-server --bin crono-server
 
+# Each isolated run gets its own credential. Environment substitution keeps
+# secrets out of command arguments; Schemathesis sanitizes Authorization output.
+export CRONO_AUTH_MODE=development
+CRONO_AUTH_DEVELOPMENT_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+export CRONO_AUTH_DEVELOPMENT_TOKEN
+
 server_pid=""
 stop_server() {
   if [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then

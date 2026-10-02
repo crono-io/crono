@@ -15,7 +15,9 @@ use super::{
 };
 use utoipa::openapi::{
     Components, ContentBuilder, InfoBuilder, License, OpenApi, OpenApiBuilder, PathItem, Ref,
-    RefOr, Response, ResponseBuilder, Tag, path::Operation,
+    RefOr, Response, ResponseBuilder, Tag,
+    path::Operation,
+    security::{Http, HttpAuthScheme, SecurityRequirement, SecurityScheme},
 };
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -54,7 +56,7 @@ const COMMON_RESPONSES: [(&str, &str, &str); 7] = [
     (
         "503",
         "DependencyUnavailable",
-        "A required dependency such as PostgreSQL is unavailable; retry later.",
+        "A required dependency such as the authentication provider, authorization policy, or PostgreSQL is unavailable; retry later.",
     ),
 ];
 
@@ -144,16 +146,31 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
 /// unauthenticated and document their own statuses.
 fn document_common_responses(openapi: &mut OpenApi) {
     let components = openapi.components.get_or_insert_with(Components::default);
-    for (_, name, description) in COMMON_RESPONSES {
+    components.security_schemes.insert(
+        "bearerAuth".to_string(),
+        RefOr::T(SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer))),
+    );
+    for (status, name, description) in COMMON_RESPONSES {
+        let mut response = error_response(description);
+        if status == "401" {
+            response.headers.insert(
+                "WWW-Authenticate".to_string(),
+                RefOr::T(utoipa::openapi::header::Header::default()),
+            );
+        }
         components
             .responses
-            .insert(name.to_string(), RefOr::T(error_response(description)));
+            .insert(name.to_string(), RefOr::T(response));
     }
     for (path, item) in &mut openapi.paths.paths {
         if !path.starts_with("/api/") {
             continue;
         }
         for operation in operations_mut(item) {
+            operation.security = Some(vec![SecurityRequirement::new(
+                "bearerAuth",
+                std::iter::empty::<String>(),
+            )]);
             let has_body = operation.request_body.is_some();
             let has_inputs = has_body
                 || operation

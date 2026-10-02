@@ -133,6 +133,8 @@ interface by default so the UI can be tested from another machine:
 ```sh
 just web
 just web 127.0.0.1 3001
+export CRONO_AUTH_MODE=development
+export CRONO_AUTH_DEVELOPMENT_TOKEN="$(openssl rand -hex 32)"
 just dev-start
 ```
 
@@ -219,9 +221,16 @@ inside pages. `crono-web` must not depend on `crono-server`, `crono-worker`,
 PostgreSQL, NATS, server repositories, or server domain/application types.
 Transport-only wire types are shared through `crono-api`.
 
-Credential authentication is intentionally not implemented. There is no login UI, OIDC,
-OAuth, PKCE, cookie/session handling, token storage, JWT processing, or RBAC in
-this foundation. The toolbar leaves room for future user and theme controls but
-keeps those placeholders disabled so it does not imply an authentication or
-preference contract. The server currently attaches its fixed development
-principal and executes the complete authorization interface in permit-all mode.
+The server verifies a configured development Bearer token through an injected
+AuthProvider before assigning `development/local`; the independently injected
+PermitAllAuthorizer still checks every application operation. Set
+`CRONO_AUTH_DEVELOPMENT_TOKEN` before starting the API. In the frontend tab's
+DevTools console, set `sessionStorage.setItem('crono.access_token', '<configured
+development token>')` on one line and reload. The shared API client attaches this
+credential to every request without embedding it in the bundle or URLs. Remove it
+with `sessionStorage.removeItem('crono.access_token')`. Missing/invalid tokens
+produce the server's safe 401 envelope. See [AUTHORIZATION.md](../../AUTHORIZATION.md)
+for startup configuration, trust boundaries, and the future external provider seam.
+There is no login UI, OAuth/OIDC flow, JWT processing, refresh-token handling,
+or RBAC in the web client. Disabled toolbar placeholders do not imply a user
+session contract.

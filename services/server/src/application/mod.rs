@@ -12,8 +12,8 @@ mod service;
 mod store;
 
 pub use auth::{
-    AuthorizationError, Authorizer, Capability, DevelopmentIdentity, PermitAllAuthorizer,
-    Principal, PrincipalKind, RequestContext, ResourceScope, VisibilityScope,
+    AuthorizationError, Authorizer, Capability, PermitAllAuthorizer, Principal, PrincipalKind,
+    RequestContext, ResourceScope, VisibilityScope,
 };
 pub use error::ApplicationError;
 pub use model::{

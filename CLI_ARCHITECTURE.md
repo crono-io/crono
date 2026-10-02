@@ -132,10 +132,12 @@ Every command must remain a thin client of the same public server application lo
 `crono-web`; it must never create jobs, runs, or schedules through CLI-only logic. Stable wire types
 or a separate SDK crate can be evaluated after the API exists, not before.
 
-Future interactive authentication may use OIDC Authorization Code with PKCE and a system browser.
-Browser sessions may independently use server-managed `HttpOnly` cookies, while automation may use
-scoped service credentials. These mechanisms must resolve to the same server-side principal and
-authorization model. This shell deliberately adds no token flag, token file, or credential store.
+Future HTTP client commands must supply opaque Bearer access credentials to Crono's
+resource-server boundary. The external IAM owns login and token issuance; the server's
+AuthProvider verifies credentials and returns the provider-neutral Principal used by
+the independent Authorizer. The development provider requires a configured static
+token, and the web client reads it from session storage. This CLI shell still has no
+HTTP transport, token flag, token file, or credential store. See [AUTHORIZATION.md](AUTHORIZATION.md).
 
 ## Telemetry
 

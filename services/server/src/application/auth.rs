@@ -1,6 +1,7 @@
 //! Replaceable identity and authorization contracts.
 //!
-//! Development uses a server-created principal and a permit-all policy, but
+//! Authentication providers supply verified principals to a separate policy;
+//! development uses a verified static credential and a permit-all policy, but
 //! every application operation still requests the same typed capability and
 //! resource scope that a future RBAC or external policy adapter will evaluate.
 //! Decisions are side-effect free and never trust client-provided roles.
@@ -19,21 +20,49 @@ pub enum PrincipalKind {
     System,
 }
 
-/// Opaque identity established before application use-case execution.
+/// Provider-neutral identity established before application use-case execution.
+///
+/// An external identity is the pair `(issuer, id)`, never an email address.
+/// Local identities have no issuer. Only trusted server/provider code may
+/// construct this type after verification; it cannot be deserialized from requests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Principal {
     id: String,
+    issuer: Option<String>,
     kind: PrincipalKind,
 }
 
 impl Principal {
+    /// Construct a server-local identity after verification by a trusted adapter.
     #[must_use]
     pub fn new(id: String, kind: PrincipalKind) -> Self {
-        Self { id, kind }
+        Self {
+            id,
+            issuer: None,
+            kind,
+        }
     }
+    /// Construct an external identity from a verified issuer and subject.
+    ///
+    /// The verifier must establish the issuer's trust and the subject's validity.
+    /// Policies must compare both values: subjects from different issuers differ.
+    #[must_use]
+    pub fn from_issuer(issuer: String, subject: String, kind: PrincipalKind) -> Self {
+        Self {
+            id: subject,
+            issuer: Some(issuer),
+            kind,
+        }
+    }
+    /// Return the opaque subject, scoped to `issuer()` for external identities.
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
+    }
+    /// Return the verified issuing authority, if this is an external identity.
+    #[must_use]
+    pub fn issuer(&self) -> Option<&str> {
+        self.issuer.as_deref()
     }
     #[must_use]
     pub const fn kind(&self) -> PrincipalKind {
@@ -49,6 +78,10 @@ pub struct RequestContext {
 }
 
 impl RequestContext {
+    /// Attach a server-issued correlation ID to an already verified principal.
+    ///
+    /// Trusted adapters must authenticate first; client request data cannot
+    /// construct this context or choose its authority.
     #[must_use]
     pub const fn new(request_id: Uuid, principal: Principal) -> Self {
         Self {
@@ -63,25 +96,6 @@ impl RequestContext {
     #[must_use]
     pub const fn principal(&self) -> &Principal {
         &self.principal
-    }
-}
-
-/// Development identity provider used until credential verification exists.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct DevelopmentIdentity;
-
-impl DevelopmentIdentity {
-    /// Build a server-owned development context for one HTTP request.
-    ///
-    /// `request_id` must be issued by the server, never read from the
-    /// request, because it is the correlation key shared with logs and the
-    /// `x-request-id` response header.
-    #[must_use]
-    pub fn context(self, request_id: Uuid) -> RequestContext {
-        RequestContext::new(
-            request_id,
-            Principal::new("development/local".to_string(), PrincipalKind::Development),
-        )
     }
 }
 
@@ -207,16 +221,19 @@ impl Authorizer for PermitAllAuthorizer {
 #[cfg(test)]
 mod tests {
     use super::{
-        Authorizer, Capability, DevelopmentIdentity, PermitAllAuthorizer, PrincipalKind,
+        Authorizer, Capability, PermitAllAuthorizer, Principal, PrincipalKind, RequestContext,
         ResourceScope, VisibilityScope,
     };
     use anyhow::Result;
     use uuid::Uuid;
 
     #[test]
-    fn development_identity_is_server_owned_and_request_scoped() {
+    fn context_retains_verified_identity_and_server_request_id() {
         let request_id = Uuid::now_v7();
-        let context = DevelopmentIdentity.context(request_id);
+        let context = RequestContext::new(
+            request_id,
+            Principal::new("development/local".to_string(), PrincipalKind::Development),
+        );
 
         assert_eq!(context.principal().id(), "development/local");
         assert_eq!(context.principal().kind(), PrincipalKind::Development);
@@ -225,7 +242,10 @@ mod tests {
 
     #[tokio::test]
     async fn permit_all_policy_exercises_typed_decisions() -> Result<()> {
-        let context = DevelopmentIdentity.context(Uuid::now_v7());
+        let context = RequestContext::new(
+            Uuid::now_v7(),
+            Principal::new("development/local".to_string(), PrincipalKind::Development),
+        );
         let policy = PermitAllAuthorizer;
         let capabilities = [
             Capability::NamespaceCreate,

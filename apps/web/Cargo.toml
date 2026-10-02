@@ -22,8 +22,8 @@ leptos_router.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+web-sys = { workspace = true, features = ["Headers", "Storage"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen.workspace = true
 wasm-bindgen-test.workspace = true
-web-sys.workspace = true

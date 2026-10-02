@@ -1,70 +1,181 @@
 # Authentication and authorization boundary
 
-Crono currently uses a development identity that deliberately accepts every
-operation. It is not an absence of authorization code: each HTTP request is
-assigned the server-owned principal `development/local`, and every application
-use case asks an injected `Authorizer` for a typed decision before it accesses
-persistence. Request bodies and headers cannot choose a principal, role, or
-permission.
+Authentication establishes who supplied a valid credential. Authorization is
+Crono-owned and determines whether that verified principal may perform a typed
+`Capability` on a `ResourceScope`, with `VisibilityScope` restricting reads.
+These are independently injected dependencies. HTTP handlers, application use
+cases, repositories, domain records, PostgreSQL, and NATS never parse tokens,
+JWTs, OAuth/OIDC claims, or provider-specific roles.
 
-The current `PermitAllAuthorizer` grants those decisions and returns visibility
-over all Namespaces. This keeps local domain and NATS testing frictionless while
-exercising the boundary that a production policy will replace. Startup emits a
-warning so the active trust model is visible. This mode is suitable only for a
-local development server behind a trusted network boundary.
-
-## Flow overview
+## Current request flow
 
 ```text
 HTTP request
-  -> request-ID middleware issues the correlation UUID
-  -> identity middleware creates RequestContext with that UUID
-  -> application parses canonical resource identity
-  -> Authorizer checks Capability + ResourceScope
-  -> Authorizer supplies Namespace visibility for reads
-  -> PostgreSQL applies visibility before pagination/counting
-  -> application returns domain records to the HTTP mapper
+     |
+     v
+server-issued request ID + trace span
+     |
+     v
+HTTP Authorization: Bearer <opaque token> extraction
+     |
+     v
+DevelopmentAuthProvider (configured static secret)
+     |
+     v
+development/local Principal
+     |
+     v
+RequestContext
+     |
+     v
+PermitAllAuthorizer
+     |
+     v
+Capability + ResourceScope + VisibilityScope
+     |
+     v
+Crono application/domain operation
 ```
 
-The `RequestContext` holds an opaque principal and a per-request correlation
-UUID. The server issues that UUID and returns it in the `x-request-id` response
-header; a client-supplied `x-request-id` is only logged, never adopted.
-`Capability` is the stable permission vocabulary: Namespace create/read,
-Job create/read/execute, Target create/read/use, and Run create/read.
-Schedule create/read/update and global Worker read complete the current
-vocabulary; worker presence is operational control-plane metadata rather than
-Namespace-owned data.
-`ResourceScope` identifies the control plane, Namespace, qualified Job,
-qualified Target, or Run involved in one decision. Run creation checks all
-three relevant permissions: creating the Run, executing the selected Job, and
-using the selected Target.
+`AuthProvider::authenticate(&RequestCredentials)` is asynchronous and independent
+of HTTP. The adapter accepts exactly one Authorization header with a
+case-insensitive Bearer scheme, one or more ASCII spaces, and a case-sensitive
+opaque token. The token alphabet follows [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750.html#section-2.1),
+with an 8 KiB bound; only trailing `=` padding is allowed. Duplicate/combined
+headers, unsupported schemes, malformed values, and missing credentials are
+rejected before handlers parse input. Query parameters, request bodies, cookies,
+and principal/role/capability headers cannot supply trusted identity or authority.
+Only the provider's successful result can create the HTTP `RequestContext`.
 
-List and count operations use `VisibilityScope`, which is either all
-Namespaces, a server-derived set of Namespace IDs, or none. The PostgreSQL
-adapter applies that scope inside its query, before pagination and aggregation.
-Reading an individual Run also applies the scope and returns not found when the
-Run is outside it, preventing existence disclosure. Authorization helpers are
-side-effect free; the authoritative database mutation occurs only after every
-required decision succeeds.
+The development verifier accepts exactly one configured secret and produces
+`development/local` with `PrincipalKind::Development`. Token bytes never become
+a principal identifier. `subtle` compares content in constant time for equal
+lengths; token length is not concealed. Credential/config/provider Debug output
+is redacted, and errors and HTTP traces do not contain credentials. Authentication
+failure never invokes the application or selects a permissive fallback.
 
-## Replacing development access
+`PermitAllAuthorizer` currently grants all defined capabilities and Namespace
+visibility after authentication. The token check does not bypass it: replacing
+the verifier does not change authorization, and replacing the policy does not
+change credential verification. Startup warns that this is temporary full-access
+development policy. Use it only in a controlled development/test environment.
 
-A credential verifier should replace only the development identity middleware.
-It validates a session, token, or mTLS identity and constructs the same
-`RequestContext` from the server-issued request ID; it must never copy roles or permissions directly from
-unverified client input. A production `Authorizer` then replaces
-`PermitAllAuthorizer` and evaluates the existing capabilities and scopes using
-verified claims plus authoritative server-side policy data.
+GET/HEAD on `/live`, `/ready`, `/health`, and `/metrics` remain public for probes
+and monitoring. They do not execute resource use cases. All other requests,
+including API fallbacks, require authentication. Keep operational endpoints behind
+an appropriate deployment network boundary. Public HTTP requires TLS termination;
+cleartext loopback is only a local development convenience.
 
-The transport, application use cases, domain model, PostgreSQL schema, and NATS
-dispatch format do not need an authentication refactor for that replacement.
-If production policy becomes an external dependency, failures map to
-`AuthorizationError::Unavailable` and deny access. Unauthenticated and
-forbidden decisions already map to distinct HTTP responses, while internal
-policy detail is not exposed to clients.
+## Configuration and development clients
 
-Authentication ownership is intentionally absent from the current database
-schema. Namespaces, Jobs, Targets, Runs, and the outbox model domain state; they
-do not contain provisional users, roles, password hashes, tokens, or provider
-identifiers. Identity and role storage should be added only with the selected
-authentication protocol and lifecycle requirements.
+`--auth-mode` / `CRONO_AUTH_MODE` selects the provider and defaults to `development`.
+`CRONO_AUTH_DEVELOPMENT_TOKEN` is mandatory, with no default or command-line token
+argument. Set it to a randomly generated Bearer value of 32–8192 bytes before
+starting the server or `just dev-start`, for example:
+
+```sh
+export CRONO_AUTH_MODE=development
+export CRONO_AUTH_DEVELOPMENT_TOKEN="$(openssl rand -hex 32)"
+just dev-start
+```
+
+Keep the value private; do not commit it or enable shell tracing while handling
+it. Short, malformed, missing, or non-Unicode configuration fails startup before
+PostgreSQL, NATS, or the listener is opened. Selecting `oidc` fails explicitly
+because that provider is not implemented, even if a development token is present.
+There are no unused issuer/audience/discovery placeholders in configuration.
+
+The web client reads the opaque credential centrally from browser **session
+storage**, scoped to the frontend origin and tab. Set it in that tab's DevTools
+console using the actual configured secret, then reload:
+
+```js
+sessionStorage.setItem('crono.access_token', '<configured development token>');
+location.reload();
+```
+
+Clear it with `sessionStorage.removeItem('crono.access_token')`. It is attached to
+GET/POST/PUT/PATCH/DELETE requests as an Authorization header, never built into the
+WASM bundle or sent in URLs. Missing credentials receive the server's 401 envelope.
+This temporary setup adds no login screen, cookie session, token issuance, or
+refresh flow. Browser storage is not an identity authority: the server still
+verifies every supplied credential. The CLI currently has no HTTP transport;
+future client requests must supply Bearer credentials through that client boundary.
+
+## Identity and authorization invariants
+
+`Principal` carries an opaque subject, optional verified issuer, and caller kind.
+An external identity is the **pair `(issuer, subject)`**; identical subjects from
+different issuers differ. Email and human profile fields are not identity keys or
+required fields. Human, service, system, and development principals share this
+provider-neutral representation. Only trusted provider/server code constructs it
+after verification; neither Principal nor RequestContext is deserialized from a
+client request. Future authority metadata must likewise be verified and neutral.
+
+The server issues each correlation UUID and returns it in `x-request-id`. A
+client-supplied request ID is never adopted as that UUID. RequestContext pairs it
+with the verified principal; it carries no JWT or OIDC claim object.
+
+Application use cases still ask the injected `Authorizer` for capabilities and
+resource scopes before persistence. Run creation checks Run creation, execution
+of the selected Job, and use of the selected Target. Global Worker and Monitor
+reads remain separate capabilities. Policy decisions are side-effect free and
+must use verified identity plus authoritative server policy, never client roles.
+
+Visibility is all Namespaces, a server-derived set of Namespace IDs, or none.
+The PostgreSQL adapter applies that scope before pagination, counts, and
+aggregation. An individual Run outside visibility remains not found, preserving
+resource-hiding behavior. Authentication does not move any of these decisions
+into middleware or query Jobs, Targets, Runs, or other Crono resources.
+
+Missing, malformed, unsupported, or invalid credentials return 401 with the safe
+`unauthenticated` envelope and `WWW-Authenticate: Bearer realm="crono"`.
+Verifier outages return a generic 503 without running authorization or handlers.
+An authenticated denial remains 403, or the existing 404 visibility semantics.
+Authorization outages remain 503. No failure establishes a development identity
+or falls back to PermitAll.
+
+## Future external authentication
+
+```text
+Bearer access token
+     |
+     v
+OIDC/OAuth AuthProvider
+(Permesi / Auth0 / Keycloak / Zitadel / another IAM)
+     |
+     v
+verified Principal
+     |
+     v
+RequestContext
+     |
+     v
+Production Authorizer
+     |
+     v
+Capability + ResourceScope + VisibilityScope
+     |
+     v
+Crono
+```
+
+Replace `DevelopmentAuthProvider` with an `OidcAuthProvider` (or an opaque-token
+introspection/workload credential verifier) at startup/router injection. Its
+configuration and implementation own trusted issuer, audience, signature,
+expiry/not-before, subject, and any required scope/claim validation. The stable
+result is Principal, so Jobs, Targets, Runs, and other application logic remain
+unchanged. Additional credential forms such as mTLS can extend the transport
+adapter and RequestCredentials without making JWT a domain concept.
+
+Independently replace `PermitAllAuthorizer` with a production Authorizer that
+interprets verified authority and authoritative Crono policy through the existing
+capability/resource/visibility contract. No complex RBAC or provisional IAM is
+introduced here. A fake external provider integration test exercises the same
+Namespace handler and injected policy using an issuer-scoped service principal.
+
+Crono's intended role is an OAuth2 resource server receiving access tokens. IAM
+providers own passwords, signup, resets, MFA/passkeys, login screens, grants,
+authorization-code exchange, and refresh-token issuance. None is implemented by
+this refactor. Crono's domain schema stores workload state, not users, passwords,
+provider claims, or tokens.

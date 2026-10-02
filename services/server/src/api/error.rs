@@ -9,7 +9,12 @@
 //! so a hostile request cannot inflate the response.
 
 use crate::application::{ApplicationError, AuthorizationError};
-use axum::{Json, http::StatusCode, response::IntoResponse};
+use crate::authentication::AuthenticationError;
+use axum::{
+    Json,
+    http::{HeaderValue, StatusCode, header::WWW_AUTHENTICATE},
+    response::IntoResponse,
+};
 use crono_api::{ErrorBody, ErrorEnvelope};
 use tracing::error;
 
@@ -19,6 +24,8 @@ const REJECTION_MESSAGE_MAX_CHARS: usize = 256;
 /// HTTP-safe error response.
 #[derive(Debug)]
 pub enum ApiError {
+    /// The verifier rejected a credential or could not verify it.
+    Authentication(AuthenticationError),
     /// A use case failed; mapped by its stable application meaning.
     Application(ApplicationError),
     /// The transport refused the request before any use case ran.
@@ -49,6 +56,22 @@ impl From<ApplicationError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
         let application = match self {
+            Self::Authentication(AuthenticationError::InvalidCredentials) => {
+                return envelope(
+                    StatusCode::UNAUTHORIZED,
+                    "unauthenticated",
+                    "valid authentication credentials are required".to_string(),
+                    None,
+                );
+            }
+            Self::Authentication(AuthenticationError::Unavailable) => {
+                return envelope(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "dependency_unavailable",
+                    "a required service is unavailable".to_string(),
+                    None,
+                );
+            }
             Self::Application(application) => application,
             Self::Rejected {
                 status,
@@ -126,7 +149,7 @@ fn envelope(
     message: String,
     field: Option<String>,
 ) -> axum::response::Response {
-    (
+    let mut response = (
         status,
         Json(ErrorEnvelope {
             error: ErrorBody {
@@ -136,7 +159,14 @@ fn envelope(
             },
         }),
     )
-        .into_response()
+        .into_response();
+    if status == StatusCode::UNAUTHORIZED {
+        response.headers_mut().insert(
+            WWW_AUTHENTICATE,
+            HeaderValue::from_static("Bearer realm=\"crono\""),
+        );
+    }
+    response
 }
 
 #[cfg(test)]
@@ -149,7 +179,7 @@ mod tests {
         let long = "é".repeat(REJECTION_MESSAGE_MAX_CHARS * 4);
         let message = match ApiError::rejected(StatusCode::BAD_REQUEST, "invalid_request", &long) {
             ApiError::Rejected { message, .. } => Some(message),
-            ApiError::Application(_) => None,
+            ApiError::Application(_) | ApiError::Authentication(_) => None,
         };
         assert_eq!(
             message.map(|message| message.chars().count()),

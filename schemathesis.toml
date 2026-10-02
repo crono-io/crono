@@ -3,11 +3,15 @@
 # Run it through `just schemathesis` (an isolated throwaway stack) or the
 # nightly `API Fuzzing` workflow; both use scripts/schemathesis.sh, which
 # supplies the base URL. Never point it at a shared or production server:
-# every endpoint is open under the development authorizer, including deletes.
+# authenticated requests receive all capabilities under the development authorizer, including deletes.
 
 workers = 4
 request-timeout = 10.0
 max-failures = 50
+headers = { Authorization = "Bearer ${CRONO_AUTH_DEVELOPMENT_TOKEN}" }
+
+[output.sanitization]
+enabled = true
 
 [generation]
 # Positive and negative data: valid requests must be accepted or rejected for

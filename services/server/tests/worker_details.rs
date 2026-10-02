@@ -8,8 +8,8 @@ use crono_api::{WorkerDiagnostics, WorkerHeartbeatRequest};
 use crono_server::{
     application::{
         Application, ApplicationError, AuthorizationError, Authorizer, Capability,
-        ControlPlaneStore, DevelopmentIdentity, PermitAllAuthorizer, RequestContext, ResourceScope,
-        VisibilityScope,
+        ControlPlaneStore, PermitAllAuthorizer, Principal, PrincipalKind, RequestContext,
+        ResourceScope, VisibilityScope,
     },
     domain::QueueName,
     infrastructure::{DatabasePoolConfig, PostgresStore},
@@ -79,7 +79,10 @@ async fn worker_details_are_authorized_and_legacy_heartbeats_remain_readable() -
         .record_worker_heartbeat(&heartbeat)
         .await
         .context("record first heartbeat")?;
-    let context = DevelopmentIdentity.context(Uuid::now_v7());
+    let context = RequestContext::new(
+        Uuid::now_v7(),
+        Principal::new("development/local".to_string(), PrincipalKind::Development),
+    );
     let allowed = Application::new(Arc::new(store.clone()), Arc::new(PermitAllAuthorizer));
     let details = allowed
         .get_worker(&context, &id)

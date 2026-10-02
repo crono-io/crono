@@ -10,8 +10,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use crono_server::{
     application::{
-        Application, AuthorizationError, Authorizer, Capability, ControlPlaneStore,
-        DevelopmentIdentity, RequestContext, ResourceScope, VisibilityScope,
+        Application, AuthorizationError, Authorizer, Capability, ControlPlaneStore, Principal,
+        PrincipalKind, RequestContext, ResourceScope, VisibilityScope,
     },
     infrastructure::{DatabasePoolConfig, PostgresStore},
 };
@@ -69,7 +69,10 @@ async fn monitor_samples_database_counts_and_rejects_unauthorized_readers() -> R
 
     let application = Application::new(Arc::new(store), Arc::new(DenyMonitor));
     let denied = application
-        .monitor_snapshot(&DevelopmentIdentity.context(Uuid::now_v7()))
+        .monitor_snapshot(&RequestContext::new(
+            Uuid::now_v7(),
+            Principal::new("development/local".to_string(), PrincipalKind::Development),
+        ))
         .await;
     assert!(matches!(
         denied,

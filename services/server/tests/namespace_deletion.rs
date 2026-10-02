@@ -11,8 +11,8 @@ use async_trait::async_trait;
 use crono_server::{
     application::{
         Application, ApplicationError, AuthorizationError, Authorizer, Capability,
-        ControlPlaneStore, DevelopmentIdentity, JobDefinition, PermitAllAuthorizer, RequestContext,
-        ResourceScope, StoreError, TargetDefinition, VisibilityScope,
+        ControlPlaneStore, JobDefinition, PermitAllAuthorizer, Principal, PrincipalKind,
+        RequestContext, ResourceScope, StoreError, TargetDefinition, VisibilityScope,
     },
     domain::{ExecutorKind, NamespaceId, NamespaceName, QueueName, ResourceName},
     infrastructure::{DatabasePoolConfig, PostgresStore},
@@ -30,7 +30,10 @@ async fn deleting_empty_namespace_releases_its_name_and_reports_missing_ids() ->
     let name = NamespaceName::parse(&format!("delete-ns-{}", Uuid::now_v7().simple()))?;
     let namespace = store.create_namespace(&name).await?;
     let app = Application::new(Arc::new(store.clone()), Arc::new(PermitAllAuthorizer));
-    let context = DevelopmentIdentity.context(Uuid::now_v7());
+    let context = RequestContext::new(
+        Uuid::now_v7(),
+        Principal::new("development/local".to_string(), PrincipalKind::Development),
+    );
     assert_eq!(
         app.list_jobs(&context, namespace.id().get(), None, None)
             .await?
@@ -123,7 +126,10 @@ async fn namespace_deletion_authorizes_before_default_and_existence_checks() -> 
         sqlx::query_scalar("SELECT id FROM crono.namespaces WHERE name = 'default'")
             .fetch_one(&pool)
             .await?;
-    let context = DevelopmentIdentity.context(Uuid::now_v7());
+    let context = RequestContext::new(
+        Uuid::now_v7(),
+        Principal::new("development/local".to_string(), PrincipalKind::Development),
+    );
     for id in [default_id, Uuid::now_v7()] {
         let app = Application::new(
             Arc::new(store.clone()),
@@ -173,7 +179,10 @@ async fn namespace_deletion_succeeds_only_after_its_last_target_is_removed() -> 
         )
         .await?;
     let app = Application::new(Arc::new(store.clone()), Arc::new(PermitAllAuthorizer));
-    let context = DevelopmentIdentity.context(Uuid::now_v7());
+    let context = RequestContext::new(
+        Uuid::now_v7(),
+        Principal::new("development/local".to_string(), PrincipalKind::Development),
+    );
     assert!(matches!(
         app.delete_namespace(&context, namespace.id().get()).await,
         Err(ApplicationError::InUse)
@@ -223,7 +232,10 @@ async fn namespace_deletion_preserves_definitions_and_run_history() -> Result<()
         )
         .await?;
     let app = Application::new(Arc::new(store.clone()), Arc::new(PermitAllAuthorizer));
-    let context = DevelopmentIdentity.context(Uuid::now_v7());
+    let context = RequestContext::new(
+        Uuid::now_v7(),
+        Principal::new("development/local".to_string(), PrincipalKind::Development),
+    );
     // A Job alone must block deletion before any Target exists.
     assert!(matches!(
         app.delete_namespace(&context, namespace.id().get()).await,

@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use crono_server::{
     application::{
         Application, ApplicationError, AuthorizationError, Authorizer, Capability,
-        ControlPlaneStore, DevelopmentIdentity, JobDefinition, JobRecord, PermitAllAuthorizer,
+        ControlPlaneStore, JobDefinition, JobRecord, PermitAllAuthorizer, Principal, PrincipalKind,
         RequestContext, ResourceScope, StoreError, TargetDefinition, VisibilityScope,
     },
     domain::{ExecutorKind, JobId, NamespaceId, NamespaceName, QueueName, ResourceName, TargetId},
@@ -43,7 +43,10 @@ async fn deleting_unused_target_removes_it_and_releases_its_name() -> Result<()>
         .create_target(namespace.id(), &name, &definition)
         .await?;
     let app = Application::new(Arc::new(store.clone()), Arc::new(PermitAllAuthorizer));
-    let context = DevelopmentIdentity.context(Uuid::now_v7());
+    let context = RequestContext::new(
+        Uuid::now_v7(),
+        Principal::new("development/local".to_string(), PrincipalKind::Development),
+    );
     app.delete_target(&context, target.target.id().get())
         .await?;
     assert!(matches!(
@@ -108,7 +111,10 @@ async fn deletion_authorizes_before_protection_or_existence_checks() -> Result<(
     .fetch_one(&pool)
     .await?;
     let store = PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?;
-    let context = DevelopmentIdentity.context(Uuid::now_v7());
+    let context = RequestContext::new(
+        Uuid::now_v7(),
+        Principal::new("development/local".to_string(), PrincipalKind::Development),
+    );
     for target_id in [id, Uuid::now_v7()] {
         let app = Application::new(
             Arc::new(store.clone()),
@@ -155,7 +161,10 @@ async fn deletion_preserves_target_sets_schedules_requests_and_run_history() -> 
         .await?;
     let id = target.target.id();
     let app = Application::new(Arc::new(store.clone()), Arc::new(PermitAllAuthorizer));
-    let context = DevelopmentIdentity.context(Uuid::now_v7());
+    let context = RequestContext::new(
+        Uuid::now_v7(),
+        Principal::new("development/local".to_string(), PrincipalKind::Development),
+    );
     let set = store
         .create_target_set(
             namespace.id(),
@@ -278,7 +287,10 @@ async fn verify_schedule_reference(
     job_id: JobId,
     target_id: TargetId,
 ) -> Result<()> {
-    let context = DevelopmentIdentity.context(Uuid::now_v7());
+    let context = RequestContext::new(
+        Uuid::now_v7(),
+        Principal::new("development/local".to_string(), PrincipalKind::Development),
+    );
     let schedule_id: Uuid = sqlx::query_scalar(
         "INSERT INTO crono.schedules (namespace_id, job_id, target_id, name, schedule_type, execute_at, enabled)
          VALUES ($1, $2, $3, 'once', 'once', statement_timestamp() + interval '1 day', false) RETURNING id",

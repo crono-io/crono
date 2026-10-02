@@ -66,6 +66,40 @@ fn openapi_contains_health_and_control_plane_contracts() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn every_resource_operation_requires_bearer_auth_and_operational_endpoints_remain_public()
+-> Result<()> {
+    let document = serde_json::to_value(crono_server::api::openapi())?;
+    assert_eq!(
+        document
+            .pointer("/components/securitySchemes/bearerAuth/type")
+            .and_then(Value::as_str),
+        Some("http")
+    );
+    assert_eq!(
+        document
+            .pointer("/components/securitySchemes/bearerAuth/scheme")
+            .and_then(Value::as_str),
+        Some("bearer")
+    );
+    assert!(
+        document
+            .pointer("/components/securitySchemes/bearerAuth/bearerFormat")
+            .is_none()
+    );
+    for (path, _, operation) in operations(&document) {
+        if path.starts_with("/api/") {
+            assert_eq!(
+                operation.get("security"),
+                Some(&serde_json::json!([{"bearerAuth": []}]))
+            );
+        } else {
+            assert!(operation.get("security").is_none());
+        }
+    }
+    Ok(())
+}
+
 /// Iterate `(path, method, operation)` for every operation in the document.
 fn operations(document: &Value) -> Vec<(&str, &str, &Value)> {
     document

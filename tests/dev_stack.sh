@@ -32,6 +32,7 @@ chmod +x "$sandbox/bin/just" "$sandbox/bin/cargo" "$sandbox/bin/podman" \
   "$sandbox/bin/trunk" "$sandbox/checkout/target/debug/crono-server"
 touch "$sandbox/checkout/public/ready"
 export PATH="$sandbox/bin:$PATH"
+export CRONO_AUTH_DEVELOPMENT_TOKEN="test-only-fake-stack-credential-123456789"
 
 read -r web_port api_port < <(python3 -c '
 import socket

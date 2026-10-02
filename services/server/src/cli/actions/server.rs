@@ -1,6 +1,6 @@
 //! HTTP server action boundary.
 //!
-//! Startup validates pool and outbox configuration before touching any
+//! Startup validates authentication, pool and outbox configuration before touching any
 //! dependency, connects the PostgreSQL pool, and hands it to the API. After the
 //! API and every background loop have stopped, the pool is closed so PostgreSQL
 //! sees a clean terminate for each connection rather than a dropped socket.
@@ -8,6 +8,7 @@
 use crate::{
     api,
     application::{Application, ControlPlaneStore, PermitAllAuthorizer},
+    authentication::{AuthConfig, AuthMode},
     infrastructure::{DatabasePoolConfig, DispatcherConfig, NatsPublisher, PostgresStore},
 };
 use anyhow::{Context, Result};
@@ -21,6 +22,8 @@ const POOL_CLOSE_TIMEOUT: Duration = Duration::from_secs(10);
 pub struct Args {
     /// TCP port exposed on the wildcard listener.
     pub port: u16,
+    /// Selected credential verifier; the secret is loaded outside command parsing.
+    pub auth_mode: AuthMode,
 }
 
 /// Run the Crono HTTP API until graceful shutdown.
@@ -31,6 +34,9 @@ pub struct Args {
 /// at startup, or the API listener or server fails.
 #[tracing::instrument(name = "server.serve", skip_all, fields(port = args.port))]
 pub async fn execute(args: Args) -> Result<()> {
+    let auth_provider = AuthConfig::from_env(args.auth_mode)
+        .context("failed to load authentication configuration")?
+        .into_provider();
     let database_url = env::var("CRONO_DATABASE_URL")
         .unwrap_or_else(|_| "postgres://crono_runtime@127.0.0.1:5432/crono".to_string());
     let nats_url =
@@ -48,9 +54,17 @@ pub async fn execute(args: Args) -> Result<()> {
 
     tracing::warn!(
         principal = "development/local",
-        "development authentication policy grants every defined capability"
+        "development Bearer authentication is active; PermitAllAuthorizer grants every defined capability"
     );
-    let result = api::serve(args.port, application, store, publisher, dispatcher_config).await;
+    let result = api::serve(
+        args.port,
+        application,
+        store,
+        publisher,
+        dispatcher_config,
+        auth_provider,
+    )
+    .await;
     if let Err(error) = &result {
         tracing::error!(%error, "Crono API server stopped with an error");
     }

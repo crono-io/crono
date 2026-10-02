@@ -38,6 +38,10 @@ fn command(port: u16, database_url: &str) -> Command {
         .env("RUST_LOG", "info")
         .env("CRONO_DATABASE_URL", database_url)
         .env("CRONO_NATS_URL", UNREACHABLE_NATS)
+        .env(
+            "CRONO_AUTH_DEVELOPMENT_TOKEN",
+            "test-only-telemetry-credential-123456789",
+        )
         .args(["--port", &port.to_string()])
         .kill_on_drop(true);
     command

@@ -19,7 +19,7 @@
 //!
 //! 1. [`assign`] mints the ID and inserts [`RequestId`].
 //! 2. [`make_span`] opens the trace span with method, matched route, and ID.
-//! 3. The identity middleware builds the [`RequestContext`] from the ID.
+//! 3. The authentication middleware builds the [`RequestContext`] from the ID.
 //! 4. [`assign`] writes the ID into the response header on the way out, which
 //!    also covers error responses produced by inner layers.
 //!

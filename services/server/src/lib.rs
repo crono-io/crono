@@ -7,6 +7,7 @@
 
 pub mod api;
 pub mod application;
+pub mod authentication;
 pub mod cli;
 pub mod domain;
 pub mod infrastructure;

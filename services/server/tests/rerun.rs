@@ -10,8 +10,9 @@ use anyhow::Result;
 use crono_api::{ExecutionSnapshot, ExecutionTrigger};
 use crono_server::{
     application::{
-        Application, ApplicationError, ControlPlaneStore, DevelopmentIdentity, JobDefinition,
-        PermitAllAuthorizer, RunListFilter, RunRecord, TargetDefinition, VisibilityScope,
+        Application, ApplicationError, ControlPlaneStore, JobDefinition, PermitAllAuthorizer,
+        Principal, PrincipalKind, RequestContext, RunListFilter, RunRecord, TargetDefinition,
+        VisibilityScope,
     },
     domain::{
         ExecutorKind, JobId, NamespaceId, NamespaceName, QueueId, QueueName, ResourceName, RunId,
@@ -54,7 +55,10 @@ async fn rerun_preserves_snapshot_and_repeats_only_selected_set_member() -> Resu
         vec!["hello invocation", "first"]
     );
     let app = Application::new(Arc::new(store.clone()), Arc::new(PermitAllAuthorizer));
-    let context = DevelopmentIdentity.context(Uuid::now_v7());
+    let context = RequestContext::new(
+        Uuid::now_v7(),
+        Principal::new("development/local".to_string(), PrincipalKind::Development),
+    );
     assert!(matches!(
         app.rerun_run(&context, source_id.get(), Uuid::now_v7())
             .await,
@@ -189,7 +193,10 @@ async fn verify_unrepeatable_runs(
         .await?;
     let duplicate = app
         .rerun_run(
-            &DevelopmentIdentity.context(Uuid::now_v7()),
+            &RequestContext::new(
+                Uuid::now_v7(),
+                Principal::new("development/local".to_string(), PrincipalKind::Development),
+            ),
             source_id.get(),
             request_id,
         )
@@ -201,7 +208,10 @@ async fn verify_unrepeatable_runs(
     );
     assert!(matches!(
         app.rerun_run(
-            &DevelopmentIdentity.context(Uuid::now_v7()),
+            &RequestContext::new(
+                Uuid::now_v7(),
+                Principal::new("development/local".to_string(), PrincipalKind::Development)
+            ),
             source_id.get(),
             Uuid::now_v7()
         )
@@ -217,7 +227,10 @@ async fn verify_unrepeatable_runs(
         .await?;
     assert!(matches!(
         app.rerun_run(
-            &DevelopmentIdentity.context(Uuid::now_v7()),
+            &RequestContext::new(
+                Uuid::now_v7(),
+                Principal::new("development/local".to_string(), PrincipalKind::Development)
+            ),
             source_id.get(),
             Uuid::now_v7()
         )

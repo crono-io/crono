@@ -204,6 +204,18 @@ start_stack() {
   local server_pid web_pid status attempt
   local ready=false
 
+  # Reject missing credentials before stopping a working stack. The server
+  # validates token syntax/length and mode before connecting to dependencies.
+  case "${CRONO_AUTH_MODE:-development}" in
+    development) ;;
+    oidc) echo "OIDC authentication is not implemented" >&2; return 2 ;;
+    *) echo "CRONO_AUTH_MODE must be development or oidc" >&2; return 2 ;;
+  esac
+  [[ -n "${CRONO_AUTH_DEVELOPMENT_TOKEN:-}" ]] || {
+    echo "Set CRONO_AUTH_DEVELOPMENT_TOKEN to a random development Bearer token before starting Crono" >&2
+    return 2
+  }
+
   valid_port "$web_port" && valid_port "$server_port" && [[ "$web_port" != "$server_port" ]] || {
     echo "Web and API ports must be distinct integers from 1 through 65535" >&2
     return 2
