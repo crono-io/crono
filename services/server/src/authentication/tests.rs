@@ -8,14 +8,16 @@ const TEST_TOKEN: &str = "test-only-development-token-1234567890";
 #[tokio::test]
 async fn only_the_configured_token_establishes_the_fixed_development_identity() -> Result<()> {
     let provider = DevelopmentAuthProvider::new(BearerToken::new(TEST_TOKEN.to_string())?)?;
-    let principal = provider
+    let caller = provider
         .authenticate(&RequestCredentials::Bearer(BearerToken::new(
             TEST_TOKEN.to_string(),
         )?))
         .await?;
+    let principal = caller.principal();
     assert_eq!(principal.id(), "development/local");
     assert_eq!(principal.issuer(), None);
     assert_eq!(principal.kind(), PrincipalKind::Development);
+    assert_eq!(caller.grants(), &GrantSet::development());
     for value in [
         "arbitrary",
         "development/local",

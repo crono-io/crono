@@ -79,6 +79,18 @@ selected UUID rather than a display name. Target Sets use the same pattern for
 multi-selection, and Job creation selects an enabled Queue by UUID. Loading,
 empty, stale-selection, API, and field validation
 states remain in the form so failed submissions do not discard entered values.
+
+The Target Sets page explains choosing members, adding shared inputs, and using
+the saved set in Run Job or Schedules. Read-only, expandable examples show a
+two-person greeting and an Ansible deployment to two inventory hosts, including
+the Job arguments, Target arguments, shared JSON, and separate per-member Runs.
+The greeting demonstrates a Target overriding a shared input; a separate example
+explains all four input layers and a manual Run override. These examples do not
+create resources or replace the draft. The form explains optional shared inputs,
+shows the number of Runs a Job request would create for the selected members,
+and links to Target creation when the Namespace has none. Examples sit beside
+the editor on wide screens and stack below it on smaller screens.
+
 Text fields, native selects, searchable resource selectors, and timezone
 selectors share one `crono-input` style: a 44 px control height, consistent
 padding, and visible focus and disabled states. Every block label leaves a
@@ -246,8 +258,8 @@ PostgreSQL, NATS, server repositories, or server domain/application types.
 Transport-only wire types are shared through `crono-api`.
 
 The server verifies a configured development Bearer token through an injected
-AuthProvider before assigning `development/local`; the independently injected
-PermitAllAuthorizer still checks every application operation. The `dev-start`
+AuthProvider before assigning `development/local` and explicit full grants; the
+independently injected GrantAuthorizer checks every application operation. The `dev-start`
 launcher supplies a private token to the server and development proxy. Outside
 that automatic proxy, set `CRONO_AUTH_DEVELOPMENT_TOKEN` before starting the API.
 In the frontend tab's

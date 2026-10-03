@@ -2,7 +2,7 @@
 
 use crate::{
     api::{app, request_id::REQUEST_ID_HEADER},
-    application::{Principal, PrincipalKind, RequestContext},
+    application::{AuthenticatedCaller, Principal, PrincipalKind, RequestContext},
     authentication::{
         AuthProvider, AuthenticationError, BearerToken, DevelopmentAuthProvider, RequestCredentials,
     },
@@ -147,7 +147,7 @@ impl AuthProvider for UnavailableProvider {
     async fn authenticate(
         &self,
         _credentials: &RequestCredentials,
-    ) -> Result<Principal, AuthenticationError> {
+    ) -> Result<AuthenticatedCaller, AuthenticationError> {
         self.0.fetch_add(1, Ordering::SeqCst);
         Err(AuthenticationError::Unavailable)
     }

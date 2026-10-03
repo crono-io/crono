@@ -672,7 +672,7 @@ pub async fn update_target_set(
     params(("namespace_id" = Uuid, Path)),
     request_body = CreateScheduleRequest,
     responses(
-        (status = 201, description = "The Schedule was created.", body = ScheduleResource),
+        (status = 201, description = "The Schedule was created after Schedule creation, Job read/execute, Run creation, and selected Target/Target Set use authorization.", body = ScheduleResource),
         (status = 400, description = "The request is invalid; `field` names the offending input when known.", body = crono_api::ErrorEnvelope),
         (status = 404, description = "The Namespace was not found.", body = crono_api::ErrorEnvelope),
         (status = 409, description = "A Schedule with this name already exists.", body = crono_api::ErrorEnvelope),
@@ -779,7 +779,7 @@ pub async fn get_schedule(
     params(("schedule_id" = Uuid, Path)),
     request_body = UpdateScheduleRequest,
     responses(
-        (status = 200, description = "The updated Schedule.", body = ScheduleResource),
+        (status = 200, description = "The updated Schedule. Enabling also requires Job read/execute, Run creation, and selected Target/Target Set use; disabling requires Schedule read/update.", body = ScheduleResource),
         (status = 400, description = "The Schedule cannot be enabled because its recurrence is invalid.", body = crono_api::ErrorEnvelope),
         (status = 404, description = "The Schedule was not found.", body = crono_api::ErrorEnvelope),
         (status = 409, description = "The revision is stale; reload the Schedule and retry.", body = crono_api::ErrorEnvelope),
@@ -1041,7 +1041,7 @@ pub async fn get_worker(
     get,
     path = "/api/overview",
     responses(
-        (status = 200, description = "Resource and Run counts visible to the caller.", body = OverviewResource),
+        (status = 200, description = "Resource and Run counts for Namespaces with crono.overview.read. Namespace metadata read does not grant counts; no overview grants returns zero counts.", body = OverviewResource),
     ),
     tag = "control-plane"
 )]

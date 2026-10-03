@@ -4,6 +4,10 @@
 //! input layer shared by all members. Editing replaces metadata and membership
 //! without changing the Target Set's identity. Shared modals report every API
 //! outcome while failures retain field guidance and entered membership choices.
+//! Read-only examples explain per-member Runs and input precedence without
+//! adding sample resources or altering the user's draft.
+
+mod guide;
 
 use super::resource_options;
 use crate::{
@@ -122,6 +126,7 @@ pub fn TargetSetsPage() -> impl IntoView {
     })
 }
 
+/// Clear membership and edit identity when switching Namespace collections.
 fn clear_target_set_selection(
     namespace_id: RwSignal<Option<uuid::Uuid>>,
     target_ids: RwSignal<Vec<uuid::Uuid>>,
@@ -158,31 +163,114 @@ struct TargetSetViewState {
     submit: Callback<leptos::ev::SubmitEvent>,
 }
 
+/// Pair the live editor with illustrative examples and the selected Namespace's list.
 fn target_sets_view(state: &TargetSetViewState) -> impl IntoView + use<> {
     let state = *state;
     let heading = NodeRef::<leptos::html::H2>::new();
     view! {
         <div class="space-y-8">
-            <PageHeader title="Target Sets" description="Target Sets fan a Job out to explicit Targets and add shared variables." />
-            <section class="rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
-                <h2 class="text-base font-semibold text-crono-text">{move || if state.editing_id.get().is_some() { "Edit Target Set" } else { "Create Target Set" }}</h2>
-                <form class="mt-5 space-y-5" on:submit=move |event| state.submit.run(event) novalidate>
-                    <ResourceSelect id="target-set-namespace" label="Namespace" placeholder="Search/select namespace…" options=state.namespace_choices.options selected=state.namespace_id loading=state.namespace_choices.loading load_error=state.namespace_choices.load_error field_error=state.namespace_error select_single=true />
-                    <Show when=move || !state.namespace_choices.loading.get() && state.namespace_choices.options.get().is_empty() && state.namespace_choices.load_error.get().is_none()><p class="rounded-md bg-zinc-50 p-3 text-sm text-crono-muted">"No namespaces exist yet. "<A href="/namespaces" attr:class="font-medium text-crono-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">"Create one first."</A></p></Show>
-                    <ResourceNameInput id="target-set-name" label="Name" value=state.name error=state.name_error />
-                    <ResourceMultiSelect id="target-set-targets" label="Targets" options=state.target_choices.options selected=state.target_ids loading=state.target_choices.loading load_error=state.target_choices.load_error field_error=state.member_error />
-                    <JsonObjectInput id="target-set-inputs" label="Shared inputs" value=state.inputs error=state.input_error />
-                    <FormActions submit_label="Save Target Set" disabled=state.disabled on_cancel=state.reset />
-                </form>
-
-            </section>
-            <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface"><header class="border-b border-crono-border px-5 py-4 sm:px-6"><h2 node_ref=heading tabindex="-1" class="font-semibold text-crono-text">"Target Sets in Namespace"</h2></header>{move || state.target_sets.map(|result| match result {
-                Ok(page) if page.items.is_empty() => view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Select a Namespace or create its first Target Set."</p> }.into_any(),
-                Ok(page) => view! { <ul class="divide-y divide-crono-border">{page.items.iter().cloned().map(|set| { let edit_set = set.clone(); view! { <li class="flex items-center justify-between gap-4 px-5 py-4 sm:px-6"><div><p class="font-medium text-crono-text">{set.qualified_name}</p><p class="mt-1 text-sm text-crono-muted">{set.targets.iter().map(|target| target.name.clone()).collect::<Vec<_>>().join(", ")}</p></div><button type="button" class=QUIET_ACTION_CLASS on:click=move |_| { state.editing_id.set(Some(edit_set.id)); state.namespace_id.set(Some(edit_set.namespace_id)); state.name.set(edit_set.name.clone()); state.target_ids.set(edit_set.targets.iter().map(|target| target.id).collect()); state.inputs.set(pretty_json(&edit_set.inputs)); }>"Edit"</button></li> } }).collect_view()}</ul> }.into_any(),
-                Err(error) => view! { <p class="px-6 py-10 text-center text-sm text-crono-failed">{error.message.clone()}</p> }.into_any(),
-            }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Target Sets…"</p> }.into_any())}</section>
-        <ResourceFeedbackModal id="target-set-save-result" resource="Target Set" plural="Target Sets" feedback=state.feedback on_view=Callback::new(move |()| focus_heading(heading)) />
+            <PageHeader title="Target Sets" description="Group Targets to run the same Job once for each member, with inputs shared across the group." />
+            <guide::TargetSetSteps />
+            <div class="grid items-start gap-6 xl:grid-cols-2">
+                {target_set_form(&state)}
+                <guide::TargetSetGuide />
+            </div>
+            {target_sets_list(&state, heading)}
+            <ResourceFeedbackModal id="target-set-save-result" resource="Target Set" plural="Target Sets" feedback=state.feedback on_view=Callback::new(move |()| focus_heading(heading)) />
         </div>
+    }
+}
+
+/// Explain each draft field while preserving the existing save and reset behavior.
+fn target_set_form(state: &TargetSetViewState) -> impl IntoView + use<> {
+    let state = *state;
+    view! {
+        <section class="rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
+            <h2 class="text-base font-semibold text-crono-text">{move || if state.editing_id.get().is_some() { "Edit Target Set" } else { "Create Target Set" }}</h2>
+            <form class="mt-5 space-y-5" on:submit=move |event| state.submit.run(event) novalidate>
+                <div class="space-y-1">
+                    <ResourceSelect id="target-set-namespace" label="Namespace" placeholder="Search/select namespace…" options=state.namespace_choices.options selected=state.namespace_id loading=state.namespace_choices.loading load_error=state.namespace_choices.load_error field_error=state.namespace_error select_single=true />
+                    <p class="text-xs text-crono-muted">"The Target Set and all its members belong to this Namespace."</p>
+                </div>
+                <Show when=move || !state.namespace_choices.loading.get() && state.namespace_choices.options.get().is_empty() && state.namespace_choices.load_error.get().is_none()><p class="rounded-md bg-zinc-50 p-3 text-sm text-crono-muted">"No namespaces exist yet. "<A href="/namespaces" attr:class="font-medium text-crono-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">"Create one first."</A></p></Show>
+                <div class="space-y-1">
+                    <ResourceNameInput id="target-set-name" label="Name" value=state.name error=state.name_error />
+                    <p class="text-xs text-crono-muted">"Use a name that describes the group, such as "<code class="font-mono">"web-fleet"</code>" or "<code class="font-mono">"greeting-team"</code>"."</p>
+                </div>
+                <div class="space-y-2">
+                    <ResourceMultiSelect id="target-set-targets" label="Member Targets" options=state.target_choices.options selected=state.target_ids loading=state.target_choices.loading load_error=state.target_choices.load_error field_error=state.member_error />
+                    <p class="text-xs text-crono-muted">"Choose existing Targets explicitly. New Targets are added to this group only when you select them."</p>
+                    <Show when=move || state.namespace_id.get().is_some() && !state.target_choices.loading.get() && state.target_choices.options.get().is_empty() && state.target_choices.load_error.get().is_none()>
+                        <p class="rounded-md bg-zinc-50 p-3 text-sm text-crono-muted">"This Namespace has no Targets yet. "<A href="/targets/new" attr:class=QUIET_ACTION_CLASS>"Create a Target"</A>" before adding members."</p>
+                    </Show>
+                    <Show when=move || !state.target_ids.get().is_empty()>
+                        <p role="status" class="rounded-md bg-crono-primary-soft px-3 py-2 text-sm text-crono-text">
+                            {move || {
+                                let count = state.target_ids.get().len();
+                                if count == 1 {
+                                    "Running a Job on this set creates 1 Run for its selected Target.".to_string()
+                                } else {
+                                    format!("Running a Job on this set creates {count} Runs, one per selected Target.")
+                                }
+                            }}
+                        </p>
+                    </Show>
+                </div>
+                <div class="space-y-1">
+                    <JsonObjectInput id="target-set-inputs" label="Shared inputs (optional)" value=state.inputs error=state.input_error />
+                    <p class="text-xs text-crono-muted">"Common values for every member, for example "<code class="break-all font-mono">"{\"greeting\":\"Hello\"}"</code>". Keep "<code class="font-mono">"{}"</code>" if none are needed. Target inputs override matching shared values."</p>
+                </div>
+                <FormActions submit_label="Save Target Set" disabled=state.disabled on_cancel=state.reset />
+            </form>
+            <p class="mt-4 text-xs text-crono-muted">"Saving defines the group. To execute it, select this Target Set when running a Job or creating a Schedule."</p>
+        </section>
+    }
+}
+
+/// Show member names and counts, with guidance specific to the collection state.
+fn target_sets_list(
+    state: &TargetSetViewState,
+    heading: NodeRef<leptos::html::H2>,
+) -> impl IntoView + use<> {
+    let state = *state;
+    view! {
+        <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface">
+            <header class="border-b border-crono-border px-5 py-4 sm:px-6">
+                <h2 node_ref=heading tabindex="-1" class="font-semibold text-crono-text">"Target Sets in Namespace"</h2>
+            </header>
+            {move || state.target_sets.map(|result| match result {
+                Ok(page) if page.items.is_empty() => view! {
+                    <p class="px-6 py-10 text-center text-sm text-crono-muted">
+                        {move || if state.namespace_id.get().is_some() { "No Target Sets in this Namespace yet. Name a group and choose its members above." } else { "Select a Namespace above to browse its Target Sets." }}
+                    </p>
+                }.into_any(),
+                Ok(page) => view! {
+                    <ul class="divide-y divide-crono-border">
+                        {page.items.iter().cloned().map(|set| {
+                            let edit_set = set.clone();
+                            let count = set.targets.len();
+                            let members = set.targets.iter().map(|target| target.name.clone()).collect::<Vec<_>>().join(", ");
+                            view! {
+                                <li class="flex items-center justify-between gap-4 px-5 py-4 sm:px-6">
+                                    <div class="min-w-0">
+                                        <p class="break-words font-medium text-crono-text">{set.qualified_name}</p>
+                                        <p class="mt-1 break-words text-sm text-crono-muted">{format!("{count} {} · {members}", if count == 1 { "Target" } else { "Targets" })}</p>
+                                    </div>
+                                    <button type="button" class=QUIET_ACTION_CLASS on:click=move |_| {
+                                        state.editing_id.set(Some(edit_set.id));
+                                        state.namespace_id.set(Some(edit_set.namespace_id));
+                                        state.name.set(edit_set.name.clone());
+                                        state.target_ids.set(edit_set.targets.iter().map(|target| target.id).collect());
+                                        state.inputs.set(pretty_json(&edit_set.inputs));
+                                    }>"Edit"</button>
+                                </li>
+                            }
+                        }).collect_view()}
+                    </ul>
+                }.into_any(),
+                Err(error) => view! { <p class="px-6 py-10 text-center text-sm text-crono-failed">{error.message.clone()}</p> }.into_any(),
+            }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Target Sets…"</p> }.into_any())}
+        </section>
     }
 }
 

@@ -187,8 +187,8 @@ pub async fn get_workflow_run(
 }
 
 #[utoipa::path(post, path = "/api/workflow-runs/{workflow_run_id}/cancel", params(("workflow_run_id" = Uuid, Path)),
-    responses((status = 200, description = "Pending nodes stopped; active ordinary Runs drain.", body = WorkflowRunResource),
-    (status = 404, description = "Invocation not found.", body = crono_api::ErrorEnvelope)), tag = "workflows")]
+    responses((status = 200, description = "Pending nodes stopped after invocation read and cancel authorization; active ordinary Runs drain.", body = WorkflowRunResource),
+    (status = 404, description = "Invocation not found or outside read visibility.", body = crono_api::ErrorEnvelope)), tag = "workflows")]
 pub async fn cancel_workflow_run(
     State(state): State<AppState>,
     Extension(context): Extension<RequestContext>,

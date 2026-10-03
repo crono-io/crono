@@ -17,9 +17,9 @@ use axum::{
 use crono_server::{
     api::build_router,
     application::{
-        Application, AuthorizationError, Authorizer, Capability, ControlPlaneStore,
-        PermitAllAuthorizer, Principal, PrincipalKind, RequestContext, ResourceScope,
-        VisibilityScope,
+        Application, AuthenticatedCaller, AuthorizationError, Authorizer, Capability,
+        ControlPlaneStore, PermitAllAuthorizer, Principal, PrincipalKind, RequestContext,
+        ResourceScope, VisibilityScope,
     },
     authentication::{
         AuthProvider, AuthenticationError, BearerToken, DevelopmentAuthProvider, RequestCredentials,
@@ -77,10 +77,10 @@ impl AuthProvider for FakeAuthProvider {
     async fn authenticate(
         &self,
         credentials: &RequestCredentials,
-    ) -> Result<Principal, AuthenticationError> {
+    ) -> Result<AuthenticatedCaller, AuthenticationError> {
         let RequestCredentials::Bearer(token) = credentials;
         if token.expose_secret() == TEST_TOKEN {
-            Ok(self.principal.clone())
+            Ok(self.principal.clone().into())
         } else {
             Err(AuthenticationError::InvalidCredentials)
         }

@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:crono:authorization:grants:v1",
+  "title": "Crono verified grants version 1",
+  "description": "Trusted adapter interchange only. The validator additionally bounds the encoded document to 65536 bytes. Parsing does not verify credentials.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "grants"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "grants": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/globalGrant"
+          },
+          {
+            "$ref": "#/$defs/namespaceGrant"
+          },
+          {
+            "$ref": "#/$defs/allNamespacesGrant"
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "globalGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "permissions"
+      ],
+      "properties": {
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "global"
+            }
+          }
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "crono.namespace.create",
+              "crono.queue.create",
+              "crono.queue.read",
+              "crono.queue.update",
+              "crono.queue.delete",
+              "crono.worker.read",
+              "crono.monitor.read"
+            ]
+          }
+        }
+      }
+    },
+    "namespaceGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "permissions"
+      ],
+      "properties": {
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "namespace_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "namespace"
+            },
+            "namespace_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
+          }
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "crono.namespace.read",
+              "crono.namespace.delete",
+              "crono.job.create",
+              "crono.job.read",
+              "crono.job.update",
+              "crono.job.execute",
+              "crono.target.create",
+              "crono.target.read",
+              "crono.target.update",
+              "crono.target.delete",
+              "crono.target.use",
+              "crono.target_set.create",
+              "crono.target_set.read",
+              "crono.target_set.update",
+              "crono.target_set.use",
+              "crono.schedule.create",
+              "crono.schedule.read",
+              "crono.schedule.update",
+              "crono.workflow.create",
+              "crono.workflow.read",
+              "crono.workflow.update",
+              "crono.workflow.delete",
+              "crono.workflow.execute",
+              "crono.workflow_run.read",
+              "crono.workflow_run.cancel",
+              "crono.run.create",
+              "crono.run.read",
+              "crono.overview.read"
+            ]
+          }
+        }
+      }
+    },
+    "allNamespacesGrant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "permissions"
+      ],
+      "properties": {
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "all_namespaces"
+            }
+          }
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "crono.namespace.read",
+              "crono.namespace.delete",
+              "crono.job.create",
+              "crono.job.read",
+              "crono.job.update",
+              "crono.job.execute",
+              "crono.target.create",
+              "crono.target.read",
+              "crono.target.update",
+              "crono.target.delete",
+              "crono.target.use",
+              "crono.target_set.create",
+              "crono.target_set.read",
+              "crono.target_set.update",
+              "crono.target_set.use",
+              "crono.schedule.create",
+              "crono.schedule.read",
+              "crono.schedule.update",
+              "crono.workflow.create",
+              "crono.workflow.read",
+              "crono.workflow.update",
+              "crono.workflow.delete",
+              "crono.workflow.execute",
+              "crono.workflow_run.read",
+              "crono.workflow_run.cancel",
+              "crono.run.create",
+              "crono.run.read",
+              "crono.overview.read"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -17,8 +17,10 @@ pub use workflows::{
 };
 
 pub use auth::{
-    AuthorizationError, Authorizer, Capability, PermitAllAuthorizer, Principal, PrincipalKind,
-    RequestContext, ResourceScope, VisibilityScope,
+    ALL_CAPABILITIES, AuthenticatedCaller, AuthorizationError, Authorizer, Capability,
+    GrantAuthorizer, GrantError, GrantScope, GrantSet, PermissionDefinition, PermissionScope,
+    PermitAllAuthorizer, Principal, PrincipalKind, RequestContext, ResourceKind,
+    ResourceNamespaceResolver, ResourceScope, VisibilityScope,
 };
 pub use error::ApplicationError;
 pub use model::{

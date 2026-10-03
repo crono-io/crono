@@ -131,7 +131,9 @@ POST `/api/workflow-runs/{workflow_run_id}/cancel` atomically stops pending
 nodes. Active children drain because Crono does not yet expose safe ordinary Run
 cancellation. While they remain active, the invocation stays `running` with
 `cancellation_requested`; no new node starts after that flag commits. Repeated
-cancellation is safe and finished invocations remain unchanged. Deleting a
+cancellation is safe and finished invocations remain unchanged. Cancellation also
+requires invocation read visibility because it returns the complete invocation;
+cancel-only authority receives 404 before any change. Deleting a
 Workflow with invocation history returns 409; history is never cascaded away.
 
 ## Validation and authorization
@@ -148,10 +150,12 @@ where selected, every member's `TargetUse`, and Namespace `RunCreate`. Catalog
 creation/replacement checks `WorkflowCreate`/`WorkflowUpdate` and referenced
 `JobRead`. Reads require `WorkflowRead` or `WorkflowRunRead` plus server-derived
 Namespace visibility; hidden graphs/history return 404. Deletion/cancellation
-have their own typed capabilities. Child output independently requires `RunRead`.
+have their own typed capabilities; cancellation additionally requires
+`WorkflowRunRead` and its visibility. Child output independently requires `RunRead`.
 
-The launch commits authority for the complete pinned execution intent, like
-existing Runs and Schedules. Background evaluation grants no new permissions and
+The launch commits authority for a complete pinned execution intent. Existing Runs
+retain execution snapshots; Schedules commit recurring intent and resolve current
+definitions and Target Set membership at each occurrence. Background evaluation grants no new permissions and
 does not impersonate callers. PostgreSQL checks the authorized graph revision
 and exact Target membership to reject concurrent changes introducing unapproved
 work. Preparation is bounded to 4,096 child executions and 8 MiB of snapshot JSON

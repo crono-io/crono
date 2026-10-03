@@ -1,8 +1,8 @@
 //! Provider-independent verification of credentials before application execution.
 //!
 //! The HTTP adapter extracts an opaque credential; an injected [`AuthProvider`]
-//! verifies it and returns the application-owned [`Principal`]. Providers never
-//! access Crono resources or grant capabilities. Authorization remains a separate
+//! verifies it and returns application-owned identity and normalized grants. Providers
+//! never access Crono resources or decide operation access. Authorization remains a separate
 //! application dependency, so JWT verification, introspection, or workload
 //! credentials can later replace the development verifier without changing use cases.
 //!
@@ -13,7 +13,7 @@
 //! no credential or provider detail. Development uses one configured secret;
 //! there is no unauthenticated or arbitrary-token fallback.
 
-use crate::application::{Principal, PrincipalKind};
+use crate::application::{AuthenticatedCaller, GrantSet, Principal, PrincipalKind};
 use async_trait::async_trait;
 use std::{error::Error, fmt};
 use subtle::ConstantTimeEq;
@@ -93,10 +93,12 @@ impl Error for AuthenticationError {}
 /// Establish verified identity independently of HTTP and Crono authorization.
 #[async_trait]
 pub trait AuthProvider: Send + Sync {
-    /// Verify the credential and return only trusted, provider-neutral identity.
+    /// Verify the credential and return trusted identity and scoped, normalized authority.
     ///
     /// A provider must reject invalid credentials and fail closed on dependency
-    /// failures. It must never copy unverified identity/roles into a principal,
+    /// failures. Verify issuer, audience, validity, and delegation before normalizing
+    /// any authority. Missing authority is empty; malformed present authority rejects.
+    /// Never copy unverified identity/roles into the caller,
     /// log credentials, query Crono resources, or make capability decisions.
     ///
     /// # Errors
@@ -104,7 +106,7 @@ pub trait AuthProvider: Send + Sync {
     async fn authenticate(
         &self,
         credentials: &RequestCredentials,
-    ) -> Result<Principal, AuthenticationError>;
+    ) -> Result<AuthenticatedCaller, AuthenticationError>;
 }
 
 /// Temporary verifier for one operator-configured development Bearer secret.
@@ -134,7 +136,7 @@ impl AuthProvider for DevelopmentAuthProvider {
     async fn authenticate(
         &self,
         credentials: &RequestCredentials,
-    ) -> Result<Principal, AuthenticationError> {
+    ) -> Result<AuthenticatedCaller, AuthenticationError> {
         let RequestCredentials::Bearer(token) = credentials;
         // Content comparison is constant time for equal lengths. Token length
         // is not concealed; no content prefix affects the comparison duration.
@@ -146,9 +148,9 @@ impl AuthProvider for DevelopmentAuthProvider {
         ) {
             return Err(AuthenticationError::InvalidCredentials);
         }
-        Ok(Principal::new(
-            "development/local".to_string(),
-            PrincipalKind::Development,
+        Ok(AuthenticatedCaller::new(
+            Principal::new("development/local".to_string(), PrincipalKind::Development),
+            GrantSet::development(),
         ))
     }
 }

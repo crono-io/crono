@@ -758,7 +758,7 @@
         },
         "responses": {
           "201": {
-            "description": "The Schedule was created.",
+            "description": "The Schedule was created after Schedule creation, Job read/execute, Run creation, and selected Target/Target Set use authorization.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1346,7 +1346,7 @@
         "operationId": "overview",
         "responses": {
           "200": {
-            "description": "Resource and Run counts visible to the caller.",
+            "description": "Resource and Run counts for Namespaces with crono.overview.read. Namespace metadata read does not grant counts; no overview grants returns zero counts.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2317,7 +2317,7 @@
         },
         "responses": {
           "200": {
-            "description": "The updated Schedule.",
+            "description": "The updated Schedule. Enabling also requires Job read/execute, Run creation, and selected Target/Target Set use; disabling requires Schedule read/update.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2963,7 +2963,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Pending nodes stopped; active ordinary Runs drain.",
+            "description": "Pending nodes stopped after invocation read and cancel authorization; active ordinary Runs drain.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2982,7 +2982,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "404": {
-            "description": "Invocation not found.",
+            "description": "Invocation not found or outside read visibility.",
             "content": {
               "application/json": {
                 "schema": {

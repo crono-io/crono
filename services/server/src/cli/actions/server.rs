@@ -7,7 +7,7 @@
 
 use crate::{
     api,
-    application::{Application, ControlPlaneStore, PermitAllAuthorizer},
+    application::{Application, ControlPlaneStore, GrantAuthorizer},
     authentication::{AuthConfig, AuthMode},
     infrastructure::{DatabasePoolConfig, DispatcherConfig, NatsPublisher, PostgresStore},
 };
@@ -49,12 +49,15 @@ pub async fn execute(args: Args) -> Result<()> {
         .await
         .context("failed to initialize PostgreSQL control-plane storage")?;
     let store: Arc<dyn ControlPlaneStore> = Arc::new(postgres.clone());
-    let application = Application::new(Arc::clone(&store), Arc::new(PermitAllAuthorizer));
+    let application = Application::new(
+        Arc::clone(&store),
+        Arc::new(GrantAuthorizer::new(Arc::new(postgres.clone()))),
+    );
     let publisher = NatsPublisher::new(&nats_url);
 
     tracing::warn!(
         principal = "development/local",
-        "development Bearer authentication is active; PermitAllAuthorizer grants every defined capability"
+        "development Bearer authentication is active; explicit full grants are enforced by GrantAuthorizer"
     );
     let result = api::serve(
         args.port,

@@ -1,10 +1,16 @@
 //! Replaceable identity and authorization contracts.
 //!
-//! Authentication providers supply verified principals to a separate policy;
-//! development uses a verified static credential and a permit-all policy, but
-//! every application operation still requests the same typed capability and
-//! resource scope that a future RBAC or external policy adapter will evaluate.
-//! Decisions are side-effect free and never trust client-provided roles.
+//! Authentication supplies verified identity and scoped grants to an independent
+//! policy. Every application operation checks a stable capability against the
+//! authoritative resource, and reads apply capability-specific Namespace visibility.
+//! IAM role names and raw claims never enter use cases. Development supplies explicit
+//! full grants to the same evaluator; permit-all policy is only a test fixture.
+//!
+//! # Flow Overview
+//!
+//! A trusted verifier normalizes grants, the request context binds them to identity,
+//! and the authorizer resolves resource Namespace metadata before making a decision.
+//! Failure never establishes additional authority; decisions never mutate state.
 
 use crate::domain::{
     JobId, NamespaceId, QueueId, ScheduleId, TargetId, TargetSetId, WorkflowId, WorkflowRunId,
@@ -12,6 +18,13 @@ use crate::domain::{
 use async_trait::async_trait;
 use std::{collections::BTreeSet, error::Error, fmt};
 use uuid::Uuid;
+
+mod capabilities;
+mod grants;
+mod policy;
+pub use capabilities::{ALL_CAPABILITIES, Capability, PermissionDefinition, PermissionScope};
+pub use grants::{GrantError, GrantScope, GrantSet};
+pub use policy::{GrantAuthorizer, ResourceNamespaceResolver};
 
 /// Server-verified caller category; request payloads cannot select this value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,23 +85,60 @@ impl Principal {
     }
 }
 
+/// Identity and normalized authority supplied only after credential verification.
+///
+/// This type is never deserialized from client requests. Providers must validate
+/// issuer, audience, validity, and delegated limits before constructing it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthenticatedCaller {
+    principal: Principal,
+    grants: GrantSet,
+}
+
+impl AuthenticatedCaller {
+    /// Bind verified identity to verified grants; no role names or token bytes are retained.
+    #[must_use]
+    pub const fn new(principal: Principal, grants: GrantSet) -> Self {
+        Self { principal, grants }
+    }
+
+    /// Read the verified, issuer-scoped identity.
+    #[must_use]
+    pub const fn principal(&self) -> &Principal {
+        &self.principal
+    }
+
+    /// Read normalized authority without raw provider claims.
+    #[must_use]
+    pub const fn grants(&self) -> &GrantSet {
+        &self.grants
+    }
+}
+
+impl From<Principal> for AuthenticatedCaller {
+    /// Identity alone supplies no permissions; retained for identity-only test adapters.
+    fn from(principal: Principal) -> Self {
+        Self::new(principal, GrantSet::default())
+    }
+}
+
 /// Trusted caller and correlation information passed to every use case.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestContext {
     request_id: Uuid,
-    principal: Principal,
+    caller: AuthenticatedCaller,
 }
 
 impl RequestContext {
-    /// Attach a server-issued correlation ID to an already verified principal.
+    /// Attach a server-issued correlation ID to verified identity and grants.
     ///
     /// Trusted adapters must authenticate first; client request data cannot
     /// construct this context or choose its authority.
     #[must_use]
-    pub const fn new(request_id: Uuid, principal: Principal) -> Self {
+    pub fn new(request_id: Uuid, caller: impl Into<AuthenticatedCaller>) -> Self {
         Self {
             request_id,
-            principal,
+            caller: caller.into(),
         }
     }
     #[must_use]
@@ -97,50 +147,14 @@ impl RequestContext {
     }
     #[must_use]
     pub const fn principal(&self) -> &Principal {
-        &self.principal
+        &self.caller.principal
     }
-}
 
-/// Stable permission vocabulary independent from future role names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Capability {
-    NamespaceCreate,
-    NamespaceRead,
-    /// Delete an empty Namespace after resource-specific authorization.
-    NamespaceDelete,
-    QueueCreate,
-    QueueRead,
-    QueueUpdate,
-    QueueDelete,
-    JobCreate,
-    JobRead,
-    JobUpdate,
-    JobExecute,
-    TargetCreate,
-    TargetRead,
-    TargetUpdate,
-    /// Delete one Target after resource-specific authorization.
-    TargetDelete,
-    TargetUse,
-    TargetSetCreate,
-    TargetSetRead,
-    TargetSetUpdate,
-    TargetSetUse,
-    ScheduleCreate,
-    ScheduleRead,
-    ScheduleUpdate,
-    WorkflowCreate,
-    WorkflowRead,
-    WorkflowUpdate,
-    WorkflowDelete,
-    WorkflowExecute,
-    WorkflowRunRead,
-    WorkflowRunCancel,
-    RunCreate,
-    RunRead,
-    WorkerRead,
-    /// Read system-wide operational state without exposing execution payloads.
-    MonitorRead,
+    /// Return only the authority established by trusted verification code.
+    #[must_use]
+    pub const fn grants(&self) -> &GrantSet {
+        &self.caller.grants
+    }
 }
 
 /// Resource named by one authorization decision.
@@ -158,6 +172,40 @@ pub enum ResourceScope {
     Run(Uuid),
 }
 
+/// Resource kinds accepted by the stable permission registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceKind {
+    ControlPlane,
+    Namespace,
+    Queue,
+    Job,
+    Target,
+    TargetSet,
+    Schedule,
+    Workflow,
+    WorkflowRun,
+    Run,
+}
+
+impl ResourceScope {
+    /// Classify a typed resource without trusting any caller-supplied Namespace.
+    #[must_use]
+    pub const fn kind(&self) -> ResourceKind {
+        match self {
+            Self::ControlPlane => ResourceKind::ControlPlane,
+            Self::Namespace(_) => ResourceKind::Namespace,
+            Self::Queue(_) => ResourceKind::Queue,
+            Self::Job(_) => ResourceKind::Job,
+            Self::Target(_) => ResourceKind::Target,
+            Self::TargetSet(_) => ResourceKind::TargetSet,
+            Self::Schedule(_) => ResourceKind::Schedule,
+            Self::Workflow(_) => ResourceKind::Workflow,
+            Self::WorkflowRun(_) => ResourceKind::WorkflowRun,
+            Self::Run(_) => ResourceKind::Run,
+        }
+    }
+}
+
 /// SQL visibility constraint applied before counting and pagination.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VisibilityScope {
@@ -171,6 +219,8 @@ pub enum VisibilityScope {
 pub enum AuthorizationError {
     Unauthenticated,
     Forbidden,
+    /// Missing scope metadata or a read whose Namespace must remain hidden.
+    NotFound,
     Unavailable,
 }
 
@@ -179,6 +229,7 @@ impl fmt::Display for AuthorizationError {
         match self {
             Self::Unauthenticated => formatter.write_str("authentication is required"),
             Self::Forbidden => formatter.write_str("operation is not authorized"),
+            Self::NotFound => formatter.write_str("resource was not found"),
             Self::Unavailable => formatter.write_str("authorization policy is unavailable"),
         }
     }
@@ -189,7 +240,7 @@ impl Error for AuthorizationError {}
 /// Side-effect-free authorization dependency used by every public use case.
 #[async_trait]
 pub trait Authorizer: Send + Sync {
-    /// Grant or reject one capability over one typed resource.
+    /// Grant only verified authority for this capability and authoritative resource scope.
     async fn authorize(
         &self,
         context: &RequestContext,
@@ -197,7 +248,7 @@ pub trait Authorizer: Send + Sync {
         resource: &ResourceScope,
     ) -> Result<(), AuthorizationError>;
 
-    /// Return the Namespace visibility to apply before querying list data.
+    /// Return Namespaces with this read permission; absent grants yield no visibility.
     async fn visibility(
         &self,
         context: &RequestContext,
@@ -205,7 +256,7 @@ pub trait Authorizer: Send + Sync {
     ) -> Result<VisibilityScope, AuthorizationError>;
 }
 
-/// Development policy that exercises authorization while granting all access.
+/// Explicit permit-all fixture for tests; production startup uses `GrantAuthorizer`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PermitAllAuthorizer;
 

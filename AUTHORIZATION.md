@@ -1,7 +1,7 @@
 # Authentication and authorization boundary
 
 Authentication establishes who supplied a valid credential. Authorization is
-Crono-owned and determines whether that verified principal may perform a typed
+Crono-owned and determines whether the verified caller and its scoped grants may perform a typed
 `Capability` on a `ResourceScope`, with `VisibilityScope` restricting reads.
 These are independently injected dependencies. HTTP handlers, application use
 cases, repositories, domain records, PostgreSQL, and NATS never parse tokens,
@@ -22,13 +22,13 @@ HTTP Authorization: Bearer <opaque token> extraction
 DevelopmentAuthProvider (configured static secret)
      |
      v
-development/local Principal
+AuthenticatedCaller (development/local + explicit grants)
      |
      v
 RequestContext
      |
      v
-PermitAllAuthorizer
+GrantAuthorizer
      |
      v
 Capability + ResourceScope + VisibilityScope
@@ -45,20 +45,23 @@ with an 8 KiB bound; only trailing `=` padding is allowed. Duplicate/combined
 headers, unsupported schemes, malformed values, and missing credentials are
 rejected before handlers parse input. Query parameters, request bodies, cookies,
 and principal/role/capability headers cannot supply trusted identity or authority.
-Only the provider's successful result can create the HTTP `RequestContext`.
+Only the provider's successful `AuthenticatedCaller` result can create the HTTP
+`RequestContext`, carrying verified identity and normalized authority.
 
 The development verifier accepts exactly one configured secret and produces
-`development/local` with `PrincipalKind::Development`. Token bytes never become
+`development/local` with `PrincipalKind::Development` and explicit global and
+all-Namespace assignments for every registered permission. Token bytes never become
 a principal identifier. `subtle` compares content in constant time for equal
 lengths; token length is not concealed. Credential/config/provider Debug output
 is redacted, and errors and HTTP traces do not contain credentials. Authentication
 failure never invokes the application or selects a permissive fallback.
 
-`PermitAllAuthorizer` currently grants all defined capabilities and Namespace
-visibility after authentication. The token check does not bypass it: replacing
-the verifier does not change authorization, and replacing the policy does not
-change credential verification. Startup warns that this is temporary full-access
-development policy. Use it only in a controlled development/test environment.
+`GrantAuthorizer` is the default runtime policy. It denies unless the caller has
+the requested permission in the resource's actual scope. The development verifier
+issues full grants after a successful token match, so existing development clients
+retain full access through the same evaluator as restricted callers. Startup warns
+about these full-access development grants. `PermitAllAuthorizer` remains an
+explicit test fixture and is never the runtime default or a failure fallback.
 
 GET/HEAD on `/live`, `/ready`, `/health`, and `/metrics` remain public for probes
 and monitoring. They do not execute resource use cases. All other requests,
@@ -141,23 +144,42 @@ An external identity is the **pair `(issuer, subject)`**; identical subjects fro
 different issuers differ. Email and human profile fields are not identity keys or
 required fields. Human, service, system, and development principals share this
 provider-neutral representation. Only trusted provider/server code constructs it
-after verification; neither Principal nor RequestContext is deserialized from a
-client request. Future authority metadata must likewise be verified and neutral.
+after verification. `AuthenticatedCaller` pairs this identity with an immutable
+`GrantSet`. None of these types is deserialized from HTTP input. Converting an
+identity alone into a caller yields empty authority, including in test adapters.
 
 The server issues each correlation UUID and returns it in `x-request-id`. A
 client-supplied request ID is never adopted as that UUID. RequestContext pairs it
-with the verified principal; it carries no JWT or OIDC claim object.
+with the verified caller; it carries no token, JWT, or OIDC claim object.
 
 Application use cases still ask the injected `Authorizer` for capabilities and
 resource scopes before persistence. Run creation checks Run creation, execution
 of the selected Job, and use of the selected Target. Global Worker and Monitor
 reads remain separate capabilities. Policy decisions are side-effect free and
-must use verified identity plus authoritative server policy, never client roles.
+must use verified grants and authoritative resource ownership, never client roles.
+A narrow `ResourceNamespaceResolver` reads only Namespace IDs for UUID resources.
+Jobs, Targets, Target Sets, Schedules, and Workflows use their own Namespace; Runs
+resolve through their Job, and Workflow Runs use their stored Namespace. Full
+resource payloads are not fetched to make this decision. Explicit all-Namespace
+grants and direct Namespace references avoid this lookup.
+
+Target Set replacement validates generic request fields, then checks update
+authority before loading configuration. A caller without update grants receives
+403 for both existing and nonexistent set IDs. Authorized replacements still
+require Target read on each member and membership in the set's Namespace.
 
 Visibility is all Namespaces, a server-derived set of Namespace IDs, or none.
-The PostgreSQL adapter applies that scope before pagination, counts, and
-aggregation. An individual Run outside visibility remains not found, preserving
-resource-hiding behavior. Authentication does not move any of these decisions
+Each read permission computes its own scope; unrelated assignments cannot widen
+it. The PostgreSQL adapter applies that scope before pagination, counts, and
+aggregation. `crono.overview.read` independently controls aggregate workload counts;
+Namespace metadata reads never grant counts. Missing grants yield empty unscoped
+Namespace/Run pages and zero overview counts. A scoped list still requires its
+read permission on the requested Namespace. Runs, Workflow graphs, and Workflow
+Runs outside visibility return not found,
+including Attempt output and events. Other denied operations return forbidden.
+Missing ownership metadata returns not found; resolver outages fail closed with
+503 rather than treating missing policy data as permission. Authentication does
+not move any of these decisions
 into middleware or query Jobs, Targets, Runs, or other Crono resources.
 
 Missing, malformed, unsupported, or invalid credentials return 401 with the safe
@@ -166,6 +188,117 @@ Verifier outages return a generic 503 without running authorization or handlers.
 An authenticated denial remains 403, or the existing 404 visibility semantics.
 Authorization outages remain 503. No failure establishes a development identity
 or falls back to PermitAll.
+
+## Canonical grants, version 1
+
+The transport-independent [JSON Schema](docs/authorization/grants-v1.schema.json)
+defines the authority interchange. Its document is at most 64 KiB of UTF-8 JSON,
+with at most 256 raw assignments, including duplicates and empty assignments.
+The parser rejects unknown fields at every level, duplicate fields, unknown
+permissions, unsupported versions, invalid Namespace UUIDs, and incompatible
+scope/permission combinations. UUIDs use the standard hyphenated representation;
+uppercase hex is accepted and normalized. The typed constructor likewise validates
+scope compatibility and assignment bounds. Encoding a typed set enforces the wire
+size limit. Neither parsing nor encoding performs credential verification.
+
+```json
+{
+  "version": 1,
+  "grants": [
+    {
+      "scope": {
+        "kind": "namespace",
+        "namespace_id": "019a0000-0000-7000-8000-000000000001"
+      },
+      "permissions": [
+        "crono.job.execute",
+        "crono.target.use",
+        "crono.run.create"
+      ]
+    },
+    {
+      "scope": {
+        "kind": "namespace",
+        "namespace_id": "019a0000-0000-7000-8000-000000000002"
+      },
+      "permissions": ["crono.job.read"]
+    },
+    {
+      "scope": {"kind": "global"},
+      "permissions": ["crono.queue.read"]
+    }
+  ]
+}
+```
+
+This caller may execute in the first Namespace and read Job definitions in the
+second. Read access in the second cannot grant execution there, and execute access
+in the first cannot grant definition reads there. Permissions and Namespace IDs
+are never flattened into a cross product. Duplicate permissions/assignments
+combine only within the same exact scope; empty arrays grant nothing. There are
+no permission wildcards, role inheritance, deny rules, or implicit permissions.
+
+`global` accepts only global permissions and requires no Namespace ID.
+`namespace` requires one authoritative Namespace UUID and only namespaced
+permissions. `all_namespaces` requires no UUID, accepts only namespaced permissions,
+and includes current and future Namespaces for exactly the listed permissions.
+An assignment covers every resource of the listed kinds in its Namespace,
+including resources created later. Version 1 has no per-Job or per-Target grants.
+It never grants Queue, Worker, or Monitor access. Namespace creation is global
+but does not assign authority over the new Namespace.
+
+IAM may define a reader role from the desired read permissions, an executor role
+from Job execute, Target/Target Set use, and Run create, or an operator role from
+the required global permissions. Those names and role management remain entirely
+in IAM. Assign the role at a Namespace, expand it into canonical assignments,
+and apply any narrower token delegation limits before returning grants. Namespace
+management, executable Job updates, and global Queue management are independent
+powerful permissions; none is implied by a role name such as `admin`.
+
+Identifiers and scope meanings below are frozen for version 1. Rust variant
+renaming never changes a permission identifier. Unknown identifiers fail closed;
+deploy receivers that understand an added identifier before issuers use it.
+Incompatible meanings require a new contract version and explicit adapter rollout,
+never silent remapping or fallback. The registry, schema enums, and identifier
+fixture are tested together.
+
+| Permission | Assignment scope | Requested resource kinds | Behavior |
+| --- | --- | --- | --- |
+| `crono.namespace.create` | global | ControlPlane | Create a Namespace; does not assign access to it. |
+| `crono.namespace.read` | namespace / all_namespaces | Namespace | Read Namespace metadata; does not expose workload counts. |
+| `crono.namespace.delete` | namespace / all_namespaces | Namespace | Delete an empty Namespace subject to bootstrap protections. |
+| `crono.queue.create` | global | ControlPlane | Create a global worker Queue. |
+| `crono.queue.read` | global | ControlPlane, Queue | Read global Queues, including selecting a Queue for a Job. |
+| `crono.queue.update` | global | Queue | Edit or enable a global Queue. |
+| `crono.queue.delete` | global | Queue | Delete an unused non-system Queue. |
+| `crono.job.create` | namespace / all_namespaces | Namespace | Create executable Job definitions in a Namespace. |
+| `crono.job.read` | namespace / all_namespaces | Namespace, Job | Read Job definitions and execution configuration. |
+| `crono.job.update` | namespace / all_namespaces | Job | Replace executable configuration for future executions. |
+| `crono.job.execute` | namespace / all_namespaces | Job | Execute a Job; Run creation and selected Target use are checked separately. |
+| `crono.target.create` | namespace / all_namespaces | Namespace | Create a Target's arguments and inputs. |
+| `crono.target.read` | namespace / all_namespaces | Namespace, Target | Read Target arguments and inputs. |
+| `crono.target.update` | namespace / all_namespaces | Target | Replace a Target's arguments and inputs for future executions. |
+| `crono.target.delete` | namespace / all_namespaces | Target | Delete an unused Target subject to starter protections. |
+| `crono.target.use` | namespace / all_namespaces | Target | Use a Target's arguments and inputs for execution. |
+| `crono.target_set.create` | namespace / all_namespaces | Namespace | Create a Target Set; member Target reads are checked separately. |
+| `crono.target_set.read` | namespace / all_namespaces | Namespace, TargetSet | Read Target Set configuration and membership. |
+| `crono.target_set.update` | namespace / all_namespaces | TargetSet | Replace Target Set membership and inputs, affecting future scheduled executions. |
+| `crono.target_set.use` | namespace / all_namespaces | TargetSet | Use a Target Set; each selected Target requires its own use grant. |
+| `crono.schedule.create` | namespace / all_namespaces | Namespace | Create recurring or deferred execution; underlying execution grants are required. |
+| `crono.schedule.read` | namespace / all_namespaces | Namespace, Schedule | Read Schedule timing, references, and policy. |
+| `crono.schedule.update` | namespace / all_namespaces | Schedule | Enable or disable a Schedule; enabling requires execution grants. |
+| `crono.workflow.create` | namespace / all_namespaces | Namespace | Create a Workflow graph; referenced Job reads are checked separately. |
+| `crono.workflow.read` | namespace / all_namespaces | Namespace, Workflow | Read Workflow graphs in visible Namespaces. |
+| `crono.workflow.update` | namespace / all_namespaces | Workflow | Replace a Workflow graph at its expected revision. |
+| `crono.workflow.delete` | namespace / all_namespaces | Workflow | Delete a Workflow subject to invocation references. |
+| `crono.workflow.execute` | namespace / all_namespaces | Workflow | Launch a Workflow; all underlying execution grants are checked separately. |
+| `crono.workflow_run.read` | namespace / all_namespaces | Workflow, WorkflowRun | Read invocation graphs and child Run identities; output needs Run read. |
+| `crono.workflow_run.cancel` | namespace / all_namespaces | WorkflowRun | Cancel pending Workflow work; invocation read is also required, with no process-kill authority. |
+| `crono.run.create` | namespace / all_namespaces | Namespace | Commit execution intent in a Namespace; Job and Target grants remain required. |
+| `crono.run.read` | namespace / all_namespaces | Run | Read Run history, Attempt output, and lifecycle events. |
+| `crono.worker.read` | global | ControlPlane | Read global worker presence and bounded diagnostics. |
+| `crono.monitor.read` | global | ControlPlane | Read global operational and database monitoring. |
+| `crono.overview.read` | namespace / all_namespaces | Namespace | Read aggregate workload counts for assigned Namespaces. |
 
 ## Workflow authorization
 
@@ -178,6 +311,32 @@ consumes that intent without granting new authority. WorkflowRead/WorkflowRunRea
 visibility hides other Namespaces; child Attempt output independently requires
 RunRead. See [WORKFLOWS.md](WORKFLOWS.md).
 
+Cancellation requires both Workflow Run read visibility and cancel permission
+before changing state or returning the invocation. Its response contains graph,
+inputs, and child history, including for finished invocations; a cancel-only
+caller receives 404 and commits no change.
+
+Creating a Schedule, or enabling one, requires Schedule create or read/update
+respectively, Job read/execute, Namespace Run create, and selected Target use.
+Target Set selection also requires Target Set use and use of every current member.
+Denied operations commit no Schedule change or execution intent. Disabling uses
+Schedule read/update alone. Manual Run creation, Workflow launches, and their
+idempotent replays check every selected execution permission. A historical rerun
+repeats one retained Target snapshot and requires Run read, Job execute, Target
+use, and Run create. Target Set use applies when selecting a set for a new batch.
+Reading a graph never grants execution or child output access.
+
+Schedules and Workflows commit server-owned execution intent. Background services
+execute that intent without retaining tokens or calling IAM for each occurrence
+or node. Later grant revocation affects new requests and replays; it does not
+automatically disable an existing Schedule or cancel committed Workflow work.
+Disable or cancel that work explicitly when needed. Changing executable Job or
+Target inputs remains separately authorized and affects future executions.
+Target Set updates likewise affect future scheduled membership and inputs:
+Schedules resolve their selected set at each occurrence. The enabling caller's
+Namespace Target use grant covers every member in that Namespace, including
+future members. Workflow invocations pin membership for immutable history instead.
+
 ## Future external authentication
 
 ```text
@@ -188,13 +347,13 @@ OIDC/OAuth AuthProvider
 (Permesi / Auth0 / Keycloak / Zitadel / another IAM)
      |
      v
-verified Principal
+AuthenticatedCaller (Principal + GrantSet)
      |
      v
 RequestContext
      |
      v
-Production Authorizer
+GrantAuthorizer
      |
      v
 Capability + ResourceScope + VisibilityScope
@@ -203,19 +362,32 @@ Capability + ResourceScope + VisibilityScope
 Crono
 ```
 
-Replace `DevelopmentAuthProvider` with an `OidcAuthProvider` (or an opaque-token
-introspection/workload credential verifier) at startup/router injection. Its
-configuration and implementation own trusted issuer, audience, signature,
-expiry/not-before, subject, and any required scope/claim validation. The stable
-result is Principal, so Jobs, Targets, Runs, and other application logic remain
-unchanged. Additional credential forms such as mTLS can extend the transport
-adapter and RequestCredentials without making JWT a domain concept.
+Replace `DevelopmentAuthProvider` with a JWT verifier, opaque-token introspection
+adapter, or workload credential verifier at startup/router injection. Its
+configuration and implementation own trusted issuers, Crono audience, signatures
+and key rotation, expiry/not-before, subjects, revocation/caching policy, and
+delegation limits. After verification, it normalizes provider-native authority
+into `GrantSet` and returns `AuthenticatedCaller`. Grant parsing alone authenticates
+nothing. A present malformed/unsupported grant document rejects authentication
+with the safe 401 envelope; an absent document establishes identity with no grants.
+Adapters must not swallow validation errors, union unrelated resource audiences,
+or expand delegated access beyond the verified token's limits. Verifier outages
+return 503. Provider-native role names never reach application use cases.
 
-Independently replace `PermitAllAuthorizer` with a production Authorizer that
-interprets verified authority and authoritative Crono policy through the existing
-capability/resource/visibility contract. No complex RBAC or provisional IAM is
-introduced here. A fake external provider integration test exercises the same
-Namespace handler and injected policy using an issuer-scoped service principal.
+IAM owns users, groups, roles, and assignments. Permesi, Keycloak, Auth0, and other
+providers can map different verified claim layouts or introspection responses into
+the same contract. Crono owns the permission vocabulary and checks each referenced
+resource itself. No particular JWT claim name is mandated: providers may emit the
+canonical JSON or adapters may translate verified native assignments through the
+validated typed constructor. Crono never calls an IAM for every resource decision;
+a future adapter decides whether credential verification requires introspection.
+
+The production evaluator already exists and is provider-independent. Fake
+provider integration tests exercise two authority layouts through the unchanged
+HTTP handlers, production policy, and PostgreSQL membership resolver. External
+OIDC/introspection, IAM role administration, login, and token refresh remain future
+work. Selecting `oidc` still fails explicitly. Additional credential forms such as
+mTLS can extend transport without making provider claims a domain concept.
 
 Crono's intended role is an OAuth2 resource server receiving access tokens. IAM
 providers own passwords, signup, resets, MFA/passkeys, login screens, grants,

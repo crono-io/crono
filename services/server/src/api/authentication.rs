@@ -10,7 +10,7 @@
 //!
 //! Request correlation runs first. Protected requests extract credentials, call
 //! the injected provider, then construct `RequestContext` from its verified
-//! Principal and the server-issued ID. Every application authorization decision
+//! caller (identity and normalized grants) and the server-issued ID. Every authorization decision
 //! still runs normally. No credential, role, or identity header is logged here.
 
 use super::{error::ApiError, request_id::RequestId};
@@ -26,7 +26,7 @@ use axum::{
 };
 use std::sync::Arc;
 
-/// Authenticate before attaching trusted identity; a failure never invokes the handler.
+/// Authenticate before attaching trusted identity and grants; failures never invoke handlers.
 ///
 /// Only GET/HEAD on the exact public probe/metrics paths bypass authentication.
 /// A missing server-issued correlation ID is a composition error and fails with 500.
@@ -47,15 +47,15 @@ pub async fn establish(
         tracing::error!("authentication middleware ran before request correlation");
         return ApiError::from(ApplicationError::Internal).into_response();
     };
-    let principal = match credentials(request.headers()) {
+    let caller = match credentials(request.headers()) {
         Ok(credentials) => provider.authenticate(&credentials).await,
         Err(error) => Err(error),
     };
-    match principal {
-        Ok(principal) => {
+    match caller {
+        Ok(caller) => {
             request
                 .extensions_mut()
-                .insert(RequestContext::new(request_id.get(), principal));
+                .insert(RequestContext::new(request_id.get(), caller));
             next.run(request).await
         }
         Err(error) => ApiError::Authentication(error).into_response(),

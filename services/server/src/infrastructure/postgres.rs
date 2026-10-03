@@ -7,6 +7,7 @@
 //! and conditional updates; uniqueness constraints remain the final duplicate
 //! boundary.
 
+mod authorization;
 mod workflows;
 
 use super::DatabasePoolConfig;

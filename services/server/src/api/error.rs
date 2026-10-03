@@ -86,7 +86,8 @@ impl IntoResponse for ApiError {
                 message.clone(),
                 field.map(str::to_string),
             ),
-            ApplicationError::NotFound => (
+            ApplicationError::NotFound
+            | ApplicationError::Authorization(AuthorizationError::NotFound) => (
                 StatusCode::NOT_FOUND,
                 "not_found",
                 "resource was not found".to_string(),

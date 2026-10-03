@@ -3,7 +3,7 @@
 # Run it through `just schemathesis` (an isolated throwaway stack) or the
 # nightly `API Fuzzing` workflow; both use scripts/schemathesis.sh, which
 # supplies the base URL. Never point it at a shared or production server:
-# authenticated requests receive all capabilities under the development authorizer, including deletes.
+# authenticated development requests receive explicit full grants, including deletes.
 
 workers = 4
 request-timeout = 10.0
@@ -32,3 +32,15 @@ stateful.enabled = true
 # cannot express: cron and template syntax, executor/executable pairing,
 # page cursors, references to unknown resources, or names that already exist.
 positive_data_acceptance.expected-statuses = ["2xx", "400", "404", "409"]
+
+# These writes reference independent UUIDs in their bodies. A Namespace created
+# through an inferred link does not create the selected Job or Target.
+# Schemathesis 4.28 checks linked path parameters but overlooks missing body
+# references when asserting availability. Keep this check on reads and all other
+# operations; retain every other check and all phases on these two writes.
+[[operations]]
+include-name = [
+  "POST /api/namespaces/{namespace_id}/schedules",
+  "POST /api/namespaces/{namespace_id}/workflows",
+]
+checks.ensure_resource_availability.enabled = false

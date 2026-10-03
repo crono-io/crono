@@ -731,6 +731,10 @@ impl Application {
 
     /// Replace Target Set membership and shared inputs atomically.
     ///
+    /// Validate generic inputs, then require `TargetSetUpdate` before loading
+    /// configuration or revealing existence. Every member also requires `TargetRead`
+    /// and authoritative membership in the set's Namespace.
+    ///
     /// # Errors
     ///
     /// Returns validation, authorization, not-found, conflict, or storage failures.
@@ -743,8 +747,6 @@ impl Application {
         inputs: serde_json::Value,
     ) -> Result<TargetSetRecord, ApplicationError> {
         let id = TargetSetId::new(id);
-        let existing = self.store.get_target_set(id).await?;
-        let namespace_id = existing.target_set.namespace_id();
         let name = ResourceName::parse(name.trim()).map_err(invalid_name)?;
         validate_input_object(&inputs)?;
         validate_target_ids(&target_ids)?;
@@ -755,6 +757,8 @@ impl Application {
                 &ResourceScope::TargetSet(id),
             )
             .await?;
+        let existing = self.store.get_target_set(id).await?;
+        let namespace_id = existing.target_set.namespace_id();
         let ids: Vec<TargetId> = target_ids.into_iter().map(TargetId::new).collect();
         self.validate_target_members(context, namespace_id, &ids)
             .await?;
@@ -764,7 +768,8 @@ impl Application {
             .await?)
     }
 
-    /// Create a durable Schedule without consulting NATS.
+    /// Commit scheduled execution only after Schedule, Job execution, Run creation,
+    /// and selected Target use authorization; no NATS dependency is consulted.
     ///
     /// # Errors
     ///
@@ -790,6 +795,20 @@ impl Application {
                 context,
                 Capability::JobRead,
                 &ResourceScope::Job(input.job_id),
+            )
+            .await?;
+        self.authorizer
+            .authorize(
+                context,
+                Capability::JobExecute,
+                &ResourceScope::Job(input.job_id),
+            )
+            .await?;
+        self.authorizer
+            .authorize(
+                context,
+                Capability::RunCreate,
+                &ResourceScope::Namespace(namespace_id),
             )
             .await?;
         let job = self.store.get_job(input.job_id).await?;
@@ -910,6 +929,8 @@ impl Application {
     }
 
     /// Enable or disable a Schedule using optimistic revision matching.
+    /// Enabling verifies all referenced execution grants; disabling requires only
+    /// the existing Schedule read/update permissions and does not grant execution.
     ///
     /// # Errors
     ///
@@ -931,6 +952,31 @@ impl Application {
             )
             .await?;
         let next = if enabled {
+            for capability in [Capability::JobRead, Capability::JobExecute] {
+                self.authorizer
+                    .authorize(
+                        context,
+                        capability,
+                        &ResourceScope::Job(record.schedule.job_id),
+                    )
+                    .await?;
+            }
+            self.authorizer
+                .authorize(
+                    context,
+                    Capability::RunCreate,
+                    &ResourceScope::Namespace(record.schedule.namespace_id),
+                )
+                .await?;
+            let (namespace_id, _, _) = self
+                .execution_targets(context, record.schedule.target)
+                .await?;
+            if namespace_id != record.schedule.namespace_id {
+                return Err(ApplicationError::invalid_request(
+                    "Schedule and execution target must belong to the same Namespace",
+                ));
+            }
+
             match &record.schedule.timing {
                 ScheduleTiming::Cron {
                     expression,
@@ -1187,7 +1233,8 @@ impl Application {
         Ok(self.store.get_worker(stored_worker_id(worker_id)?).await?)
     }
 
-    /// Count only resources visible to the established principal.
+    /// Expose workload counts only for Namespaces with `OverviewRead` authority;
+    /// Namespace metadata visibility alone never reveals workload counts.
     ///
     /// # Errors
     ///
@@ -1195,7 +1242,7 @@ impl Application {
     pub async fn overview(&self, context: &RequestContext) -> Result<Overview, ApplicationError> {
         let visibility = self
             .authorizer
-            .visibility(context, Capability::NamespaceRead)
+            .visibility(context, Capability::OverviewRead)
             .await?;
         Ok(self.store.overview(&visibility).await?)
     }

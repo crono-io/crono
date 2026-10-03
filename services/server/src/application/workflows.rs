@@ -412,24 +412,28 @@ impl Application {
             .await?)
     }
 
-    /// Prevent pending nodes from starting while active ordinary Runs drain normally.
+    /// Stop pending nodes after verifying invocation read visibility and cancel authority.
+    ///
+    /// The response contains graph, input, and child history, so `WorkflowRunRead`
+    /// is required even for finished invocations. Hidden invocations fail before
+    /// mutation; active ordinary Runs drain normally without process-kill authority.
     ///
     /// # Errors
-    /// Requires `WorkflowRunCancel` on this invocation; no process-kill authority is implied.
+    /// Returns hidden/missing history, `WorkflowRunCancel` denial, or dependency failures.
     pub async fn cancel_workflow_run(
         &self,
         context: &RequestContext,
         id: Uuid,
     ) -> Result<WorkflowRunRecord, ApplicationError> {
-        let id = WorkflowRunId::new(id);
+        let record = self.get_workflow_run(context, id).await?;
         self.authorizer
             .authorize(
                 context,
                 Capability::WorkflowRunCancel,
-                &ResourceScope::WorkflowRun(id),
+                &ResourceScope::WorkflowRun(record.id),
             )
             .await?;
-        Ok(self.store.cancel_workflow_run(id).await?)
+        Ok(self.store.cancel_workflow_run(record.id).await?)
     }
 
     /// Authorize every historical Job and pinned Target before returning an idempotent replay.

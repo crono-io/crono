@@ -3,7 +3,8 @@
 //! Routes are wrapped in three transport layers. Request-ID assignment runs
 //! first and mints a server-owned `UUIDv7` correlation ID; the trace layer then
 //! opens a span carrying the method, matched route, and that ID; authentication
-//! verifies credentials last and builds `RequestContext` from the Principal and ID.
+//! verifies credentials last and builds `RequestContext` from the caller's identity,
+//! normalized grants, and ID.
 //! Operational endpoints remain public and perform no application use case. The ID
 //! is returned to callers in `x-request-id`, and a client-supplied value is
 //! never adopted as the correlation ID (see [`request_id`]).
