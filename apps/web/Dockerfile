@@ -41,6 +41,12 @@ LABEL org.opencontainers.image.title="crono-web" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.created="${CREATED}"
 
+# BuildKit applies `COPY --chmod` to parent directories it creates, which left
+# /etc/nginx/snippets as 0444 and unsearchable for uid 101 in published images
+# (nginx then fails to open security-headers.conf). Create it 0755 first.
+USER 0
+RUN install -d -m 0755 /etc/nginx/snippets
+
 # The base image's nginx user and group; its entrypoint and command stay.
 USER 101:101
 EXPOSE 8080

@@ -123,8 +123,8 @@ that configuration file.
 Crono servers never apply the schema themselves: the runtime role has no DDL
 privileges, and PostgreSQL stays outside the cluster. An operator applies the
 SQL from the release being deployed before its server image is rolled out. The
-full runbook lives in the deployment repository (`crono-helm`) at
-`docs/postgres.md`; in short:
+full runbook lives in the Helm chart repository (`crono-helm`) at
+`docs/install-guide.md#database-schema`; in short:
 
 1. Check out the release tag that matches the server image.
 2. Apply the bootstrap as an administrator with `CREATEROLE` and `CREATEDB`,
