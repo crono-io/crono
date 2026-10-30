@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "crono-api"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "serde",
  "serde_json",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "crono-cli"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "built",
@@ -628,7 +628,7 @@ dependencies = [
 
 [[package]]
 name = "crono-execution"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -641,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "crono-nats"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -652,7 +652,7 @@ dependencies = [
 
 [[package]]
 name = "crono-server"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "async-nats",
@@ -692,7 +692,7 @@ dependencies = [
 
 [[package]]
 name = "crono-telemetry"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "opentelemetry",
@@ -706,7 +706,7 @@ dependencies = [
 
 [[package]]
 name = "crono-web"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -726,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "crono-worker"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "anyhow",
  "async-nats",
