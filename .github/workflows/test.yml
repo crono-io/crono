@@ -13,7 +13,7 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/rust-toolchain
@@ -27,7 +27,7 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/rust-toolchain
@@ -47,7 +47,7 @@ jobs:
     name: Feature Checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/rust-toolchain
@@ -62,7 +62,7 @@ jobs:
     name: Browser UI
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/rust-toolchain
@@ -88,7 +88,7 @@ jobs:
       CRONO_TEST_DATABASE_URL: postgres://crono_runtime@127.0.0.1:5432/crono
       CRONO_TEST_REQUIRE_DATABASE: "1"
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/rust-toolchain

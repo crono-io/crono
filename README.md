@@ -559,9 +559,9 @@ private key generated for it. Each run mints a short-lived token scoped to crono
 alone. While either value is missing the dispatch step is skipped with a warning and the
 release still succeeds; configure the App and run the workflow by hand to catch up.
 
-The workflows are hardened like the template's: every action is pinned to a full commit
-SHA with its version in a comment (Dependabot proposes updates once a week, as one pull
-request into `sandbox`), the Rust toolchain comes
+The workflows are hardened like the template's: actions are referenced by major version
+tag (Dependabot proposes major upgrades once a week, as one pull request into `sandbox`),
+the Rust toolchain comes
 from `rustup` through `.github/actions/rust-toolchain`, no checkout keeps the token, and
 the "Release tags" ruleset (`just protect-branches`) lets `X.Y.Z` tags be created but
 never moved or deleted. To check a downloaded release file:
