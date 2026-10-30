@@ -71,7 +71,9 @@ runs:
             echo "Ignoring ${candidate}: ${commit} is not on main (${status})."
             continue
           fi
-          version="$(gh api "repos/${repo}/contents/Cargo.toml?ref=${commit}" --jq '.content' | base64 -d | awk -F'"' '/^version = /{print $2; exit}')"
+          # awk reads to the end: an early exit can SIGPIPE base64 and, under
+          # pipefail, fail the step ("base64: Broken pipe", the 0.1.10 tag run).
+          version="$(gh api "repos/${repo}/contents/Cargo.toml?ref=${commit}" --jq '.content' | base64 -d | awk -F'"' '!found && /^version = /{print $2; found=1}')"
           if [[ "${version}" != "${candidate}" ]]; then
             echo "Ignoring ${candidate}: its commit carries version ${version}."
             continue
