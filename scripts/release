@@ -81,7 +81,8 @@ current_version() {
 
 # The workspace version recorded in a commit (used to validate staged candidates).
 version_at() {
-    git show "$1:Cargo.toml" | awk -F'"' '/^version = /{print $2; exit}'
+    # Read to the end: an early awk exit can SIGPIPE git show under pipefail.
+    git show "$1:Cargo.toml" | awk -F'"' '!found && /^version = /{print $2; found=1}'
 }
 
 # Change the version in RELEASE_FILES only; dependency updates are separate commits.
