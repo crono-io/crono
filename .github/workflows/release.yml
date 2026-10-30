@@ -771,7 +771,8 @@ jobs:
   # Add the version tag, and `X.Y` and `latest` while the tag is the highest promoted
   # release of its line and overall, to the candidate's image digests. skopeo copies
   # within the same repository with the digest preserved, so the tested index, its SBOM,
-  # provenance and attestation are what the tags name; re-running is a no-op.
+  # provenance and attestation are what the tags name; re-running is a no-op. The
+  # promoted digests and the latest-release answer are outputs for the crono-helm job.
   images-publish:
     name: Tag images
     runs-on: ubuntu-latest
@@ -783,6 +784,10 @@ jobs:
       group: crono-production-images
       cancel-in-progress: false
       queue: max
+    outputs:
+      latest: ${{ steps.latest.outputs.latest }}
+      server_digest: ${{ steps.tag.outputs.crono-server }}
+      web_digest: ${{ steps.tag.outputs.crono-web }}
     permissions:
       contents: read
       actions: read
@@ -809,6 +814,7 @@ jobs:
           path: ${{ runner.temp }}/manifest
 
       - name: Tag the tested digests
+        id: tag
         shell: bash
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -838,7 +844,28 @@ jobs:
               fi
               echo "${repository}:${tag} -> ${digest}"
             done
+            echo "${image}=${digest}" >> "$GITHUB_OUTPUT"
           done < "${RUNNER_TEMP}/manifest/IMAGES"
+
+  # Once the images carry the version tag, tell crono-helm to bump its charts to this
+  # release with exactly the digests promoted above. Only the highest promoted release
+  # goes there, so a late or recovered older tag never moves the charts back; without
+  # the crono-helm App configured the dispatch is skipped with a warning.
+  helm:
+    name: Notify crono-helm
+    needs:
+      - guard
+      - images-publish
+    if: needs.images-publish.outputs.latest == 'true'
+    permissions: {}
+    uses: ./.github/workflows/dispatch-helm-release.yml
+    with:
+      version: ${{ needs.guard.outputs.version }}
+      source_sha: ${{ needs.guard.outputs.commit }}
+      server_digest: ${{ needs.images-publish.outputs.server_digest }}
+      web_digest: ${{ needs.images-publish.outputs.web_digest }}
+    secrets:
+      CRONO_HELM_APP_PRIVATE_KEY: ${{ secrets.CRONO_HELM_APP_PRIVATE_KEY }}
 
   # Publish the tag's committed API contract to GitHub Pages, only while the tag is the
   # highest promoted release. It shares the `pages` group with the manual API Docs

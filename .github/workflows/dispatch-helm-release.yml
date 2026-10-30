@@ -1,0 +1,152 @@
+---
+# Tells crono-io/crono-helm that a release's images are promoted: a `crono-release`
+# repository dispatch carrying the version, the tagged commit and the promoted
+# multi-arch index digests of crono-server and crono-web, from which crono-helm opens
+# its chart bump pull request. The Release workflow calls it once the images carry the
+# version tag, and only for the highest promoted release; run it by hand to resend a
+# release, always with the exact digests the release promoted (never ones re-read from a
+# mutable tag).
+#
+# Every input is validated before anything is sent, so a malformed value fails the run.
+# The dispatch is authenticated by a GitHub App installed on crono-helm whose token is
+# scoped to that repository only; while `vars.CRONO_HELM_APP_ID` or
+# `secrets.CRONO_HELM_APP_PRIVATE_KEY` is missing the run skips the dispatch with a
+# warning instead of failing the release.
+name: Dispatch Helm Release
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Release version (X.Y.Z; a leading v is stripped).
+        required: true
+        type: string
+      source_sha:
+        description: Full commit SHA the release was built from.
+        required: true
+        type: string
+      server_digest:
+        description: Promoted index digest of ghcr.io/crono-io/crono-server (sha256:...).
+        required: true
+        type: string
+      web_digest:
+        description: Promoted index digest of ghcr.io/crono-io/crono-web (sha256:...).
+        required: true
+        type: string
+    secrets:
+      CRONO_HELM_APP_PRIVATE_KEY:
+        description: Private key of the GitHub App installed on crono-helm.
+        required: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version (X.Y.Z; a leading v is stripped).
+        required: true
+        type: string
+      source_sha:
+        description: Full commit SHA the release was built from.
+        required: true
+        type: string
+      server_digest:
+        description: Promoted index digest of ghcr.io/crono-io/crono-server (sha256:...).
+        required: true
+        type: string
+      web_digest:
+        description: Promoted index digest of ghcr.io/crono-io/crono-web (sha256:...).
+        required: true
+        type: string
+
+# The App token does all the work; the run's own token needs nothing.
+permissions: {}
+
+jobs:
+  dispatch:
+    name: Notify crono-helm
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: dispatch-helm-release-${{ inputs.version }}
+      cancel-in-progress: false
+    steps:
+      - name: Validate the release and the App configuration
+        id: meta
+        shell: bash
+        env:
+          RAW_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SERVER_DIGEST: ${{ inputs.server_digest }}
+          WEB_DIGEST: ${{ inputs.web_digest }}
+          APP_ID: ${{ vars.CRONO_HELM_APP_ID }}
+          HAS_KEY: ${{ secrets.CRONO_HELM_APP_PRIVATE_KEY != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REPOSITORY}" != "crono-io/crono" ]]; then
+            echo "::error::Helm releases must originate from crono-io/crono, not ${GITHUB_REPOSITORY}."
+            exit 1
+          fi
+          version="${RAW_VERSION#v}"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version '${RAW_VERSION}'; expected X.Y.Z or vX.Y.Z."
+            exit 1
+          fi
+          if [[ ! "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid source commit '${SOURCE_SHA}'; expected 40 lowercase hex digits."
+            exit 1
+          fi
+          for digest in "${SERVER_DIGEST}" "${WEB_DIGEST}"; do
+            if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::Invalid image digest '${digest}'; expected sha256:<64 hex>."
+              exit 1
+            fi
+          done
+          configured=true
+          if [[ -z "${APP_ID}" || "${HAS_KEY}" != true ]]; then
+            configured=false
+            echo "::warning::vars.CRONO_HELM_APP_ID or secrets.CRONO_HELM_APP_PRIVATE_KEY is not set, so crono-helm was not told about ${version}. Configure the App, then run the Dispatch Helm Release workflow by hand."
+          fi
+          {
+            echo "version=${version}"
+            echo "source_sha=${SOURCE_SHA}"
+            echo "server_digest=${SERVER_DIGEST}"
+            echo "web_digest=${WEB_DIGEST}"
+            echo "configured=${configured}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create the crono-helm App token
+        id: app-token
+        if: steps.meta.outputs.configured == 'true'
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.CRONO_HELM_APP_ID }}
+          private-key: ${{ secrets.CRONO_HELM_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: crono-helm
+
+      - name: Dispatch the release to crono-helm
+        if: steps.meta.outputs.configured == 'true'
+        shell: bash
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          SOURCE_SHA: ${{ steps.meta.outputs.source_sha }}
+          SERVER_DIGEST: ${{ steps.meta.outputs.server_digest }}
+          WEB_DIGEST: ${{ steps.meta.outputs.web_digest }}
+        run: |
+          set -euo pipefail
+          payload="${RUNNER_TEMP}/helm-dispatch.json"
+          jq -n \
+            --arg version "${VERSION}" \
+            --arg sha "${SOURCE_SHA}" \
+            --arg server "${SERVER_DIGEST}" \
+            --arg web "${WEB_DIGEST}" \
+            '{event_type: "crono-release", client_payload: {version: $version, source_sha: $sha, server_digest: $server, web_digest: $web}}' \
+            > "${payload}"
+          cat "${payload}"
+          curl -fsSL \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            --data @"${payload}" \
+            https://api.github.com/repos/crono-io/crono-helm/dispatches
+          echo "Sent crono-release ${VERSION} (${SOURCE_SHA}) to crono-io/crono-helm." >> "$GITHUB_STEP_SUMMARY"

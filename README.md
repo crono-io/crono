@@ -543,6 +543,22 @@ when the tagged workflow itself was wrong, fix it, release as usual, and run
 `just release-republish X.Y.Z`. Recovery needs the candidate's artifacts, which GitHub
 keeps for 90 days, and its `sha-` images.
 
+Once the images carry the version tag, and only when the tag is the highest promoted
+release, the Release run calls `.github/workflows/dispatch-helm-release.yml`, which sends
+a `crono-release` repository dispatch to `crono-io/crono-helm` with the version, the
+tagged commit and the exact index digests it just promoted for `crono-server` and
+`crono-web`; crono-helm turns that into its chart bump pull request. The workflow
+validates every value (`X.Y.Z`, a 40-hex commit, `sha256:` digests) before sending, and
+it can be run by hand from the Actions tab to resend a release with the digests from the
+release's run, never ones read back from a mutable tag. It authenticates as a GitHub App:
+create an App in the `crono-io` organization (no webhook; repository permission
+**Contents: Read and write**, which repository dispatches need; nothing else), install it
+on `crono-io/crono-helm` only, then in this repository set the variable
+`CRONO_HELM_APP_ID` to the App's ID and the secret `CRONO_HELM_APP_PRIVATE_KEY` to a
+private key generated for it. Each run mints a short-lived token scoped to crono-helm
+alone. While either value is missing the dispatch step is skipped with a warning and the
+release still succeeds; configure the App and run the workflow by hand to catch up.
+
 The workflows are hardened like the template's: every action is pinned to a full commit
 SHA with its version in a comment (Dependabot proposes updates once a week, as one pull
 request into `sandbox`), the Rust toolchain comes
