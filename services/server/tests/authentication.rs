@@ -14,6 +14,7 @@ use axum::{
     body::{self, Body},
     http::{Request, StatusCode},
 };
+use crono_nats::NatsClientConfig;
 use crono_server::{
     api::build_router,
     application::{
@@ -97,7 +98,7 @@ fn router(
     build_router(
         application,
         store,
-        NatsPublisher::new("nats://127.0.0.1:1"),
+        NatsPublisher::new(NatsClientConfig::anonymous("nats://127.0.0.1:1")),
         provider,
     )
 }

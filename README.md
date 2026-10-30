@@ -210,11 +210,24 @@ Each server instance uses one bounded pool for the API and its scheduler, reconc
 | `CRONO_DATABASE_IDLE_TIMEOUT_SECONDS` | `600` | 10 s or more, below the lifetime | Idle time before a connection above the minimum closes |
 | `CRONO_DATABASE_MAX_LIFETIME_SECONDS` | `1800` | 60–86400 s | Age at which any connection is replaced |
 
+Connections use TLS through rustls (ring) whenever the server negotiates it. `CRONO_DATABASE_URL` accepts libpq's `sslmode` and `sslrootcert` query parameters, and the standard `PGPASSWORD`, `PGSSLMODE`, and `PGSSLROOTCERT` variables fill in anything the URL omits. The default mode is `prefer`, so a local PostgreSQL without TLS keeps working unchanged. Outside a workstation use `sslmode=verify-full`, which checks both the certificate chain and the host name; with `sslrootcert` the chain must lead to that private CA, and without it to the bundled Mozilla (webpki) roots rather than the operating system store. Keep the password out of the URL and supply it through `PGPASSWORD` from a secret, for example `CRONO_DATABASE_URL=postgres://crono_runtime@db.internal:5432/crono?sslmode=verify-full&sslrootcert=/etc/crono/postgres/ca.crt`. Crono never logs the URL.
+
 ## NATS assumptions
 
 The server creates `CRONO_DISPATCH` for `crono.dispatch.*` with file storage, WorkQueue retention, explicit worker acknowledgements, bounded message size, and discard-new behavior. The final subject token is the immutable Queue UUID, so renaming a Queue does not reroute durable work. Development defaults to one replica. Set `CRONO_NATS_REPLICAS=3` for a three-node production JetStream cluster; valid values are 1, 3, and 5. Production NATS must use TLS, authenticated identities, and subject permissions that bind a worker to its identity-scoped control and presence subjects and authorized Queue UUID.
 
 The server starts and remains ready when NATS is unavailable as long as PostgreSQL is healthy. Its connection manager reconnects and re-establishes the stream. File-backed JetStream storage must be persistent across ordinary NATS restarts. Complete broker-storage loss requires explicit replay/reconciliation from PostgreSQL before affected queued work is considered recovered.
+
+The server and the worker read the same client settings. `CRONO_NATS_URL` (the worker's `--nats-url`) names the server, or a comma-separated list of servers. If any of them uses `tls://` or `wss://`, or a CA file is set, TLS is required for every connection, including reconnects to addresses the cluster advertises without a scheme. Never embed credentials in the URL: Crono does not log it and `--help` hides its environment value, but a `--nats-url` argument is visible in process listings and the variable in deployment manifests. TLS and identity come from these variables instead:
+
+| Environment variable | Meaning |
+| --- | --- |
+| `CRONO_NATS_TLS_CA_FILE` | PEM CA that issued the NATS server certificate. Setting it requires TLS and replaces the platform trust store for NATS. |
+| `CRONO_NATS_NKEY_SEED_FILE` | File containing an NKey user seed; the default identity in Kubernetes |
+| `CRONO_NATS_CREDS_FILE` | JWT `.creds` file for operator/account-based NATS deployments |
+| `CRONO_NATS_USER` and `CRONO_NATS_PASSWORD` | Static user name and password; both are required together |
+
+Choose at most one identity. Setting more than one, or only half of the user/password pair, stops startup with an error that names the variables but not their values. Empty values count as unset, and with nothing set the client connects anonymously, which is the local development default. The seed, `.creds`, and CA files are read again on every reconnect, so a rotated Kubernetes Secret or replaced file takes effect at the next reconnection without a restart; a live connection keeps its original identity until then, and the user/password pair can only change with a restart. Connection failures are logged with their cause, such as a TLS or authorization error and the file path involved, never with the URL or secret contents.
 
 Outbox drain controls are independent from worker concurrency:
 
@@ -447,7 +460,11 @@ The server and web client are published to GHCR as multi-platform (`linux/amd64`
 | `ghcr.io/crono-io/crono-server` | `distroless/static` (about 5 MB compressed) | 8080 | liveness `/live`, readiness `/ready` | UID 65532 |
 | `ghcr.io/crono-io/crono-web` | `nginx-unprivileged` `alpine-slim` (about 6 MB compressed) | 8080 | `/healthz` | UID 101 |
 
-Configure the server with the environment variables described above (at least `CRONO_DATABASE_URL` and `CRONO_NATS_URL`); it logs structured JSON to stderr and needs no writable filesystem, so `readOnlyRootFilesystem: true` works as is. The web image serves only the compiled single-page app and never proxies the API: route `/api` to the server Service and everything else to the web Service in one Ingress or Gateway, so the browser keeps a single origin and the client's relative `/api` calls need no configuration. Requests for `/api` that reach the web Service return `404` so a routing mistake is obvious. With a read-only root filesystem, give the web container a writable `emptyDir` at `/tmp`, where unprivileged nginx keeps its PID file and temporary files. Run `just images` to build both images for the host platform from local sources.
+Configure the server with the environment variables described above (at least `CRONO_DATABASE_URL` and `CRONO_NATS_URL`); it logs structured JSON to stderr and needs no writable filesystem, so `readOnlyRootFilesystem: true` works as is. Keep credentials out of URLs: give the PostgreSQL password as `PGPASSWORD` and the NATS NKey seed as a mounted file (`CRONO_NATS_NKEY_SEED_FILE`), both from a Secret. The web image serves only the compiled single-page app and never proxies the API: route `/api` to the server Service and everything else to the web Service in one Ingress or Gateway, so the browser keeps a single origin and the client's relative `/api` calls need no configuration. Requests for `/api` that reach the web Service return `404` so a routing mistake is obvious. With a read-only root filesystem, give the web container a writable `emptyDir` at `/tmp`, where unprivileged nginx keeps its PID file and temporary files. Workers and PostgreSQL stay outside the cluster; the Helm chart, its Flux configuration and the operating runbooks live in the separate `crono-helm` repository.
+
+Always deploy an image by digest (`ghcr.io/crono-io/crono-server@sha256:…`), never by tag. Besides releases, every push to `develop` or `main` publishes `linux/amd64` development images tagged `dev-<commit>` with the same SBOM, provenance and attestation; the Test & Build run's summary lists their digests. Every pull request and push builds both images from source, and Trivy fails the run on any fixed `HIGH` or `CRITICAL` vulnerability; a release candidate's images are scanned the same way before their digests are recorded, so a vulnerable image is never promoted. Accepted findings, each with its reason, belong in `.trivyignore`.
+
+Each Dockerfile has two final stages. The default (`runtime`) compiles from the repository root, so `docker build -f services/server/Dockerfile .` and `docker build -f apps/web/Dockerfile .` work from a plain checkout; cargo-chef keeps the compiled dependencies in their own layer, rebuilt only when a manifest or `Cargo.lock` changes. `prebuilt` copies binaries and a web bundle staged in the build context, which is how the release packages the exact binaries of its archives for both architectures without emulation. Run `just images` to build the `prebuilt` images for the host platform from local sources.
 
 ### Virtual machines
 
@@ -496,8 +513,13 @@ throwaway PostgreSQL), and pushes a signed commit "bump version to X" to the scr
 of the Release workflow in candidate mode: it tests, builds the static binaries for the
 four targets, the web client, the `.deb` and `.rpm` packages and both images, and keeps
 the files as artifacts with a manifest of their SHA-256 sums and build-provenance
-attestations. The images are pushed only as `ghcr.io/crono-io/<image>:sha-<commit>`,
-with their SBOM, provenance and attestation, and the manifest records their digests.
+attestations. The images are built from the `prebuilt` stage of their Dockerfiles, so
+they hold exactly the binaries and bundle of the archives, with the commit time as
+`SOURCE_DATE_EPOCH`. They are pushed only as `ghcr.io/crono-io/<image>:sha-<commit>`,
+with their SBOM, provenance and attestation, and Trivy scans both platforms of each
+pushed digest; only a clean image's digest reaches the manifest. Development images
+from `develop` and `main` are tagged `dev-<commit>` instead, so they never collide
+with a candidate's `sha-` tag on the same commit.
 When both runs pass, the script downloads the manifest and every artifact and checks the
 commit, the version and every checksum, then moves `develop`, `main` and the signed tag
 X together in one atomic push; the tag message names the candidate run.

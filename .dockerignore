@@ -1,0 +1,22 @@
+# Build context for `docker build -f services/server/Dockerfile .` and
+# `docker build -f apps/web/Dockerfile .` from the repository root. `.git`
+# stays: `built` reads the commit for `--version`. The release's `prebuilt`
+# builds use their own staged context and never read this file.
+
+# Build output and local web bundles.
+target/
+apps/web/dist/
+apps/web/dist-*/
+
+# Local database state and logs.
+db/data/
+db/log/
+logs/
+**/*.log
+
+# Fuzzing, test and agent state; local credentials.
+.schemathesis/
+.hypothesis/
+.agents/
+.codex/
+.aws/

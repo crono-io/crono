@@ -210,6 +210,12 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
+      # Exported for reproducible-build-aware tools only: `built` runs without its
+      # `chrono` feature, so the binaries embed the commit hash but no build time.
+      - name: Export the commit time as SOURCE_DATE_EPOCH
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+
       - name: Build native workspace applications
         run: >-
           cargo build --release --locked --target ${{ matrix.target }}
@@ -352,6 +358,12 @@ jobs:
           tar -xzf "artifacts/crono-web-${RELEASE_VERSION}.tar.gz" -C "${context}/web"
           cp -R apps/web/nginx "${context}/web/nginx"
 
+      # BuildKit takes the SOURCE_DATE_EPOCH build arg below as the image creation
+      # time, so rebuilding the commit yields the same image timestamps.
+      - name: Export the commit time as SOURCE_DATE_EPOCH
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
@@ -386,19 +398,53 @@ jobs:
             org.opencontainers.image.description=${{ matrix.description }}
             org.opencontainers.image.version=${{ needs.guard.outputs.version }}
 
+      # `target: prebuilt` copies the staged binaries and bundle; without it the
+      # default `runtime` stage would recompile from sources not in this context.
       - name: Build and push image
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: image-context
           file: ${{ matrix.dockerfile }}
+          target: prebuilt
           platforms: linux/amd64,linux/arm64
           push: ${{ env.PUSH == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
+          build-args: |
+            SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
+          cache-from: type=gha,scope=release-${{ matrix.image }}
+          cache-to: type=gha,scope=release-${{ matrix.image }},mode=max
           provenance: ${{ env.PUSH == 'true' && 'mode=max' || 'false' }}
           sbom: ${{ env.PUSH == 'true' }}
+
+      # A vulnerable image stops here: its digest is never recorded, so the manifest
+      # job fails and no release can promote it. Each platform of the index is
+      # scanned; accepted findings go in the root .trivyignore with their reason.
+      - name: Scan image (linux/amd64)
+        if: env.PUSH == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/amd64
+        with:
+          version: v0.70.0
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Scan image (linux/arm64)
+        if: env.PUSH == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_PLATFORM: linux/arm64
+        with:
+          version: v0.70.0
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
 
       - name: Attest image provenance
         if: env.PUSH == 'true'

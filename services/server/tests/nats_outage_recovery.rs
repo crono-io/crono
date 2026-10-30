@@ -9,6 +9,7 @@ use ::time::{Duration as TimeDuration, OffsetDateTime};
 use anyhow::{Context, Result, anyhow, bail};
 use async_nats::jetstream::{self, consumer::pull};
 use crono_api::{ClaimRequest, ClaimResponse, CompletionRequest, DispatchEnvelope};
+use crono_nats::NatsClientConfig;
 use crono_server::{
     application::{ControlPlaneStore, JobDefinition, NewSchedule, TargetDefinition},
     domain::{
@@ -45,7 +46,7 @@ async fn nats_outage_and_publisher_crash_preserve_logical_execution() -> Result<
     let postgres = PostgresStore::connect(&database_url, &DatabasePoolConfig::default()).await?;
     let store: Arc<dyn ControlPlaneStore> = Arc::new(postgres);
     let pool = PgPool::connect(&database_url).await?;
-    let publisher = NatsPublisher::new(&nats_url);
+    let publisher = NatsPublisher::new(NatsClientConfig::anonymous(nats_url.as_str()));
     let cancellation = CancellationToken::new();
     let manager = tokio::spawn({
         let publisher = publisher.clone();

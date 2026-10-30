@@ -1,9 +1,16 @@
 //! HTTP server action boundary.
 //!
-//! Startup validates authentication, pool and outbox configuration before touching any
-//! dependency, connects the PostgreSQL pool, and hands it to the API. After the
-//! API and every background loop have stopped, the pool is closed so PostgreSQL
-//! sees a clean terminate for each connection rather than a dropped socket.
+//! Startup validates authentication, pool, outbox and NATS client configuration
+//! before touching any dependency, connects the PostgreSQL pool, and hands it to
+//! the API. NATS itself is connected later by a background manager, so an
+//! unreachable broker does not block startup, but conflicting NATS credentials
+//! do. After the API and every background loop have stopped, the pool is closed
+//! so PostgreSQL sees a clean terminate for each connection rather than a
+//! dropped socket.
+//!
+//! Neither `CRONO_DATABASE_URL` nor `CRONO_NATS_URL` is ever logged because
+//! either may embed credentials; production supplies passwords through
+//! `PGPASSWORD` and secret files instead.
 
 use crate::{
     api,
@@ -12,6 +19,7 @@ use crate::{
     infrastructure::{DatabasePoolConfig, DispatcherConfig, NatsPublisher, PostgresStore},
 };
 use anyhow::{Context, Result};
+use crono_nats::NatsClientConfig;
 use std::{env, sync::Arc, time::Duration};
 
 /// Upper bound on waiting for pooled connections to close at shutdown.
@@ -41,6 +49,8 @@ pub async fn execute(args: Args) -> Result<()> {
         .unwrap_or_else(|_| "postgres://crono_runtime@127.0.0.1:5432/crono".to_string());
     let nats_url =
         env::var("CRONO_NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".to_string());
+    let nats_config =
+        NatsClientConfig::from_env(nats_url).context("failed to load NATS client configuration")?;
     let pool_config =
         DatabasePoolConfig::from_env().context("failed to load PostgreSQL pool configuration")?;
     let dispatcher_config =
@@ -53,7 +63,7 @@ pub async fn execute(args: Args) -> Result<()> {
         Arc::clone(&store),
         Arc::new(GrantAuthorizer::new(Arc::new(postgres.clone()))),
     );
-    let publisher = NatsPublisher::new(&nats_url);
+    let publisher = NatsPublisher::new(nats_config);
 
     tracing::warn!(
         principal = "development/local",

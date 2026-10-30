@@ -123,7 +123,9 @@ musl-build:
     sh -c 'apk add --no-cache musl-dev >/dev/null && cargo build --release --locked --target-dir target/musl -p crono-server -p crono-worker -p crono-cli'
 
 # Stage the same build context layout the release workflow uses and build both
-# images for the host platform, tagged localhost/crono-{server,web}:TAG.
+# images' `prebuilt` stage for the host platform, tagged
+# localhost/crono-{server,web}:TAG. A plain `podman build -f <Dockerfile> .`
+# from the repository root compiles from source instead.
 [doc("Build the crono-server and crono-web images locally for the host platform.")]
 images tag="dev": musl-build
   #!/usr/bin/env bash
@@ -140,8 +142,8 @@ images tag="dev": musl-build
   cp target/musl/release/crono-server "$context/$platform/"
   cp -R apps/web/dist "$context/web/dist"
   cp -R apps/web/nginx "$context/web/nginx"
-  podman build --platform "$platform" -f services/server/Dockerfile -t "localhost/crono-server:{{ tag }}" "$context"
-  podman build --platform "$platform" -f apps/web/Dockerfile -t "localhost/crono-web:{{ tag }}" "$context"
+  podman build --platform "$platform" --target prebuilt -f services/server/Dockerfile -t "localhost/crono-server:{{ tag }}" "$context"
+  podman build --platform "$platform" --target prebuilt -f apps/web/Dockerfile -t "localhost/crono-web:{{ tag }}" "$context"
   podman images --format '{{{{.Repository}}:{{{{.Tag}} {{{{.Size}}' | grep -E "crono-(server|web):{{ tag }}"
 
 # Build .deb and .rpm packages for the host architecture into target/packages.

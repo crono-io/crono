@@ -22,6 +22,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
+use crono_nats::NatsClientConfig;
 use crono_server::{
     api::build_router,
     application::{
@@ -221,7 +222,7 @@ impl Fixture {
         build_router(
             self.app.clone(),
             Arc::new(self.store.clone()),
-            NatsPublisher::new("nats://127.0.0.1:1"),
+            NatsPublisher::new(NatsClientConfig::anonymous("nats://127.0.0.1:1")),
             Arc::new(Provider(authority)),
         )
     }

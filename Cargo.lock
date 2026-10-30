@@ -640,6 +640,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "crono-nats"
+version = "0.1.9"
+dependencies = [
+ "anyhow",
+ "async-nats",
+ "nkeys",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "crono-server"
 version = "0.1.9"
 dependencies = [
@@ -654,6 +665,7 @@ dependencies = [
  "cron-parser",
  "crono-api",
  "crono-execution",
+ "crono-nats",
  "crono-telemetry",
  "futures-util",
  "opentelemetry-proto",
@@ -723,6 +735,7 @@ dependencies = [
  "clap",
  "crono-api",
  "crono-execution",
+ "crono-nats",
  "crono-telemetry",
  "futures-util",
  "opentelemetry-proto",
@@ -1902,9 +1915,9 @@ dependencies = [
 
 [[package]]
 name = "libz-sys"
-version = "1.1.30"
+version = "1.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f710a23e6dbf193214fd46ca56a9d6864e550abe86202184532ae7275e46de19"
+checksum = "ff20308ecabd635a2dc1dd5834a86c462cca20efba1d5d3ddab1f8aea3455cb2"
 dependencies = [
  "cc",
  "libc",
@@ -3174,6 +3187,7 @@ dependencies = [
  "log",
  "memchr",
  "percent-encoding",
+ "rustls",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3185,6 +3199,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "webpki-roots 1.0.11",
 ]
 
 [[package]]
@@ -3433,7 +3448,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

@@ -934,6 +934,7 @@ struct Deny {
 
 /// Use production HTTP composition and safe JSON envelopes; no live NATS is needed.
 fn fixture_router(f: &Fixture) -> Result<(Router, String)> {
+    use crono_nats::NatsClientConfig;
     use crono_server::{
         api::build_router,
         authentication::{BearerToken, DevelopmentAuthProvider},
@@ -943,7 +944,7 @@ fn fixture_router(f: &Fixture) -> Result<(Router, String)> {
     let router = build_router(
         f.app.clone(),
         Arc::new(f.store.clone()),
-        NatsPublisher::new("nats://127.0.0.1:1"),
+        NatsPublisher::new(NatsClientConfig::anonymous("nats://127.0.0.1:1")),
         Arc::new(DevelopmentAuthProvider::new(BearerToken::new(
             token.clone(),
         )?)?),

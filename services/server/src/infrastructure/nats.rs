@@ -4,6 +4,11 @@
 //! connects, verifies the `WorkQueue` stream, and exposes a reusable context to
 //! bounded publishers and worker protocol responders. Losing NATS only delays
 //! dispatch because PostgreSQL retains every execution intent.
+//!
+//! TLS and authentication come from [`NatsClientConfig`], shared with the
+//! worker, so the same `CRONO_NATS_*` variables select the private CA and the
+//! `NKey`, `.creds`, or user/password identity. Connection errors are logged
+//! with their cause but never with the URL or credentials.
 
 use anyhow::{Context, Result, anyhow};
 use async_nats::jetstream::{
@@ -12,6 +17,7 @@ use async_nats::jetstream::{
     message::PublishMessage,
     stream::{Config, DiscardPolicy, RetentionPolicy, StorageType},
 };
+use crono_nats::NatsClientConfig;
 use std::{
     sync::{Arc, RwLock},
     time::Duration,
@@ -26,15 +32,16 @@ pub const DISPATCH_SUBJECTS: &str = "crono.dispatch.*";
 
 #[derive(Debug, Clone)]
 pub struct NatsPublisher {
-    server_url: Arc<str>,
+    config: Arc<NatsClientConfig>,
     context: Arc<RwLock<Option<jetstream::Context>>>,
 }
 
 impl NatsPublisher {
+    /// Prepare a disconnected publisher; [`Self::run_connection_manager`] connects it.
     #[must_use]
-    pub fn new(server_url: &str) -> Self {
+    pub fn new(config: NatsClientConfig) -> Self {
         Self {
-            server_url: Arc::from(server_url),
+            config: Arc::new(config),
             context: Arc::new(RwLock::new(None)),
         }
     }
@@ -58,7 +65,7 @@ impl NatsPublisher {
                             self.replace(context);
                             info!("NATS JetStream execution transport is available");
                         }
-                        Err(error) => warn!(%error, "NATS unavailable; durable dispatch remains in PostgreSQL"),
+                        Err(error) => warn!(error = format!("{error:#}"), "NATS unavailable; durable dispatch remains in PostgreSQL"),
                     }
                 }
             }
@@ -66,11 +73,7 @@ impl NatsPublisher {
     }
 
     async fn connect_once(&self) -> Result<jetstream::Context> {
-        let client = async_nats::ConnectOptions::new()
-            .max_reconnects(None)
-            .connect(self.server_url.as_ref())
-            .await
-            .context("failed to connect to NATS")?;
+        let client = self.config.connect().await?;
         let context = jetstream::new(client);
         context
             .create_or_update_stream(Config {

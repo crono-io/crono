@@ -61,7 +61,9 @@ pub fn new() -> Command {
                     Arg::new("nats-url")
                         .long("nats-url")
                         .env("CRONO_NATS_URL")
-                        .default_value("nats://127.0.0.1:4222"),
+                        .hide_env_values(true)
+                        .default_value("nats://127.0.0.1:4222")
+                        .help("NATS server URL; tls:// forces TLS. Keep credentials out of it: use CRONO_NATS_* instead"),
                 )
                 .arg(
                     Arg::new("queue")

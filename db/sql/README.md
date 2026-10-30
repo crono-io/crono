@@ -118,6 +118,36 @@ When using the official image, mount `db/` at `/db` and mount
 Create the ignored `db/log/postgres/` directory before starting a container with
 that configuration file.
 
+## Remote and Kubernetes deployments
+
+Crono servers never apply the schema themselves: the runtime role has no DDL
+privileges, and PostgreSQL stays outside the cluster. An operator applies the
+SQL from the release being deployed before its server image is rolled out. The
+full runbook lives in the deployment repository (`crono-helm`) at
+`docs/postgres.md`; in short:
+
+1. Check out the release tag that matches the server image.
+2. Apply the bootstrap as an administrator with `CREATEROLE` and `CREATEDB`,
+   supplying the runtime password through a psql variable:
+   `psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -v crono_runtime_password='<secret>' -f db/sql/00_init.sql`.
+3. Verify ownership and grants with `psql "$ADMIN_URL" -f db/sql/check.sql`.
+4. Only then update the server image digest.
+
+Only one operator should apply the schema at a time. The SQL is idempotent, so
+reapplying an unchanged release is safe.
+
+The server connects as `crono_runtime` over TLS. Keep the password out of the
+URL and pass it as `PGPASSWORD`, and require certificate and host-name
+verification against the database CA:
+
+```sh
+CRONO_DATABASE_URL='postgres://crono_runtime@db.example.internal:5432/crono?sslmode=verify-full&sslrootcert=/etc/crono/postgres/ca.crt'
+PGPASSWORD='<secret>'
+```
+
+The administrator URL used for the steps above should also set
+`sslmode=verify-full` when it crosses a network.
+
 ## Reset
 
 For local development, `just dev-reset` removes the exact `crono-postgres` and

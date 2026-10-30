@@ -332,7 +332,7 @@ async fn membership_outages_fail_closed_and_global_grants_do_not_widen_namespace
             Arc::new(GrantAuthorizer::new(Arc::new(UnavailableResolver))),
         ),
         Arc::new(f.store.clone()),
-        NatsPublisher::new("nats://127.0.0.1:1"),
+        NatsPublisher::new(NatsClientConfig::anonymous("nats://127.0.0.1:1")),
         Arc::new(Provider(Authority::Document(Some(grants.to_json()?)))),
     );
     assert_eq!(

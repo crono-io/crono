@@ -14,6 +14,10 @@
 //! misrouted dispatches are terminated, while transient control failures are
 //! returned for redelivery. The worker never accesses PostgreSQL directly.
 //!
+//! The NATS connection uses the shared [`NatsClientConfig`]: `--nats-url` plus
+//! the `CRONO_NATS_*` CA and `NKey`, `.creds`, or user/password settings. The URL
+//! and credentials are never logged.
+//!
 //! Dry-run sessions consume and complete claimed Attempts successfully while
 //! printing their already-rendered command instead of starting a process.
 //! The printed argv is sanitized using known sensitive input keys and argument
@@ -35,6 +39,7 @@ use crono_api::{
     LeaseRequest, OutputSnapshotRequest, QueueReference, QueueResolutionRequest,
     QueueResolutionResponse, QueueResolutionStatus, WorkerDiagnostics, WorkerHeartbeatRequest,
 };
+use crono_nats::NatsClientConfig;
 use futures_util::StreamExt;
 use std::{
     sync::Arc,
@@ -69,9 +74,10 @@ pub struct Args {
 pub async fn execute(args: Args) -> Result<()> {
     validate_token(&args.queue, "queue")?;
     validate_token(&args.worker_id, "worker ID")?;
-    let client = async_nats::ConnectOptions::new()
-        .max_reconnects(None)
-        .connect(&args.nats_url)
+    let nats_config = NatsClientConfig::from_env(args.nats_url.as_str())
+        .context("failed to load NATS client configuration")?;
+    let client = nats_config
+        .connect()
         .await
         .context("failed to connect worker to NATS")?;
     let queue = resolve_queue(&client, &args.queue).await?;
