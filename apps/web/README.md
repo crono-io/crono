@@ -1,14 +1,14 @@
 # Crono web
 
 `crono-web` is the optional, independently built and deployed browser client
-for Crono. It uses Leptos CSR, Leptos Router, Trunk, Tailwind CSS v4, and Google
-Material Symbols Outlined. The server does not embed or serve these assets, and
-Crono remains fully usable through its public API and the `crono` CLI without
-the GUI.
+for Crono. It uses Leptos CSR, Leptos Router, Trunk, Tailwind CSS v4, and Lucide
+icons from the `lucide-leptos` crate. The server does not embed or serve these
+assets, and Crono remains fully usable through its public API and the `crono`
+CLI without the GUI.
 
-The application uses a dark infrastructure-style sidebar, compact top toolbar,
-and light routed workspace as its baseline visual language. Overview displays
-authorized live counts with Material Symbols plus Recent Runs and Workers.
+The application uses a light neutral sidebar separated by a subtle border,
+a compact top toolbar, and a light routed workspace as its baseline visual language. On desktop the shell fills the viewport: the sidebar's navigation scrolls on its own above a footer pinned to the bottom, and the workspace scrolls independently beneath the toolbar. Overview displays
+authorized live counts with Lucide icons plus Recent Runs and Workers.
 Namespaces, Queues, Jobs, Targets, and Target Sets provide creation and list
 workflows. Empty Namespaces support guarded deletion; the bootstrap `default`
 Namespace is protected. Queues additionally support rename, enable/disable, and guarded
@@ -57,7 +57,7 @@ rejects Job, Run-history, and worker-presence references; Target deletion reject
 Target Set, Schedule, Run-request, and Run-history references. These failures
 preserve all related records. Dialogs contain focus and restore it to the opener
 on cancellation. Run creation and re-run feedback retain their existing flow.
-Monitor links to Schedules, Runs, and Workers with the same Material Symbols used
+Monitor links to Schedules, Runs, and Workers with the same Lucide icons used
 in the sidebar, keeping the destination names visible beside each icon. These
 links are gray at rest, with a light background and blue text on hover and a
 visible focus ring for keyboard navigation.
@@ -122,7 +122,7 @@ and errors when an operator opens their output. The Runs history keeps Job/Targe
 Started, Finished, and Status aligned for comparison on wide screens and labels
 those fields on narrow screens. Start and finish retain seconds and exact-time
 tooltips; the finish cell labels duration as elapsed time. History actions pair
-decorative Material Symbols with visible Details, Output, and Re-run labels.
+decorative Lucide icons with visible Details, Output, and Re-run labels.
 They share Monitor's quiet gray, hover, and keyboard focus treatment. The Re-run
 confirmation expands beneath the action row on narrow screens.
 Successful repeats show one link to the new Run. That notice clears when another
@@ -132,9 +132,9 @@ Run details offer Refresh status and Refresh timeline only while the Run can
 still change; both use labeled refresh icons. Opened Attempt output likewise
 offers Refresh output only for nonterminal Runs; terminal
 outcomes load output on demand without a redundant refresh control. The live
-refresh control pairs the Material symbol with visible text and keyboard focus
-styling; the shared icon font stylesheet already covers that symbol. Eligible
-terminal Runs still offer Re-run.
+refresh control pairs its Lucide icon with visible text and keyboard focus
+styling; inline SVG icons need no font stylesheet. Eligible terminal Runs
+still offer Re-run.
 
 During an active Attempt, the worker uploads bounded, redacted output tails
 about once per second. Refresh output fetches that saved progress; a script
@@ -215,12 +215,28 @@ required. Release assets are written to the ignored `dist/` directory. Crono's
 small semantic color layer is defined through Tailwind v4 theme variables in
 that stylesheet so future palette changes do not require editing each component.
 
-Material Symbols are loaded through one Google Fonts link in `index.html` and
-rendered through the typed `Icon` component. The common outlined-family font
-settings live in `style.css`, keeping the hosted font URL isolated so the asset
-can be self-hosted later without changing page or navigation code. Trunk copies
-the white Crono SVG from the repository-level `logo/` directory for the sidebar
-brand mark; navigation and interface icons continue to use Material Symbols.
+Light and dark themes share one source of truth: the `dark` class on `<html>`.
+`style.css` defines semantic tokens (`background`, `foreground`, `card`, `muted`,
+`accent`, `border`, `sidebar*`, `primary*`) on `:root` with dark overrides on
+`.dark`, and maps them to Tailwind utilities such as `bg-card` and
+`text-muted-foreground`; components use these utilities instead of fixed
+colors. A small inline script in `index.html` picks the stored `crono-theme`
+(`localStorage`) or else `prefers-color-scheme` before first paint, avoiding a
+flash of the wrong theme. `theme.rs` reads that class into a context signal,
+and the header toggle flips it, persisting the explicit choice. The brand
+accent is reserved for the logo, primary buttons, focus rings, and the thin
+active-navigation bar; active navigation labels use neutral weight and
+background instead.
+
+Icons render through the typed `Icon` component backed by `lucide-leptos`, so
+no icon font or third-party stylesheet is requested at runtime. Each call site
+passes a typed `AppIcon` from `navigation.rs` and a `size` prop following the
+18–20 pixel convention (20 by default, 18 for inline action buttons); colors
+inherit `currentColor` from the theme variables through the wrapper's
+`app-icon` class. Trunk copies the white Crono SVG from the repository-level
+`logo/` directory for the sidebar brand mark; that logo and the custom "C"
+avatar chip stay intentionally hand-made while every navigation and interface
+icon comes from Lucide.
 
 From the workspace root, validate Rust browser code with:
 

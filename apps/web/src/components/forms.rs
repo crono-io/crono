@@ -8,7 +8,7 @@
 //! multi-line editors retain their own content height.
 
 use super::Icon;
-use crate::navigation::MaterialSymbol;
+use crate::navigation::AppIcon;
 use leptos::prelude::*;
 use uuid::Uuid;
 
@@ -79,7 +79,7 @@ pub fn JsonObjectInput(
     let error_id = format!("{id}-error");
     view! {
         <div>
-            <label for=id class="block text-sm font-medium text-crono-text">{label}</label>
+            <label for=id class="block text-sm font-medium text-foreground">{label}</label>
             <textarea
                 id=id
                 class=format!("mt-1.5 min-h-32 font-mono {INPUT_CLASS}")
@@ -89,7 +89,7 @@ pub fn JsonObjectInput(
                 prop:value=move || value.get()
                 on:input=move |event| value.set(event_target_value(&event))
             />
-            <p class="mt-1.5 text-xs text-crono-muted">
+            <p class="mt-1.5 text-xs text-muted-foreground">
                 "JSON object. Values are not treated as secrets."
             </p>
             <p id=error_id class="mt-1 text-sm text-crono-failed" role="alert">
@@ -109,7 +109,7 @@ pub fn ArgumentListInput(
 ) -> impl IntoView {
     view! {
         <fieldset>
-            <legend class="text-sm font-medium text-crono-text">{label}</legend>
+            <legend class="text-sm font-medium text-foreground">{label}</legend>
             <div class="mt-1.5 space-y-2">
                 {move || values.get().into_iter().enumerate().map(|(index, value)| {
                     view! {
@@ -128,7 +128,7 @@ pub fn ArgumentListInput(
                             />
                             <button
                                 type="button"
-                                class="rounded-md border border-crono-border px-3 text-sm text-crono-muted hover:bg-zinc-50 hover:text-crono-failed"
+                                class="rounded-md border border-border px-3 text-sm text-muted-foreground hover:bg-accent hover:text-crono-failed"
                                 aria-label=format!("Remove argument {}", index + 1)
                                 on:click=move |_| values.update(|items| {
                                     if index < items.len() {
@@ -144,12 +144,12 @@ pub fn ArgumentListInput(
             </div>
             <button
                 type="button"
-                class="mt-2 text-sm font-medium text-crono-primary hover:text-crono-primary-hover"
+                class="mt-2 text-sm font-medium text-primary hover:text-primary-hover"
                 on:click=move |_| values.update(|items| items.push(String::new()))
             >
                 "+ Add argument"
             </button>
-            <p class="mt-1.5 text-xs text-crono-muted">
+            <p class="mt-1.5 text-xs text-muted-foreground">
                 "Use {{ path.to.value }} for scalar inputs. Each row remains one argument."
             </p>
             <p class="mt-1 text-sm text-crono-failed" role="alert">
@@ -174,7 +174,7 @@ pub fn ResourceNameInput(
     let described_by = format!("{help_id} {error_id}");
     view! {
         <div>
-            <label for=id.clone() class="block text-sm font-medium text-crono-text">
+            <label for=id.clone() class="block text-sm font-medium text-foreground">
                 {label}<span class="ml-1 text-crono-failed" aria-hidden="true">"*"</span>
             </label>
             <input
@@ -190,7 +190,7 @@ pub fn ResourceNameInput(
                 on:input=move |event| value.set(event_target_value(&event))
                 on:blur=move |_| trim_structured_field(value)
             />
-            <p id=help_id class="mt-1.5 text-xs text-crono-muted">
+            <p id=help_id class="mt-1.5 text-xs text-muted-foreground">
                 "Lowercase letters, numbers and hyphens. Maximum 63 characters."
             </p>
             <p id=error_id class="mt-1 text-sm text-crono-failed" role="alert">
@@ -254,7 +254,7 @@ pub fn ResourceSelect(
 
     view! {
         <div>
-            <label for=id.clone() class="block text-sm font-medium text-crono-text">
+            <label for=id.clone() class="block text-sm font-medium text-foreground">
                 {label}
                 <Show when=move || !optional>
                     <span class="ml-1 text-crono-failed" aria-hidden="true">"*"</span>
@@ -290,7 +290,7 @@ pub fn ResourceSelect(
                     on:keydown=keydown
                     on:blur=move |_| open.set(false)
                 />
-                <Icon symbol=MaterialSymbol::ExpandMore class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-lg text-crono-muted" />
+                <Icon icon=AppIcon::ChevronDown size=18 class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Show when=move || open.get() && !disabled()>
                     <ResourceSelectOptions
                         list_id=list_id.clone()
@@ -388,11 +388,11 @@ fn ResourceSelectOptions(
     choose: Callback<ResourceOption>,
 ) -> impl IntoView {
     view! {
-        <ul id=list_id role="listbox" class="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-crono-border bg-white py-1 shadow-lg">
+        <ul id=list_id role="listbox" class="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-border bg-card py-1 shadow-lg">
             {move || {
                 let visible = filtered.get();
                 if visible.is_empty() {
-                    return view! { <li class="px-3 py-3 text-sm text-crono-muted">"No matches."</li> }.into_any();
+                    return view! { <li class="px-3 py-3 text-sm text-muted-foreground">"No matches."</li> }.into_any();
                 }
                 visible.into_iter().enumerate().map(|(index, option)| {
                     let selected_option = selected.get_untracked() == Some(option.id);
@@ -401,7 +401,7 @@ fn ResourceSelectOptions(
                         <li role="option" aria-selected=selected_option.to_string()>
                             <button
                                 type="button"
-                                class=move || format!("flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-crono-primary-soft {}", if active.get() == index { "bg-crono-primary-soft" } else { "" })
+                                class=move || format!("flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-accent {}", if active.get() == index { "bg-accent" } else { "" })
                                 on:mousedown=move |event| {
                                     event.prevent_default();
                                     choose.run(option_for_click.clone());
@@ -409,7 +409,7 @@ fn ResourceSelectOptions(
                             >
                                 <span>{option.label}</span>
                                 <Show when=move || selected.get() == Some(option.id)>
-                                    <Icon symbol=MaterialSymbol::Check class="text-base text-crono-primary" />
+                                    <Icon icon=AppIcon::Check size=18 class="text-primary" />
                                 </Show>
                             </button>
                         </li>
@@ -450,7 +450,7 @@ pub fn ResourceMultiSelect(
     });
     view! {
         <fieldset>
-            <legend class="text-sm font-medium text-crono-text">
+            <legend class="text-sm font-medium text-foreground">
                 {label}<span class="ml-1 text-crono-failed" aria-hidden="true">"*"</span>
             </legend>
             <input
@@ -463,19 +463,19 @@ pub fn ResourceMultiSelect(
                 prop:value=move || query.get()
                 on:input=move |event| query.set(event_target_value(&event))
             />
-            <div role="listbox" aria-multiselectable="true" class="mt-2 max-h-56 overflow-auto rounded-md border border-crono-border bg-white">
+            <div role="listbox" aria-multiselectable="true" class="mt-2 max-h-56 overflow-auto rounded-md border border-border bg-card">
                 {move || {
                     let visible = filtered.get();
                     if visible.is_empty() {
-                        return view! { <p class="px-3 py-4 text-sm text-crono-muted">"No targets match."</p> }.into_any();
+                        return view! { <p class="px-3 py-4 text-sm text-muted-foreground">"No targets match."</p> }.into_any();
                     }
                     visible.into_iter().map(|option| {
                         let id = option.id;
                         view! {
-                            <label class="flex cursor-pointer items-center gap-3 border-b border-crono-border px-3 py-2.5 text-sm last:border-b-0 hover:bg-crono-primary-soft">
+                            <label class="flex cursor-pointer items-center gap-3 border-b border-border px-3 py-2.5 text-sm last:border-b-0 hover:bg-accent">
                                 <input
                                     type="checkbox"
-                                    class="size-4 rounded border-crono-border text-crono-primary focus:ring-crono-primary"
+                                    class="size-4 rounded border-border text-primary focus:ring-primary"
                                     prop:checked=move || selected.get().contains(&id)
                                     on:change=move |event| {
                                         let checked = event_target_checked(&event);
@@ -494,7 +494,7 @@ pub fn ResourceMultiSelect(
                     }).collect_view().into_any()
                 }}
             </div>
-            <p class="mt-1.5 text-xs text-crono-muted">{move || format!("{} selected", selected.get().len())}</p>
+            <p class="mt-1.5 text-xs text-muted-foreground">{move || format!("{} selected", selected.get().len())}</p>
             <p class="mt-1 text-sm text-crono-failed" role="alert">
                 {move || load_error.get().or_else(|| field_error.get()).unwrap_or_default()}
             </p>
@@ -511,10 +511,10 @@ pub fn FormActions(
 ) -> impl IntoView {
     view! {
         <div class="flex items-center justify-end gap-3 pt-2">
-            <button type="button" class="rounded-md px-4 py-2 text-sm font-medium text-crono-muted hover:bg-zinc-100 hover:text-crono-text" on:click=move |_| on_cancel.run(())>
+            <button type="button" class="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground" on:click=move |_| on_cancel.run(())>
                 "Cancel"
             </button>
-            <button type="submit" disabled=move || disabled.get() class="rounded-md bg-crono-primary px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-crono-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">
+            <button type="submit" disabled=move || disabled.get() class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50">
                 {submit_label}
             </button>
         </div>

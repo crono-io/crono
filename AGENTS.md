@@ -75,7 +75,7 @@ Fix findings instead of weakening lints or adding production suppressions such a
 
 Use Rust/Tokio tests with behavioral names such as `run_reports_unavailable_nats`. Cover failure paths and add regression tests for fixes. Telemetry tests require localhost sockets. Verify GUI changes with a Trunk build and browser inspection; native checks only compile its tooling entrypoint.
 
-For web UI, label measurements and units explicitly rather than making users infer their meaning. Pair Material Symbols with visible action text, use the shared `Icon` component, and check responsive layout and keyboard focus when changing interactive controls.
+For web UI, label measurements and units explicitly rather than making users infer their meaning. Pair Lucide icons with visible action text, use the shared `Icon` component, and check responsive layout and keyboard focus when changing interactive controls.
 
 ## Commit & Pull Request Guidelines
 

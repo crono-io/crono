@@ -29,8 +29,7 @@ use leptos_router::hooks::use_params_map;
 use uuid::Uuid;
 
 const ACTION_CLASS: &str = super::runs::ACTION_CLASS;
-const PANEL_CLASS: &str =
-    "min-w-0 space-y-4 rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6";
+const PANEL_CLASS: &str = "min-w-0 space-y-4 rounded-xl border border-border bg-card p-5 sm:p-6";
 
 /// Friendly labels are shared by form controls, arrows, and structured dependencies.
 const fn condition_label(condition: DependencyCondition) -> &'static str {

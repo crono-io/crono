@@ -2,7 +2,7 @@
 
 use crate::{
     components::{Card, EmptyState, PageHeader},
-    navigation::MaterialSymbol,
+    navigation::AppIcon,
 };
 use leptos::prelude::*;
 
@@ -17,7 +17,7 @@ pub fn SettingsPage() -> impl IntoView {
             />
             <Card>
                 <EmptyState
-                    icon=MaterialSymbol::Settings
+                    icon=AppIcon::Settings
                     title="No settings available"
                     description="Configuration options will appear here when they become available."
                 />

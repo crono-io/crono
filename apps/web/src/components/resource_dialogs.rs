@@ -6,11 +6,11 @@
 //! The native Modal contains focus and blocks Escape during pending deletion.
 
 use super::{Icon, Modal, QUIET_ACTION_CLASS};
-use crate::navigation::MaterialSymbol;
+use crate::navigation::AppIcon;
 use leptos::{prelude::*, task::spawn_local};
 
 /// Style destructive actions quietly until hover, with a visible keyboard focus ring.
-pub(crate) const DELETE_ACTION_CLASS: &str = "inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-crono-muted transition-colors hover:bg-red-50 hover:text-crono-failed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-failed focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-crono-muted";
+pub(crate) const DELETE_ACTION_CLASS: &str = "inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-red-50 hover:text-crono-failed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-failed focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-muted-foreground";
 
 /// A server-confirmed outcome with a safe continuation and optional resource navigation.
 #[derive(Clone)]
@@ -58,17 +58,17 @@ pub fn ResourceFeedbackModal(
     view! {
         <Modal id open title=Signal::derive(move || if succeeded.get() { format!("{resource} saved") } else { format!("{resource} could not be saved") })>
             <div class="flex items-start gap-3">
-                <Show when=move || succeeded.get() fallback=|| view! { <Icon symbol=MaterialSymbol::Error class="text-crono-failed" /> }>
-                    <Icon symbol=MaterialSymbol::Check class="text-crono-success" />
+                <Show when=move || succeeded.get() fallback=|| view! { <Icon icon=AppIcon::CircleX class="text-crono-failed" /> }>
+                    <Icon icon=AppIcon::CircleCheck class="text-crono-success" />
                 </Show>
-                <p class="break-words text-sm text-crono-muted" role=move || if succeeded.get() { "status" } else { "alert" }>{move || feedback.get().map(|value| value.message).unwrap_or_default()}</p>
+                <p class="break-words text-sm text-muted-foreground" role=move || if succeeded.get() { "status" } else { "alert" }>{move || feedback.get().map(|value| value.message).unwrap_or_default()}</p>
             </div>
             <div class="flex flex-wrap justify-end gap-3">
                 <button type="button" class=QUIET_ACTION_CLASS autofocus on:click=move |_| open.set(false)>
                     {move || feedback.get().map_or("Back to form", |value| value.continue_label)}
                 </button>
                 <Show when=move || feedback.get().is_some_and(|value| value.succeeded || value.view_on_error)>
-                    <button type="button" class="rounded-md bg-crono-primary px-4 py-2 text-sm font-medium text-white hover:bg-crono-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary focus-visible:ring-offset-2" on:click=move |_| { open.set(false); on_view.run(()); }>{format!("View {plural}")}</button>
+                    <button type="button" class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2" on:click=move |_| { open.set(false); on_view.run(()); }>{format!("View {plural}")}</button>
                 </Show>
             </div>
         </Modal>
@@ -94,10 +94,10 @@ pub fn DeleteControl(
     let name = StoredValue::new(name);
     view! {
         <button type="button" class=DELETE_ACTION_CLASS disabled=move || busy.get() on:click=move |_| { error.set(None); open.set(true); }>
-            <Icon symbol=MaterialSymbol::Delete class="text-[18px]" />"Delete"
+            <Icon icon=AppIcon::Trash size=18 />"Delete"
         </button>
         <Modal id open title=Signal::derive(move || format!("Delete {resource} {}?", name.get_value())) busy=Signal::derive(move || busy.get())>
-            <p class="text-sm text-crono-muted">{description}</p>
+            <p class="text-sm text-muted-foreground">{description}</p>
             <Show when=move || error.get().is_some()>
                 <p class="break-words text-sm text-crono-failed" role="alert">{move || error.get().unwrap_or_default()}</p>
             </Show>
@@ -105,7 +105,7 @@ pub fn DeleteControl(
                 <button type="button" class=QUIET_ACTION_CLASS autofocus disabled=move || busy.get() on:click=move |_| open.set(false)>"Cancel"</button>
                 <button type="button" class=DELETE_ACTION_CLASS disabled=move || busy.get() on:click=move |_| {
                     if open.get_untracked() && !busy.get_untracked() { on_confirm.run(()); }
-                }><Icon symbol=MaterialSymbol::Delete class="text-[18px]" />{move || if busy.get() { "Deleting…" } else { "Confirm delete" }}</button>
+                }><Icon icon=AppIcon::Trash size=18 />{move || if busy.get() { "Deleting…" } else { "Confirm delete" }}</button>
             </div>
         </Modal>
     }

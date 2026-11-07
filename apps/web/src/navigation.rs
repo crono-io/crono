@@ -72,21 +72,22 @@ impl AppRoute {
         }
     }
 
-    /// Return the explicit Material Symbol assigned to the route.
+    /// Return the explicit Lucide icon assigned to the route.
     #[must_use]
-    pub const fn symbol(self) -> MaterialSymbol {
+    pub const fn symbol(self) -> AppIcon {
         match self {
-            Self::Overview => MaterialSymbol::Dashboard,
-            Self::Namespaces | Self::Workflows | Self::WorkflowsNew => MaterialSymbol::AccountTree,
-            Self::Queues => MaterialSymbol::Queue,
-            Self::Jobs | Self::JobsNew => MaterialSymbol::Work,
-            Self::Targets | Self::TargetsNew => MaterialSymbol::Dns,
-            Self::TargetSets => MaterialSymbol::Lan,
-            Self::Schedules => MaterialSymbol::CalendarMonth,
-            Self::Runs | Self::RunsNew => MaterialSymbol::PlayCircle,
-            Self::Workers => MaterialSymbol::Memory,
-            Self::Monitor => MaterialSymbol::Monitoring,
-            Self::Settings => MaterialSymbol::Settings,
+            Self::Overview => AppIcon::LayoutDashboard,
+            Self::Namespaces => AppIcon::Folder,
+            Self::Queues => AppIcon::ListOrdered,
+            Self::Jobs | Self::JobsNew => AppIcon::Workflow,
+            Self::Targets | Self::TargetsNew => AppIcon::Target,
+            Self::TargetSets => AppIcon::Boxes,
+            Self::Schedules => AppIcon::CalendarClock,
+            Self::Runs | Self::RunsNew => AppIcon::Play,
+            Self::Workflows | Self::WorkflowsNew => AppIcon::GitBranch,
+            Self::Workers => AppIcon::Server,
+            Self::Monitor => AppIcon::Activity,
+            Self::Settings => AppIcon::Settings,
         }
     }
 
@@ -175,62 +176,46 @@ const WORKFLOW_CHILDREN: &[NavigationChild] = &[
     },
 ];
 
-/// Known symbols used by the Crono shell and empty states.
+/// Known icons used by the Crono shell, empty states, and feedback dialogs.
+///
+/// Variants are pure data so this module stays free of rendering dependencies
+/// and remains testable on native targets.
+// Variants are constructed across the wasm-only UI modules, so the native test
+// build would report the shell-only ones as never constructed. The allowance is
+// confined to test builds so wasm builds still surface genuinely unused icons.
+#[cfg_attr(all(test, not(target_arch = "wasm32")), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MaterialSymbol {
-    AccountTree,
-    CalendarMonth,
+pub enum AppIcon {
+    Activity,
+    Boxes,
+    CalendarClock,
     Check,
-    Dashboard,
-    Delete,
-    Dns,
-    Error,
-    ExpandMore,
+    Copy,
+    ChevronDown,
+    CircleCheck,
+    CirclePlay,
+    CircleX,
+    Folder,
+    GitBranch,
+    Hash,
     Info,
-    Lan,
-    LightMode,
-    Memory,
-    Monitoring,
-    PlayCircle,
-    Queue,
-    Refresh,
-    Replay,
-    SearchOff,
+    LayoutDashboard,
+    ListOrdered,
+    Moon,
+    Play,
+    RefreshCw,
+    Repeat,
+    RotateCcw,
+    ScrollText,
+    SearchX,
+    Server,
     Settings,
-    Terminal,
+    Sun,
+    Target,
     Timer,
-    Work,
-}
-
-impl MaterialSymbol {
-    /// Return the exact ligature understood by Material Symbols Outlined.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::AccountTree => "account_tree",
-            Self::CalendarMonth => "calendar_month",
-            Self::Check => "check",
-            Self::Dashboard => "dashboard",
-            Self::Delete => "delete",
-            Self::Dns => "dns",
-            Self::Error => "error",
-            Self::ExpandMore => "expand_more",
-            Self::Info => "info",
-            Self::Lan => "lan",
-            Self::LightMode => "light_mode",
-            Self::Memory => "memory",
-            Self::Monitoring => "monitoring",
-            Self::PlayCircle => "play_circle",
-            Self::Queue => "queue",
-            Self::Refresh => "refresh",
-            Self::Replay => "replay",
-            Self::SearchOff => "search_off",
-            Self::Settings => "settings",
-            Self::Terminal => "terminal",
-            Self::Timer => "timer",
-            Self::Work => "work",
-        }
-    }
+    Trash,
+    User,
+    Workflow,
 }
 
 /// Named navigation section rendered in the sidebar.
@@ -364,9 +349,8 @@ pub fn workflow_run_details_path(id: impl std::fmt::Display) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ALL_ROUTES, AppRoute, MaterialSymbol, NAVIGATION_GROUPS, is_active_path,
-        is_section_active_path, job_edit_path, run_details_path, target_edit_path,
-        worker_details_path,
+        ALL_ROUTES, AppIcon, AppRoute, NAVIGATION_GROUPS, is_active_path, is_section_active_path,
+        job_edit_path, run_details_path, target_edit_path, worker_details_path,
     };
 
     #[test]
@@ -445,7 +429,6 @@ mod tests {
                 route.path()
             );
             assert_ne!(route.label(), "");
-            assert_ne!(route.symbol().as_str(), "");
         }
     }
 
@@ -566,29 +549,29 @@ mod tests {
     }
 
     #[test]
-    fn shell_symbols_are_explicit() {
-        let shell_symbols = [
-            MaterialSymbol::Check,
-            MaterialSymbol::Delete,
-            MaterialSymbol::ExpandMore,
-            MaterialSymbol::LightMode,
-            MaterialSymbol::SearchOff,
+    fn routes_map_to_expected_icons() {
+        let expected = [
+            (AppRoute::Overview, AppIcon::LayoutDashboard),
+            (AppRoute::Namespaces, AppIcon::Folder),
+            (AppRoute::Queues, AppIcon::ListOrdered),
+            (AppRoute::Jobs, AppIcon::Workflow),
+            (AppRoute::JobsNew, AppIcon::Workflow),
+            (AppRoute::Targets, AppIcon::Target),
+            (AppRoute::TargetsNew, AppIcon::Target),
+            (AppRoute::TargetSets, AppIcon::Boxes),
+            (AppRoute::Schedules, AppIcon::CalendarClock),
+            (AppRoute::Runs, AppIcon::Play),
+            (AppRoute::RunsNew, AppIcon::Play),
+            (AppRoute::Workflows, AppIcon::GitBranch),
+            (AppRoute::WorkflowsNew, AppIcon::GitBranch),
+            (AppRoute::Workers, AppIcon::Server),
+            (AppRoute::Monitor, AppIcon::Activity),
+            (AppRoute::Settings, AppIcon::Settings),
         ];
 
-        assert!(
-            shell_symbols
-                .into_iter()
-                .all(|symbol| !symbol.as_str().is_empty())
-        );
-    }
-
-    #[test]
-    fn action_and_feedback_symbols_have_intentional_ligatures() {
-        assert_eq!(MaterialSymbol::Error.as_str(), "error");
-        assert_eq!(MaterialSymbol::Info.as_str(), "info");
-        assert_eq!(MaterialSymbol::Refresh.as_str(), "refresh");
-        assert_eq!(MaterialSymbol::Terminal.as_str(), "terminal");
-        assert_eq!(MaterialSymbol::Replay.as_str(), "replay");
-        assert_eq!(MaterialSymbol::Timer.as_str(), "timer");
+        assert_eq!(expected.len(), ALL_ROUTES.len());
+        for (route, icon) in expected {
+            assert_eq!(route.symbol(), icon, "{}", route.path());
+        }
     }
 }

@@ -36,7 +36,7 @@ pub fn RunWorkflowPage() -> impl IntoView {
     view! { {move || workflow.map(|result| match result {
         Ok(workflow) => view! { <LaunchForm workflow=workflow.clone() /> }.into_any(),
         Err(error) => view! { <ApiFailure message=error.message.clone() on_retry=Callback::new(move |()| workflow.refetch()) /> }.into_any(),
-    }).unwrap_or_else(|| view! { <p class="text-sm text-crono-muted">"Loading Workflow…"</p> }.into_any())} }
+    }).unwrap_or_else(|| view! { <p class="text-sm text-muted-foreground">"Loading Workflow…"</p> }.into_any())} }
 }
 
 /// Reuse Job invocation selectors; this form never selects per-node destinations.
@@ -105,9 +105,9 @@ fn LaunchForm(workflow: WorkflowResource) -> impl IntoView {
             <fieldset class="space-y-5" disabled=move || busy.get()>
                 <ResourceSelect id="workflow-run-destination" label="Target or Target Set" placeholder="Choose a destination…" options selected=destination loading=Signal::derive(move || targets.loading.get() || sets.loading.get()) load_error=Signal::derive(move || targets.load_error.get().or_else(|| sets.load_error.get())) />
                 <JsonObjectInput id="workflow-run-inputs" label="Invocation inputs" value=inputs error=input_error />
-                <p class="text-xs text-crono-muted">"Inputs are configuration, not a secret store. Target Set fan-out uses normal Crono Runs for each target."</p>
+                <p class="text-xs text-muted-foreground">"Inputs are configuration, not a secret store. Target Set fan-out uses normal Crono Runs for each target."</p>
             </fieldset>
-            <div class="space-y-1 rounded-lg bg-zinc-50 p-4 text-sm"><p class="break-words font-semibold">{format!("Workflow: {}", workflow.name)}</p><p>{format!("Jobs: {}", workflow.nodes.len())}</p><p class="break-words">{move || options.get().iter().find(|option| Some(option.id) == destination.get()).map_or_else(|| "Destination: not selected".to_string(), |option| option.label.clone())}</p></div>
+            <div class="space-y-1 rounded-lg bg-muted p-4 text-sm"><p class="break-words font-semibold">{format!("Workflow: {}", workflow.name)}</p><p>{format!("Jobs: {}", workflow.nodes.len())}</p><p class="break-words">{move || options.get().iter().find(|option| Some(option.id) == destination.get()).map_or_else(|| "Destination: not selected".to_string(), |option| option.label.clone())}</p></div>
             <Show when=move || error.get().is_some()><p role="alert" class="break-words text-sm text-crono-failed">{move || error.get().unwrap_or_default()}</p></Show>
             <FormActions submit_label="Run Workflow" disabled=Signal::derive(move || busy.get() || input_error.get().is_some()) on_cancel=Callback::new(move |()| { if !busy.get_untracked() { cancel(&workflow_details_path(id), NavigateOptions::default()); } }) />
         </form></section>

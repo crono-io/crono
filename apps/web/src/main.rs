@@ -21,6 +21,8 @@ mod components;
 mod pages;
 #[cfg(target_arch = "wasm32")]
 mod routing;
+#[cfg(target_arch = "wasm32")]
+mod theme;
 
 /// Mount the client-side application.
 #[cfg(target_arch = "wasm32")]

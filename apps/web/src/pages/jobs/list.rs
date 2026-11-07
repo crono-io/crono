@@ -7,14 +7,14 @@ use super::super::resource_options;
 use crate::{
     api,
     components::{EmptyState, PageHeader, QUIET_ACTION_CLASS, ResourceSelect},
-    navigation::{AppRoute, MaterialSymbol, job_edit_path},
+    navigation::{AppIcon, AppRoute, job_edit_path},
 };
 use crono_api::{JobResource, Page};
 use leptos::prelude::*;
 use leptos_router::components::A;
 use uuid::Uuid;
 
-const ACTION_CLASS: &str = "inline-flex items-center justify-center rounded-md bg-crono-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-crono-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary focus-visible:ring-offset-2";
+const ACTION_CLASS: &str = "inline-flex items-center justify-center rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2";
 
 /// Browse Jobs in a selected Namespace without mounting the create form.
 #[component]
@@ -31,20 +31,20 @@ pub fn JobsPage() -> impl IntoView {
             <div class="max-w-xl">
                 <ResourceSelect id="jobs-namespace-filter" label="Namespace" placeholder="Select a Namespace to browse Jobs…" options=namespace_choices.options selected=namespace_id loading=namespace_choices.loading load_error=namespace_choices.load_error optional=true select_single=true />
             </div>
-            <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface">
+            <section class="overflow-hidden rounded-xl border border-border bg-card">
                 {move || {
                     if namespace_choices.loading.get() {
-                        view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Namespaces…"</p> }.into_any()
+                        view! { <p class="px-6 py-10 text-center text-sm text-muted-foreground">"Loading Namespaces…"</p> }.into_any()
                     } else if namespace_choices.load_error.get().is_some() {
                         view! { <p class="px-6 py-10 text-center text-sm text-crono-failed" role="alert">"Namespaces could not be loaded. Retry by refreshing the page."</p> }.into_any()
                     } else if namespace_choices.options.get().is_empty() {
                         view! {
-                            <EmptyState icon=MaterialSymbol::Work title="No Namespaces yet" description="Create a Namespace before adding Jobs.">
+                            <EmptyState icon=AppIcon::Workflow title="No Namespaces yet" description="Create a Namespace before adding Jobs.">
                                 <A href=AppRoute::Namespaces.path() attr:class=ACTION_CLASS>"Go to Namespaces"</A>
                             </EmptyState>
                         }.into_any()
                     } else if namespace_id.get().is_none() {
-                        view! { <EmptyState icon=MaterialSymbol::Work title="Select a Namespace" description="Choose a Namespace above to browse and manage its Jobs." /> }.into_any()
+                        view! { <EmptyState icon=AppIcon::Workflow title="Select a Namespace" description="Choose a Namespace above to browse and manage its Jobs." /> }.into_any()
                     } else {
                         view! { <ResourceList jobs=jobs /> }.into_any()
                     }
@@ -60,20 +60,20 @@ fn ResourceList(jobs: LocalResource<api::ApiResult<Page<JobResource>>>) -> impl 
     view! {
         {move || jobs.map(|result| match result {
             Ok(page) if page.items.is_empty() => view! {
-                <EmptyState icon=MaterialSymbol::Work title="No Jobs yet" description="Create the first Job in this Namespace to define what workers execute.">
+                <EmptyState icon=AppIcon::Workflow title="No Jobs yet" description="Create the first Job in this Namespace to define what workers execute.">
                     <A href=AppRoute::JobsNew.path() attr:class=ACTION_CLASS>"Create Job"</A>
                 </EmptyState>
             }.into_any(),
             Ok(page) => view! {
-                <ul class="divide-y divide-crono-border">
+                <ul class="divide-y divide-border">
                     {page.items.iter().cloned().map(|job| {
                         let edit_path = job_edit_path(job.id);
                         view! {
                             <li class="flex flex-wrap items-center justify-between gap-4 px-5 py-4 sm:px-6">
                                 <div class="min-w-0">
-                                    <p class="font-medium text-crono-text">{job.name}</p>
-                                    <p class="text-sm text-crono-muted">{job.qualified_name}</p>
-                                    <p class="mt-1 text-xs text-crono-muted">{format!("{:?} · {} · {} argv items{}", job.executor, job.queue, job.arguments.len(), if job.dry_run { " · Dry run" } else { "" })}</p>
+                                    <p class="font-medium text-foreground">{job.name}</p>
+                                    <p class="text-sm text-muted-foreground">{job.qualified_name}</p>
+                                    <p class="mt-1 text-xs text-muted-foreground">{format!("{:?} · {} · {} argv items{}", job.executor, job.queue, job.arguments.len(), if job.dry_run { " · Dry run" } else { "" })}</p>
                                 </div>
                                 <A href=edit_path attr:class=QUIET_ACTION_CLASS>"Edit"</A>
                             </li>
@@ -82,7 +82,7 @@ fn ResourceList(jobs: LocalResource<api::ApiResult<Page<JobResource>>>) -> impl 
                 </ul>
             }.into_any(),
             Err(error) => view! { <p class="px-6 py-10 text-center text-sm text-crono-failed" role="alert">{error.message.clone()}</p> }.into_any(),
-        }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Jobs…"</p> }.into_any())}
+        }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-muted-foreground">"Loading Jobs…"</p> }.into_any())}
     }
 }
 

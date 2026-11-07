@@ -36,7 +36,7 @@ pub use workflows::{
 
 use crate::{
     components::{Card, EmptyState},
-    navigation::MaterialSymbol,
+    navigation::AppIcon,
 };
 use leptos::prelude::*;
 use leptos_router::components::A;
@@ -48,13 +48,13 @@ pub fn NotFoundPage() -> impl IntoView {
         <div class="pt-10">
             <Card>
                 <EmptyState
-                    icon=MaterialSymbol::SearchOff
+                    icon=AppIcon::SearchX
                     title="Page not found"
                     description="The requested Crono page does not exist."
                 >
                     <A
                         href="/"
-                        attr:class="inline-flex items-center rounded-md bg-crono-primary px-3 py-2 text-sm font-medium text-white hover:bg-crono-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary focus-visible:ring-offset-2"
+                        attr:class="inline-flex items-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
                     >
                         "Return to overview"
                     </A>

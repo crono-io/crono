@@ -115,7 +115,7 @@ pub(super) fn WorkflowGraph(
     on_cleanup(move || resize.remove());
     view! {
         <figure class="min-w-0 space-y-3" aria-label="Workflow Jobs and dependencies">
-            <div node_ref=viewport class="max-h-[42rem] w-full overflow-auto rounded-lg bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary" tabindex="0" aria-label="Workflow preview. Scroll to explore all Jobs.">
+            <div node_ref=viewport class="max-h-[42rem] w-full overflow-auto rounded-lg bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" tabindex="0" aria-label="Workflow preview. Scroll to explore all Jobs.">
                 <div class="relative mx-auto" style=move || format!("width:{}px;height:{}px", layout.get().width.max(NODE_WIDTH + 144), layout.get().height)>
                     <svg class="absolute inset-0 overflow-visible" width=move || layout.get().width.to_string() height=move || layout.get().height.to_string() aria-hidden="true">
                         <defs><marker id=marker markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 10 4 L 0 8 z" fill="context-stroke" /></marker></defs>
@@ -141,8 +141,8 @@ pub(super) fn WorkflowGraph(
                     } />
                 </div>
             </div>
-            <figcaption class="text-xs text-crono-muted">"Arrows show required predecessor results. All incoming dependencies must match. Jobs on the same level can run in parallel."</figcaption>
-            <Show when=move || layout.get().unresolved><p class="text-sm text-crono-muted" role="status">"Some draft dependencies cannot be layered yet. Check the connections; saving validates the complete Workflow."</p></Show>
+            <figcaption class="text-xs text-muted-foreground">"Arrows show required predecessor results. All incoming dependencies must match. Jobs on the same level can run in parallel."</figcaption>
+            <Show when=move || layout.get().unresolved><p class="text-sm text-muted-foreground" role="status">"Some draft dependencies cannot be layered yet. Check the connections; saving validates the complete Workflow."</p></Show>
         </figure>
     }
 }
@@ -197,7 +197,7 @@ fn edge_view(
     };
     view! {
         <g><path d=path fill="none" stroke=color stroke-width="2" stroke-dasharray=dash marker-end=arrow />
-            <text x=label_x.to_string() y=label_y.to_string() text-anchor="middle" fill=color stroke="#fafafa" stroke-width="5" paint-order="stroke" class="text-xs font-medium">{condition_label(edge.condition)}</text>
+            <text x=label_x.to_string() y=label_y.to_string() text-anchor="middle" fill=color style="stroke: var(--color-background)" stroke-width="5" paint-order="stroke" class="text-xs font-medium">{condition_label(edge.condition)}</text>
         </g>
     }
 }
@@ -209,16 +209,16 @@ fn GraphCard(node: Signal<GraphNode>, position: Signal<Option<NodePosition>>) ->
         Some(WorkflowNodeRunState::Failed | WorkflowNodeRunState::Unknown) => "border-red-200",
         Some(WorkflowNodeRunState::Running) => "border-blue-300",
         Some(WorkflowNodeRunState::Succeeded) => "border-emerald-200",
-        _ => "border-crono-border",
+        _ => "border-border",
     });
     view! {
-        <div data-workflow-node=move || node.get().name class=move || format!("absolute flex flex-col justify-between rounded-lg border bg-white p-3 shadow-sm {}", class.get()) style=move || position.get().map(|position| format!("left:{}px;top:{}px;width:{NODE_WIDTH}px;height:{NODE_HEIGHT}px", position.x, position.y)).unwrap_or_default()>
-            <div><p class="truncate font-semibold text-crono-text" title=move || node.get().name>{move || { let name = node.get().name; if name.is_empty() { "Unnamed Job".to_string() } else { name } }}</p><p class="truncate text-xs text-crono-muted" title=move || node.get().job>{move || node.get().job}</p></div>
+        <div data-workflow-node=move || node.get().name class=move || format!("absolute flex flex-col justify-between rounded-lg border bg-card p-3 shadow-sm {}", class.get()) style=move || position.get().map(|position| format!("left:{}px;top:{}px;width:{NODE_WIDTH}px;height:{NODE_HEIGHT}px", position.x, position.y)).unwrap_or_default()>
+            <div><p class="truncate font-semibold text-foreground" title=move || node.get().name>{move || { let name = node.get().name; if name.is_empty() { "Unnamed Job".to_string() } else { name } }}</p><p class="truncate text-xs text-muted-foreground" title=move || node.get().job>{move || node.get().job}</p></div>
             <div class="flex items-center justify-between gap-2">
                 {move || node.get().state.map(|state| view! { <StateBadge state /> })}
-                <Show when=move || !node.get().runs.is_empty()><A href=move || node.get().runs.first().copied().map(run_details_path).unwrap_or_default() attr:class="rounded text-xs font-medium text-crono-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">"View Run"</A></Show>
+                <Show when=move || !node.get().runs.is_empty()><A href=move || node.get().runs.first().copied().map(run_details_path).unwrap_or_default() attr:class="rounded text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">"View Run"</A></Show>
             </div>
-            <Show when=move || { node.get().runs.len() > 1 }><p class="text-xs text-crono-muted">{move || format!("{} target Runs; all links below", node.get().runs.len())}</p></Show>
+            <Show when=move || { node.get().runs.len() > 1 }><p class="text-xs text-muted-foreground">{move || format!("{} target Runs; all links below", node.get().runs.len())}</p></Show>
         </div>
     }
 }

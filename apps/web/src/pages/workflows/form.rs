@@ -22,7 +22,7 @@ use crate::{
         forms::{FIELD_CLASS, READ_ONLY_FIELD_CLASS},
         resource_dialogs::DELETE_ACTION_CLASS,
     },
-    navigation::{MaterialSymbol, workflow_details_path},
+    navigation::{AppIcon, workflow_details_path},
     pages::resource_options,
 };
 use crono_api::{DependencyCondition, UpdateWorkflowRequest, WorkflowResource};
@@ -51,7 +51,7 @@ pub fn EditWorkflowPage() -> impl IntoView {
     view! { {move || workflow.map(|result| match result {
         Ok(workflow) => view! { <WorkflowForm initial=workflow.clone() /> }.into_any(),
         Err(error) => view! { <ApiFailure message=error.message.clone() on_retry=Callback::new(move |()| workflow.refetch()) /> }.into_any(),
-    }).unwrap_or_else(|| view! { <p class="text-sm text-crono-muted">"Loading Workflow…"</p> }.into_any())} }
+    }).unwrap_or_else(|| view! { <p class="text-sm text-muted-foreground">"Loading Workflow…"</p> }.into_any())} }
 }
 
 /// Keep creation/editing consistent, with server validation adjacent to the editor.
@@ -104,7 +104,7 @@ fn WorkflowForm(#[prop(optional)] initial: Option<WorkflowResource>) -> impl Int
                 <A href="/workflows" attr:class=QUIET_ACTION_CLASS>"All Workflows"</A>
                 {editor.edit_id.map(|_| view! { <ReloadLatest editor on_jobs_reload=jobs.reload /> })}
             </PageHeader>
-            <Show when=move || dirty.get()><p class="text-sm text-crono-muted" role="status">"Unsaved changes"</p></Show>
+            <Show when=move || dirty.get()><p class="text-sm text-muted-foreground" role="status">"Unsaved changes"</p></Show>
             <form class="space-y-6" on:submit=submit novalidate aria-busy=move || editor.busy.get().to_string()>
                 <fieldset disabled=move || editor.busy.get() class="space-y-6">
                     <Metadata editor namespaces />
@@ -112,8 +112,8 @@ fn WorkflowForm(#[prop(optional)] initial: Option<WorkflowResource>) -> impl Int
                     <DependenciesEditor editor />
                 </fieldset>
                 <Show when=move || errors.get().is_some()><p class="rounded-lg bg-red-50 p-4 text-sm text-crono-failed" role="alert">{move || errors.get().unwrap_or_default()}</p></Show>
-                <section class=PANEL_CLASS><h2 class="font-semibold text-crono-text">"Workflow preview"</h2><WorkflowGraph nodes=Signal::derive(move || editor.graph_nodes(&jobs.options.get())) edges=Signal::derive(move || editor.graph_edges()) /></section>
-                <p class="text-sm text-crono-muted">"Changes affect future workflow runs only. Existing workflow run history is unchanged."</p>
+                <section class=PANEL_CLASS><h2 class="font-semibold text-foreground">"Workflow preview"</h2><WorkflowGraph nodes=Signal::derive(move || editor.graph_nodes(&jobs.options.get())) edges=Signal::derive(move || editor.graph_edges()) /></section>
+                <p class="text-sm text-muted-foreground">"Changes affect future workflow runs only. Existing workflow run history is unchanged."</p>
                 <FormActions submit_label="Save Workflow" disabled=Signal::derive(move || editor.busy.get()) on_cancel=Callback::new(move |()| { if !editor.busy.get_untracked() { cancel_nav("/workflows", NavigateOptions::default()); } }) />
             </form>
             <ResourceFeedbackModal id="workflow-save-feedback" resource="Workflow" plural="Workflow" feedback=editor.feedback on_view=Callback::new(move |()| { if let Some(id) = editor.saved_id.get_untracked() { navigate(&workflow_details_path(id), NavigateOptions::default()); } }) />
@@ -212,9 +212,9 @@ fn Metadata(editor: Editor, namespaces: resource_options::ResourceOptions) -> im
         <section class=PANEL_CLASS>
             <div class="grid gap-4 md:grid-cols-2">
                 <ResourceNameInput id="workflow-name" label="Name" value=editor.name error=Signal::derive(move || visible_name_validation(&editor.name.get(), editor.attempted.get())) />
-                {if editor.edit_id.is_some() { view! { <div><p class="text-sm font-medium text-crono-text">"Namespace"</p><p class=READ_ONLY_FIELD_CLASS>{editor.namespace_label.get_value()}</p></div> }.into_any() } else { view! { <ResourceSelect id="workflow-namespace" label="Namespace" placeholder="Select a Namespace…" selected=editor.namespace options=namespaces.options loading=namespaces.loading load_error=namespaces.load_error select_single=true /> }.into_any() }}
+                {if editor.edit_id.is_some() { view! { <div><p class="text-sm font-medium text-foreground">"Namespace"</p><p class=READ_ONLY_FIELD_CLASS>{editor.namespace_label.get_value()}</p></div> }.into_any() } else { view! { <ResourceSelect id="workflow-namespace" label="Namespace" placeholder="Select a Namespace…" selected=editor.namespace options=namespaces.options loading=namespaces.loading load_error=namespaces.load_error select_single=true /> }.into_any() }}
             </div>
-            <div><label for="workflow-description" class="block text-sm font-medium text-crono-text">"Description"</label><textarea id="workflow-description" maxlength="500" class=FIELD_CLASS prop:value=move || editor.description.get() on:input=move |event| editor.description.set(event_target_value(&event)) /></div>
+            <div><label for="workflow-description" class="block text-sm font-medium text-foreground">"Description"</label><textarea id="workflow-description" maxlength="500" class=FIELD_CLASS prop:value=move || editor.description.get() on:input=move |event| editor.description.set(event_target_value(&event)) /></div>
         </section>
     }
 }
@@ -225,8 +225,8 @@ fn JobEditor(editor: Editor, jobs: resource_options::ResourceOptions) -> impl In
     let heading = NodeRef::<leptos::html::H2>::new();
     view! {
         <section class=PANEL_CLASS>
-            <h2 node_ref=heading tabindex="-1" class="font-semibold text-crono-text">"Jobs"</h2>
-            <p class="text-sm text-crono-muted">"Each node references an existing Job in this Namespace. Names identify Jobs in the dependencies below."</p>
+            <h2 node_ref=heading tabindex="-1" class="font-semibold text-foreground">"Jobs"</h2>
+            <p class="text-sm text-muted-foreground">"Each node references an existing Job in this Namespace. Names identify Jobs in the dependencies below."</p>
             <For each=move || editor.nodes.get() key=|row| row.key children=move |row| view! { <JobEditorRow row editor jobs on_removed=Callback::new(move |()| focus_heading(heading)) /> } />
             <button type="button" class=QUIET_ACTION_CLASS disabled=move || { editor.nodes.get().len() >= 64 } on:click=move |_| editor.nodes.update(|rows| rows.push(JobRow::empty()))>"+ Add Job"</button>
         </section>
@@ -272,12 +272,12 @@ fn JobEditorRow(
         on_removed.run(());
     };
     view! {
-        <div class="grid items-start gap-3 rounded-lg border border-crono-border p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
+        <div class="grid items-start gap-3 rounded-lg border border-border p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
             <ResourceNameInput id=format!("workflow-node-name-{}", row.key) label="Node name" value=row.name error=Signal::derive(move || visible_name_validation(&row.name.get(), editor.attempted.get())) />
             <ResourceSelect id=format!("workflow-node-job-{}", row.key) label="Job" placeholder="Choose an existing Job…" options=jobs.options selected=row.job loading=jobs.loading load_error=jobs.load_error />
-            <button type="button" class=format!("min-h-11 md:mt-[1.625rem] {DELETE_ACTION_CLASS}") aria-label=move || format!("Remove Job {}", row.name.get()) on:click=move |_| { if incident.get_untracked() == 0 { remove(); } else { open.set(true); } }><Icon symbol=MaterialSymbol::Delete class="text-lg" />"Remove"</button>
+            <button type="button" class=format!("min-h-11 md:mt-[1.625rem] {DELETE_ACTION_CLASS}") aria-label=move || format!("Remove Job {}", row.name.get()) on:click=move |_| { if incident.get_untracked() == 0 { remove(); } else { open.set(true); } }><Icon icon=AppIcon::Trash size=18 />"Remove"</button>
             <Modal id=format!("workflow-remove-node-{}", row.key) open title=Signal::derive(|| "Remove Job from Workflow?".to_string()) busy=Signal::derive(move || editor.busy.get())>
-                <p class="text-sm text-crono-muted">{move || format!("Removing {} also removes {} connected dependencies from this draft. Nothing is saved until you save the Workflow.", row.name.get(), incident.get())}</p>
+                <p class="text-sm text-muted-foreground">{move || format!("Removing {} also removes {} connected dependencies from this draft. Nothing is saved until you save the Workflow.", row.name.get(), incident.get())}</p>
                 <div class="flex justify-end gap-3"><button type="button" class=QUIET_ACTION_CLASS autofocus on:click=move |_| open.set(false)>"Cancel"</button><button type="button" class=DELETE_ACTION_CLASS on:click=move |_| remove()>"Remove Job"</button></div>
             </Modal>
         </div>
@@ -324,8 +324,8 @@ fn DependenciesEditor(editor: Editor) -> impl IntoView {
             .collect::<Vec<_>>()
     });
     view! {
-        <section class=PANEL_CLASS><h2 class="font-semibold text-crono-text">"Dependencies"</h2>
-            <p class="text-sm text-crono-muted">"Choose which predecessor result allows the next Job to start. All incoming dependencies must match. Jobs with no incoming dependencies start together."</p>
+        <section class=PANEL_CLASS><h2 class="font-semibold text-foreground">"Dependencies"</h2>
+            <p class="text-sm text-muted-foreground">"Choose which predecessor result allows the next Job to start. All incoming dependencies must match. Jobs with no incoming dependencies start together."</p>
             <For each=move || editor.edges.get() key=|row| row.key children=move |row| view! { <DependencyRow row editor choices /> } />
             <button type="button" class=QUIET_ACTION_CLASS disabled=move || { editor.nodes.get().len() < 2 || editor.edges.get().len() >= 256 } on:click=move |_| editor.edges.update(|rows| rows.push(EdgeRow::empty()))>"+ Add Dependency"</button>
         </section>
@@ -347,13 +347,13 @@ fn DependencyRow(
             .collect::<Vec<_>>()
     });
     view! {
-        <div class="grid items-start gap-3 rounded-lg border border-crono-border p-3 md:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1fr)_auto]">
+        <div class="grid items-start gap-3 rounded-lg border border-border p-3 md:grid-cols-[minmax(0,1fr)_9rem_minmax(0,1fr)_auto]">
             <ResourceSelect id=format!("workflow-edge-from-{}", row.key) label="From Job" placeholder="Choose predecessor…" options=choices selected=row.from loading=Signal::derive(|| false) load_error=Signal::derive(|| None) />
-            <div><label for=format!("workflow-edge-condition-{}", row.key) class="block text-sm font-medium text-crono-text">"Condition"</label><select id=format!("workflow-edge-condition-{}", row.key) class=FIELD_CLASS prop:value=move || match row.condition.get() { DependencyCondition::Success => "success", DependencyCondition::Failure => "failure", DependencyCondition::Always => "always" } on:change=move |event| { match event_target_value(&event).as_str() { "success" => row.condition.set(DependencyCondition::Success), "failure" => row.condition.set(DependencyCondition::Failure), "always" => row.condition.set(DependencyCondition::Always), _ => {} } }>
+            <div><label for=format!("workflow-edge-condition-{}", row.key) class="block text-sm font-medium text-foreground">"Condition"</label><select id=format!("workflow-edge-condition-{}", row.key) class=FIELD_CLASS prop:value=move || match row.condition.get() { DependencyCondition::Success => "success", DependencyCondition::Failure => "failure", DependencyCondition::Always => "always" } on:change=move |event| { match event_target_value(&event).as_str() { "success" => row.condition.set(DependencyCondition::Success), "failure" => row.condition.set(DependencyCondition::Failure), "always" => row.condition.set(DependencyCondition::Always), _ => {} } }>
                 <option value="success">{condition_label(DependencyCondition::Success)}</option><option value="failure">{condition_label(DependencyCondition::Failure)}</option><option value="always">{condition_label(DependencyCondition::Always)}</option>
             </select></div>
             <ResourceSelect id=format!("workflow-edge-to-{}", row.key) label="To Job" placeholder="Choose dependent Job…" options=destinations selected=row.to loading=Signal::derive(|| false) load_error=Signal::derive(|| None) />
-            <button type="button" class=format!("min-h-11 md:mt-[1.625rem] {DELETE_ACTION_CLASS}") aria-label="Remove dependency" on:click=move |_| editor.edges.update(|rows| rows.retain(|edge| edge.key != row.key))><Icon symbol=MaterialSymbol::Delete class="text-lg" />"Remove"</button>
+            <button type="button" class=format!("min-h-11 md:mt-[1.625rem] {DELETE_ACTION_CLASS}") aria-label="Remove dependency" on:click=move |_| editor.edges.update(|rows| rows.retain(|edge| edge.key != row.key))><Icon icon=AppIcon::Trash size=18 />"Remove"</button>
         </div>
     }
 }
@@ -401,9 +401,9 @@ fn ReloadLatest(editor: Editor, on_jobs_reload: Callback<()>) -> impl IntoView {
     view! {
         <button type="button" class=QUIET_ACTION_CLASS disabled=move || editor.busy.get() on:click=move |_| { error.set(None); open.set(true); }>"Reload latest"</button>
         <Modal id="workflow-reload-latest" open busy=Signal::derive(move || editor.busy.get()) title=Signal::derive(|| "Reload latest Workflow?".to_string())>
-            <p class="text-sm text-crono-muted">"After a successful load, this replaces your draft with the current server definition and revision. Unsaved changes will be discarded. Keep a copy below before reloading if you need to reconcile changes."</p>
+            <p class="text-sm text-muted-foreground">"After a successful load, this replaces your draft with the current server definition and revision. Unsaved changes will be discarded. Keep a copy below before reloading if you need to reconcile changes."</p>
             <Show when=move || error.get().is_some()><p role="alert" class="text-sm text-crono-failed">{move || error.get().unwrap_or_default()}</p></Show>
-            <details><summary class="cursor-pointer text-sm text-crono-primary">"Copy current draft"</summary><pre class="mt-2 max-h-64 overflow-auto rounded bg-zinc-50 p-3 text-xs">{move || editor.request().ok().and_then(|request| serde_json::to_string_pretty(&request).ok()).unwrap_or_else(|| "Complete the required fields to export the draft.".to_string())}</pre></details>
+            <details><summary class="cursor-pointer text-sm text-primary">"Copy current draft"</summary><pre class="mt-2 max-h-64 overflow-auto rounded bg-muted p-3 text-xs">{move || editor.request().ok().and_then(|request| serde_json::to_string_pretty(&request).ok()).unwrap_or_else(|| "Complete the required fields to export the draft.".to_string())}</pre></details>
             <div class="flex flex-wrap justify-end gap-3"><button type="button" class=QUIET_ACTION_CLASS autofocus disabled=move || editor.busy.get() on:click=move |_| open.set(false)>"Keep draft"</button><button type="button" class=QUIET_ACTION_CLASS disabled=move || editor.busy.get() on:click=reload>"Discard draft and reload"</button></div>
         </Modal>
     }

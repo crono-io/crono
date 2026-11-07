@@ -9,7 +9,7 @@ use super::status_can_change;
 use crate::{
     api,
     components::{Icon, QUIET_ACTION_CLASS},
-    navigation::MaterialSymbol,
+    navigation::AppIcon,
 };
 use crono_api::RunStatus;
 use leptos::prelude::*;
@@ -20,15 +20,15 @@ use uuid::Uuid;
 pub(super) fn RunAttemptOutput(run_id: Uuid, status: RunStatus) -> impl IntoView {
     let attempts = LocalResource::new(move || api::list_run_attempts(run_id));
     view! {
-        <div class="mt-3 rounded-md border border-crono-border bg-zinc-50 p-3">
+        <div class="mt-3 rounded-md border border-border bg-muted p-3">
             {status_can_change(status).then(|| view! {
                 <button type="button" class=QUIET_ACTION_CLASS on:click=move |_| attempts.refetch()>
-                    <Icon symbol=MaterialSymbol::Refresh class="text-base leading-none" />
+                    <Icon icon=AppIcon::RefreshCw size=18 />
                     <span>"Refresh output"</span>
                 </button>
             })}
             {move || attempts.map(|result| match result {
-                Ok(items) if items.is_empty() => view! { <p class="mt-2 text-sm text-crono-muted">"No attempts yet."</p> }.into_any(),
+                Ok(items) if items.is_empty() => view! { <p class="mt-2 text-sm text-muted-foreground">"No attempts yet."</p> }.into_any(),
                 Ok(items) => view! { <div class="mt-2 space-y-3">{items.iter().cloned().map(|attempt| {
                     let status = attempt_status(attempt.status);
                     let stdout = attempt.stdout_tail.filter(|value| !value.is_empty());
@@ -36,20 +36,20 @@ pub(super) fn RunAttemptOutput(run_id: Uuid, status: RunStatus) -> impl IntoView
                     let error = attempt.error;
                     let no_output = stdout.is_none() && stderr.is_none() && error.is_none();
                     view! {
-                        <section class="rounded-md border border-crono-border bg-white p-3">
-                            <h3 class="text-sm font-medium text-crono-text">{format!("Attempt {} · {}", attempt.attempt, status)}</h3>
-                            <p class="text-xs text-crono-muted">{format!("Started: {} · Completed: {}", attempt.started_at.as_deref().unwrap_or("—"), attempt.completed_at.as_deref().unwrap_or("—"))}</p>
-                            {attempt.worker_id.map(|worker| view! { <p class="text-xs text-crono-muted">{format!("Worker: {worker}")}</p> })}
-                            {attempt.exit_code.map(|code| view! { <p class="text-xs text-crono-muted">{format!("Exit code: {code}")}</p> })}
-                            {stdout.map(|value| view! { <div class="mt-2"><p class="text-xs font-medium text-crono-muted">"stdout"</p><pre class="overflow-auto whitespace-pre-wrap break-all text-xs text-crono-text">{value}</pre></div> })}
-                            {stderr.map(|value| view! { <div class="mt-2"><p class="text-xs font-medium text-crono-muted">"stderr"</p><pre class="overflow-auto whitespace-pre-wrap break-all text-xs text-crono-text">{value}</pre></div> })}
+                        <section class="rounded-md border border-border bg-card p-3">
+                            <h3 class="text-sm font-medium text-foreground">{format!("Attempt {} · {}", attempt.attempt, status)}</h3>
+                            <p class="text-xs text-muted-foreground">{format!("Started: {} · Completed: {}", attempt.started_at.as_deref().unwrap_or("—"), attempt.completed_at.as_deref().unwrap_or("—"))}</p>
+                            {attempt.worker_id.map(|worker| view! { <p class="text-xs text-muted-foreground">{format!("Worker: {worker}")}</p> })}
+                            {attempt.exit_code.map(|code| view! { <p class="text-xs text-muted-foreground">{format!("Exit code: {code}")}</p> })}
+                            {stdout.map(|value| view! { <div class="mt-2"><p class="text-xs font-medium text-muted-foreground">"stdout"</p><pre class="overflow-auto whitespace-pre-wrap break-all text-xs text-foreground">{value}</pre></div> })}
+                            {stderr.map(|value| view! { <div class="mt-2"><p class="text-xs font-medium text-muted-foreground">"stderr"</p><pre class="overflow-auto whitespace-pre-wrap break-all text-xs text-foreground">{value}</pre></div> })}
                             {error.map(|value| view! { <p class="mt-2 text-xs text-crono-failed">{value}</p> })}
-                            {no_output.then(|| view! { <p class="mt-2 text-xs text-crono-muted">"No output captured."</p> })}
+                            {no_output.then(|| view! { <p class="mt-2 text-xs text-muted-foreground">"No output captured."</p> })}
                         </section>
                     }
                 }).collect_view()}</div> }.into_any(),
                 Err(error) => view! { <p class="mt-2 text-sm text-crono-failed" role="alert">{error.message.clone()}</p> }.into_any(),
-            }).unwrap_or_else(|| view! { <p class="mt-2 text-sm text-crono-muted">"Loading output…"</p> }.into_any())}
+            }).unwrap_or_else(|| view! { <p class="mt-2 text-sm text-muted-foreground">"Loading output…"</p> }.into_any())}
         </div>
     }
 }
@@ -116,15 +116,12 @@ mod browser_tests {
                 .and_then(|button| button.text_content())
                 .is_some_and(|text| text.contains("Refresh output"))
         );
+        let icon = refresh.and_then(|button| button.query_selector(".app-icon").ok().flatten());
+        assert!(icon.is_some(), "refresh action should show its icon");
         assert_eq!(
-            refresh
-                .and_then(|button| button
-                    .query_selector(".material-symbols-outlined")
-                    .ok()
-                    .flatten())
-                .and_then(|icon| icon.text_content())
+            icon.and_then(|icon| icon.get_attribute("aria-hidden"))
                 .as_deref(),
-            Some("refresh")
+            Some("true")
         );
         drop(handle);
         host.remove();

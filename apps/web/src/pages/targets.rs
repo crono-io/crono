@@ -50,12 +50,12 @@ pub fn EditTargetPage() -> impl IntoView {
             Err(error) => view! {
                 <div class="space-y-6">
                     <PageHeader title="Edit Target" description="Update an existing Target." />
-                    <div class="rounded-xl border border-crono-border bg-crono-surface p-6">
+                    <div class="rounded-xl border border-border bg-card p-6">
                         <p class="text-sm text-crono-failed" role="alert">{error.message.clone()}</p>
                         <div class="mt-4"><A href="/targets" attr:class=QUIET_ACTION_CLASS>"Back to Targets"</A></div>
                     </div>
                 </div>
             }.into_any(),
-        }).unwrap_or_else(|| view! { <p class="text-sm text-crono-muted">"Loading Target…"</p> }.into_any())}
+        }).unwrap_or_else(|| view! { <p class="text-sm text-muted-foreground">"Loading Target…"</p> }.into_any())}
     }
 }

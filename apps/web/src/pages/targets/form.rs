@@ -195,46 +195,46 @@ fn target_view(state: &TargetViewState) -> impl IntoView + use<> {
     view! {
         <div class="space-y-8">
             <PageHeader title=if state.is_edit { "Edit Target" } else { "Create Target" } description="Targets supply destination-specific arguments and variables to a Job." />
-            <section class="rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
-                <h2 class="text-base font-semibold text-crono-text">{if state.is_edit { "Target settings" } else { "New Target" }}</h2>
+            <section class="rounded-xl border border-border bg-card p-5 sm:p-6">
+                <h2 class="text-base font-semibold text-foreground">{if state.is_edit { "Target settings" } else { "New Target" }}</h2>
                 <form class="mt-5 space-y-5" on:submit=move |event| state.submit.run(event) novalidate>
                     {match state.namespace_name.get_untracked() {
                         Some(namespace) => view! {
-                            <div><p class="text-sm font-medium text-crono-text">"Namespace"</p><p class=READ_ONLY_FIELD_CLASS>{namespace}</p></div>
+                            <div><p class="text-sm font-medium text-foreground">"Namespace"</p><p class=READ_ONLY_FIELD_CLASS>{namespace}</p></div>
                         }.into_any(),
                         None => view! {
                             <div>
                                 <ResourceSelect id="target-namespace" label="Namespace" placeholder="Search/select namespace…" options=state.namespace_choices.options selected=state.namespace_id loading=state.namespace_choices.loading load_error=state.namespace_choices.load_error field_error=state.namespace_error select_single=true />
-                                <Show when=move || !state.namespace_choices.loading.get() && state.namespace_choices.options.get().is_empty() && state.namespace_choices.load_error.get().is_none()><p class="rounded-md bg-zinc-50 p-3 text-sm text-crono-muted">"No namespaces exist yet. "<A href="/namespaces" attr:class="font-medium text-crono-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">"Create one before creating a Target."</A></p></Show>
+                                <Show when=move || !state.namespace_choices.loading.get() && state.namespace_choices.options.get().is_empty() && state.namespace_choices.load_error.get().is_none()><p class="rounded-md bg-muted p-3 text-sm text-muted-foreground">"No namespaces exist yet. "<A href="/namespaces" attr:class="font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">"Create one before creating a Target."</A></p></Show>
                             </div>
                         }.into_any(),
                     }}
                     <ResourceNameInput id="target-name" label="Name" value=state.name error=state.name_error read_only=Signal::derive(move || state.editing_default) />
-                    {state.editing_default.then(|| view! { <p class="text-xs text-crono-muted">"The default Target name is fixed; its arguments and inputs can be edited."</p> })}
+                    {state.editing_default.then(|| view! { <p class="text-xs text-muted-foreground">"The default Target name is fixed; its arguments and inputs can be edited."</p> })}
                     <div class="space-y-1">
                         <ArgumentListInput id="target-arguments" label="Additional arguments" values=state.arguments error=state.argument_error />
-                        <p class="text-xs text-crono-muted">
+                        <p class="text-xs text-muted-foreground">
                             "For an ansible-playbook Job, add "<code class="whitespace-nowrap font-mono">"--limit"</code>" in one row and "<code class="whitespace-nowrap font-mono">"{{ host }}"</code>" in the next. Target arguments follow Job arguments."
                         </p>
                     </div>
                     <div class="space-y-1">
                         <JsonObjectInput id="target-inputs" label="Target inputs" value=state.inputs error=state.input_error />
-                        <p class="text-xs text-crono-muted">
+                        <p class="text-xs text-muted-foreground">
                             "Example JSON: "<code class="whitespace-nowrap font-mono">"{\"host\":\"web01.example.com\"}"</code>". The argument above limits the playbook to this inventory host."
                         </p>
                     </div>
-                    <div class="rounded-md border border-crono-border bg-zinc-50 px-3 py-2.5">
-                        <p class="text-xs font-medium text-crono-muted">"Example worker command (Job + Target)"</p>
-                        <code class="mt-1 block break-words font-mono text-xs text-crono-text">
+                    <div class="rounded-md border border-border bg-muted px-3 py-2.5">
+                        <p class="text-xs font-medium text-muted-foreground">"Example worker command (Job + Target)"</p>
+                        <code class="mt-1 block break-words font-mono text-xs text-foreground">
                             "/usr/bin/ansible-playbook -i /etc/ansible/hosts /srv/playbooks/deploy.yml --limit web01.example.com"
                         </code>
                     </div>
-                    <div class="rounded-md border border-crono-border bg-zinc-50 px-3 py-2.5">
-                        <p class="text-xs font-medium text-crono-muted">"Simple echo demo (Job + Target)"</p>
-                        <p class="mt-1 text-xs text-crono-muted">
+                    <div class="rounded-md border border-border bg-muted px-3 py-2.5">
+                        <p class="text-xs font-medium text-muted-foreground">"Simple echo demo (Job + Target)"</p>
+                        <p class="mt-1 text-xs text-muted-foreground">
                             "Job: "<code class="font-mono">"/bin/echo"</code>" with argument "<code class="font-mono">"Hello"</code>". Target: argument "<code class="whitespace-nowrap font-mono">"{{ name }}"</code>" and inputs "<code class="whitespace-nowrap font-mono">"{\"name\":\"world\"}"</code>"."
                         </p>
-                        <code class="mt-1 block break-words font-mono text-xs text-crono-text">"/bin/echo Hello world"</code>
+                        <code class="mt-1 block break-words font-mono text-xs text-foreground">"/bin/echo Hello world"</code>
                     </div>
                     <FormActions submit_label="Save Target" disabled=state.disabled on_cancel=state.cancel />
                 </form>

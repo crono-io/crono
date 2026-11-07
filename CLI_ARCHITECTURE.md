@@ -161,8 +161,8 @@ deployed; its native no-op entrypoint exists only so workspace checks can run wi
 dependencies. Crono remains usable through the server API and CLI when the GUI is absent.
 
 Leptos Router selects page content inside one shared application shell. A pure typed navigation
-model keeps route paths, labels, Material Symbols, sidebar sections, and active-state tests aligned.
-The shell establishes Crono's dark navigation, compact toolbar, and light operational workspace;
+model keeps route paths, labels, Lucide icons, sidebar sections, and active-state tests aligned.
+The shell establishes Crono's light neutral navigation, compact toolbar, and light operational workspace;
 reusable summaries and cards render only honest zero and empty states. Trunk invokes a pinned
 standalone Tailwind CSS v4 CLI for CSS-first compilation. Future HTTP access belongs behind a
 dedicated client/service boundary, not inside pages and never through server Rust internals.

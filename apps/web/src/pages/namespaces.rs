@@ -85,24 +85,24 @@ pub fn NamespacesPage() -> impl IntoView {
                 title="Namespaces"
                 description="Namespaces are the authorization and organization boundary for Jobs, Targets, and Target Sets."
             />
-            <section class="rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
-                <h2 class="text-base font-semibold text-crono-text">"Create Namespace"</h2>
+            <section class="rounded-xl border border-border bg-card p-5 sm:p-6">
+                <h2 class="text-base font-semibold text-foreground">"Create Namespace"</h2>
                 <form class="mt-5 space-y-4" on:submit=submit novalidate>
                     <ResourceNameInput id="namespace-name" label="Name" value=name error=name_error />
                     <FormActions submit_label="Create Namespace" disabled=disabled on_cancel=reset />
                 </form>
             </section>
-            <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface">
-                <header class="border-b border-crono-border px-5 py-4 sm:px-6">
-                    <h2 node_ref=heading tabindex="-1" class="text-base font-semibold text-crono-text">"Available Namespaces"</h2>
+            <section class="overflow-hidden rounded-xl border border-border bg-card">
+                <header class="border-b border-border px-5 py-4 sm:px-6">
+                    <h2 node_ref=heading tabindex="-1" class="text-base font-semibold text-foreground">"Available Namespaces"</h2>
                 </header>
-                <p class="px-5 text-sm text-crono-muted sm:px-6" role="status">{move || deleted.get().unwrap_or_default()}</p>
+                <p class="px-5 text-sm text-muted-foreground sm:px-6" role="status">{move || deleted.get().unwrap_or_default()}</p>
                 {move || namespaces.map(|result| match result {
                     Ok(page) if page.items.is_empty() => view! {
-                        <p class="px-6 py-10 text-center text-sm text-crono-muted">"No Namespaces yet."</p>
+                        <p class="px-6 py-10 text-center text-sm text-muted-foreground">"No Namespaces yet."</p>
                     }.into_any(),
                     Ok(page) => view! {
-                        <ul class="divide-y divide-crono-border">
+                        <ul class="divide-y divide-border">
                             {page.items.iter().cloned().map(|namespace| view! {
                                 <NamespaceRow namespace on_deleted />
                             }).collect_view()}
@@ -112,7 +112,7 @@ pub fn NamespacesPage() -> impl IntoView {
                         <p class="px-6 py-10 text-center text-sm text-crono-failed">{error.message.clone()}</p>
                     }.into_any(),
                 }).unwrap_or_else(|| view! {
-                    <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Namespaces…"</p>
+                    <p class="px-6 py-10 text-center text-sm text-muted-foreground">"Loading Namespaces…"</p>
                 }.into_any())}
             </section>
             <ResourceFeedbackModal id="namespace-save-result" resource="Namespace" plural="Namespaces" feedback on_view=Callback::new(move |()| focus_heading(heading)) />
@@ -148,8 +148,8 @@ fn NamespaceRow(
     });
     view! {
         <li class="flex flex-wrap items-center justify-between gap-4 px-5 py-4 sm:px-6">
-            <p class="min-w-0 break-words font-medium text-crono-text">{name.get_value()}</p>
-            <Show when=move || !protected fallback=|| view! { <span class="text-xs text-crono-muted">"Protected default Namespace"</span> }>
+            <p class="min-w-0 break-words font-medium text-foreground">{name.get_value()}</p>
+            <Show when=move || !protected fallback=|| view! { <span class="text-xs text-muted-foreground">"Protected default Namespace"</span> }>
                 <DeleteControl id=format!("delete-namespace-{id}") resource="Namespace" name=name.get_value() description="This permanently removes the empty Namespace and cannot be undone. Namespaces containing resources or Run requests cannot be deleted." open busy error on_confirm />
             </Show>
         </li>

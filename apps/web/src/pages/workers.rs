@@ -7,7 +7,7 @@
 use crate::{
     api,
     components::{EmptyState, Icon, PageHeader, QUIET_ACTION_CLASS},
-    navigation::{MaterialSymbol, worker_details_path},
+    navigation::{AppIcon, worker_details_path},
 };
 use crono_api::WorkerStatus;
 use leptos::prelude::*;
@@ -23,18 +23,18 @@ pub fn WorkersPage() -> impl IntoView {
                 title="Workers"
                 description="Heartbeat-backed worker presence, capacity, and execution activity."
             />
-            <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface">
-                <header class="flex items-center justify-between border-b border-crono-border px-5 py-4 sm:px-6">
+            <section class="overflow-hidden rounded-xl border border-border bg-card">
+                <header class="flex items-center justify-between border-b border-border px-5 py-4 sm:px-6">
                     <div>
-                        <h2 class="font-semibold text-crono-text">"Worker presence"</h2>
-                        <p class="mt-1 text-xs text-crono-muted">"Online ≤30s · stale ≤2m · offline retained for 7 days"</p>
+                        <h2 class="font-semibold text-foreground">"Worker presence"</h2>
+                        <p class="mt-1 text-xs text-muted-foreground">"Online ≤30s · stale ≤2m · offline retained for 7 days"</p>
                     </div>
-                    <button class=QUIET_ACTION_CLASS type="button" on:click=move |_| workers.refetch()><Icon symbol=MaterialSymbol::Refresh class="text-lg leading-none" />"Refresh"</button>
+                    <button class=QUIET_ACTION_CLASS type="button" on:click=move |_| workers.refetch()><Icon icon=AppIcon::RefreshCw size=18 />"Refresh"</button>
                 </header>
                 {move || workers.map(|result| match result {
                     Ok(page) if page.items.is_empty() => view! {
                         <EmptyState
-                            icon=MaterialSymbol::Memory
+                            icon=AppIcon::Server
                             title="No workers yet"
                             description="Start crono-worker to publish its first presence heartbeat."
                         />
@@ -42,7 +42,7 @@ pub fn WorkersPage() -> impl IntoView {
                     Ok(page) => view! {
                         <div class="overflow-x-auto">
                             <table class="w-full min-w-[760px] text-left text-sm">
-                                <thead class="bg-crono-primary-soft text-xs uppercase tracking-wide text-crono-muted">
+                                <thead class="bg-primary-soft text-xs uppercase tracking-wide text-muted-foreground">
                                     <tr>
                                         <th class="px-5 py-3 font-medium sm:px-6">"Worker"</th>
                                         <th class="px-5 py-3 font-medium">"Status"</th>
@@ -52,22 +52,22 @@ pub fn WorkersPage() -> impl IntoView {
                                         <th class="px-5 py-3 font-medium sm:pr-6">"Last seen"</th>
                                     </tr>
                                 </thead>
-                                <tbody class="divide-y divide-crono-border">
+                                <tbody class="divide-y divide-border">
                                     {page.items.iter().cloned().map(|worker| {
                                         let details_path = worker_details_path(&worker.worker_id);
                                         let (status, status_class) = match worker.status {
                                             WorkerStatus::Online => ("online", "bg-emerald-50 text-emerald-700"),
                                             WorkerStatus::Stale => ("stale", "bg-amber-50 text-amber-700"),
-                                            WorkerStatus::Offline => ("offline", "bg-slate-100 text-slate-600"),
+                                            WorkerStatus::Offline => ("offline", "bg-muted text-muted-foreground"),
                                         };
                                         view! {
                                             <tr>
-                                                <td class="px-5 py-4 font-medium text-crono-text sm:px-6"><A href=details_path attr:class="font-mono text-crono-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">{worker.worker_id.clone()}</A></td>
+                                                <td class="px-5 py-4 font-medium text-foreground sm:px-6"><A href=details_path attr:class="font-mono text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{worker.worker_id.clone()}</A></td>
                                                 <td class="px-5 py-4"><span class=format!("rounded-full px-2.5 py-1 text-xs font-medium {status_class}")>{status}</span></td>
-                                                <td class="px-5 py-4 text-crono-muted">{worker.queue.clone()}</td>
-                                                <td class="px-5 py-4 text-crono-muted">{format!("{} / {}", worker.active_executions, worker.concurrency)}</td>
-                                                <td class="px-5 py-4 text-crono-muted">{worker.version.clone()}</td>
-                                                <td class="px-5 py-4 text-xs text-crono-muted sm:pr-6"><time>{worker.last_seen_at.clone()}</time></td>
+                                                <td class="px-5 py-4 text-muted-foreground">{worker.queue.clone()}</td>
+                                                <td class="px-5 py-4 text-muted-foreground">{format!("{} / {}", worker.active_executions, worker.concurrency)}</td>
+                                                <td class="px-5 py-4 text-muted-foreground">{worker.version.clone()}</td>
+                                                <td class="px-5 py-4 text-xs text-muted-foreground sm:pr-6"><time>{worker.last_seen_at.clone()}</time></td>
                                             </tr>
                                         }
                                     }).collect_view()}
@@ -76,7 +76,7 @@ pub fn WorkersPage() -> impl IntoView {
                         </div>
                     }.into_any(),
                     Err(error) => view! { <p class="px-6 py-10 text-center text-sm text-crono-failed">{error.message.clone()}</p> }.into_any(),
-                }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading workers…"</p> }.into_any())}
+                }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-muted-foreground">"Loading workers…"</p> }.into_any())}
             </section>
         </div>
     }
@@ -102,37 +102,37 @@ pub fn WorkerDetailsPage() -> impl IntoView {
                     let (status, status_class) = match item.status {
                         WorkerStatus::Online => ("Online", "bg-emerald-50 text-emerald-700"),
                         WorkerStatus::Stale => ("Stale", "bg-amber-50 text-amber-700"),
-                        WorkerStatus::Offline => ("Offline", "bg-slate-100 text-slate-600"),
+                        WorkerStatus::Offline => ("Offline", "bg-muted text-muted-foreground"),
                     };
                     view! {
-                        <section class="rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
-                            <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="break-all font-mono text-lg font-semibold text-crono-text">{item.worker_id.clone()}</h2><span class=format!("rounded-full px-2.5 py-1 text-xs font-medium {status_class}")>{status}</span></div>
+                        <section class="rounded-xl border border-border bg-card p-5 sm:p-6">
+                            <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="break-all font-mono text-lg font-semibold text-foreground">{item.worker_id.clone()}</h2><span class=format!("rounded-full px-2.5 py-1 text-xs font-medium {status_class}")>{status}</span></div>
                             <dl class="mt-5 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
-                                <div><dt class="text-crono-muted">"Queue"</dt><dd>{item.queue.clone()}</dd></div>
-                                <div><dt class="text-crono-muted">"Active / capacity"</dt><dd>{format!("{} / {}", item.active_executions, item.concurrency)}</dd></div>
-                                <div><dt class="text-crono-muted">"Version"</dt><dd>{item.version.clone()}</dd></div>
-                                <div><dt class="text-crono-muted">"Started"</dt><dd>{item.started_at.clone()}</dd></div>
-                                <div><dt class="text-crono-muted">"Last seen"</dt><dd>{item.last_seen_at.clone()}</dd></div>
+                                <div><dt class="text-muted-foreground">"Queue"</dt><dd>{item.queue.clone()}</dd></div>
+                                <div><dt class="text-muted-foreground">"Active / capacity"</dt><dd>{format!("{} / {}", item.active_executions, item.concurrency)}</dd></div>
+                                <div><dt class="text-muted-foreground">"Version"</dt><dd>{item.version.clone()}</dd></div>
+                                <div><dt class="text-muted-foreground">"Started"</dt><dd>{item.started_at.clone()}</dd></div>
+                                <div><dt class="text-muted-foreground">"Last seen"</dt><dd>{item.last_seen_at.clone()}</dd></div>
                                 {diagnostics.map(|facts| view! {
-                                    <div><dt class="text-crono-muted">"Hostname"</dt><dd>{facts.hostname.clone()}</dd></div>
-                                    <div><dt class="text-crono-muted">"Platform"</dt><dd>{format!("{} / {}", facts.os, facts.architecture)}</dd></div>
-                                    <div><dt class="text-crono-muted">"Default shell"</dt><dd><code>{facts.default_shell_path.clone()}</code>{if facts.default_shell_present { " · present" } else { " · not found" }}</dd></div>
-                                    <div><dt class="text-crono-muted">"Worker dry run"</dt><dd>{if facts.dry_run { "On" } else { "Off" }}</dd></div>
+                                    <div><dt class="text-muted-foreground">"Hostname"</dt><dd>{facts.hostname.clone()}</dd></div>
+                                    <div><dt class="text-muted-foreground">"Platform"</dt><dd>{format!("{} / {}", facts.os, facts.architecture)}</dd></div>
+                                    <div><dt class="text-muted-foreground">"Default shell"</dt><dd><code>{facts.default_shell_path.clone()}</code>{if facts.default_shell_present { " · present" } else { " · not found" }}</dd></div>
+                                    <div><dt class="text-muted-foreground">"Worker dry run"</dt><dd>{if facts.dry_run { "On" } else { "Off" }}</dd></div>
                                 })}
                             </dl>
                         </section>
-                        <section class="rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
-                            <h2 class="font-semibold text-crono-text">"Child environment"</h2>
-                            <p class="mt-1 text-sm text-crono-muted">"Crono clears the worker environment before execution. It injects CRONO_RUN_ID and CRONO_INPUTS_FILE; only LANG, LC_ALL, and TZ may be copied. PATH and SHELL are not inherited. Custom Job interpreters are checked when a process starts."</p>
+                        <section class="rounded-xl border border-border bg-card p-5 sm:p-6">
+                            <h2 class="font-semibold text-foreground">"Child environment"</h2>
+                            <p class="mt-1 text-sm text-muted-foreground">"Crono clears the worker environment before execution. It injects CRONO_RUN_ID and CRONO_INPUTS_FILE; only LANG, LC_ALL, and TZ may be copied. PATH and SHELL are not inherited. Custom Job interpreters are checked when a process starts."</p>
                             {diagnostics.map_or_else(
-                                || view! { <p class="mt-3 text-sm text-crono-muted">"This worker has not reported diagnostics; it may be an older version."</p> }.into_any(),
-                                |facts| view! { <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-3"><div><dt class="text-crono-muted">"LANG"</dt><dd>{facts.lang.clone().unwrap_or_else(|| "Unset".to_string())}</dd></div><div><dt class="text-crono-muted">"LC_ALL"</dt><dd>{facts.lc_all.clone().unwrap_or_else(|| "Unset".to_string())}</dd></div><div><dt class="text-crono-muted">"TZ"</dt><dd>{facts.tz.clone().unwrap_or_else(|| "Unset".to_string())}</dd></div></dl> }.into_any(),
+                                || view! { <p class="mt-3 text-sm text-muted-foreground">"This worker has not reported diagnostics; it may be an older version."</p> }.into_any(),
+                                |facts| view! { <dl class="mt-4 grid gap-3 text-sm sm:grid-cols-3"><div><dt class="text-muted-foreground">"LANG"</dt><dd>{facts.lang.clone().unwrap_or_else(|| "Unset".to_string())}</dd></div><div><dt class="text-muted-foreground">"LC_ALL"</dt><dd>{facts.lc_all.clone().unwrap_or_else(|| "Unset".to_string())}</dd></div><div><dt class="text-muted-foreground">"TZ"</dt><dd>{facts.tz.clone().unwrap_or_else(|| "Unset".to_string())}</dd></div></dl> }.into_any(),
                             )}
                         </section>
                     }.into_any()
                 }
-                Err(error) => view! { <p class="rounded-xl border border-crono-border bg-crono-surface p-6 text-sm text-crono-failed" role="alert">{error.message.clone()}</p> }.into_any(),
-            }).unwrap_or_else(|| view! { <p class="text-sm text-crono-muted">"Loading worker…"</p> }.into_any())}
+                Err(error) => view! { <p class="rounded-xl border border-border bg-card p-6 text-sm text-crono-failed" role="alert">{error.message.clone()}</p> }.into_any(),
+            }).unwrap_or_else(|| view! { <p class="text-sm text-muted-foreground">"Loading worker…"</p> }.into_any())}
         </div>
     }
 }

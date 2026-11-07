@@ -12,7 +12,7 @@ use crate::{
         focus_heading,
     },
     navigation::{
-        AppRoute, MaterialSymbol, workflow_details_path, workflow_edit_path, workflow_launch_path,
+        AppIcon, AppRoute, workflow_details_path, workflow_edit_path, workflow_launch_path,
     },
     pages::resource_options,
 };
@@ -60,19 +60,19 @@ pub fn WorkflowsPage() -> impl IntoView {
     view! {
         <div class="space-y-6">
             <PageHeader title="Workflows" description="A Workflow connects existing Jobs through dependencies: on success, on failure, or always.">
-                <button type="button" class=QUIET_ACTION_CLASS on:click=move |_| { choices.reload.run(()); workflows.refetch(); }><Icon symbol=MaterialSymbol::Refresh class="text-lg" />"Refresh"</button>
+                <button type="button" class=QUIET_ACTION_CLASS on:click=move |_| { choices.reload.run(()); workflows.refetch(); }><Icon icon=AppIcon::RefreshCw size=18 />"Refresh"</button>
                 <A href=AppRoute::WorkflowsNew.path() attr:class=ACTION_CLASS>"Create Workflow"</A>
             </PageHeader>
             <div class="max-w-xl"><ResourceSelect id="workflows-namespace-filter" label="Namespace" placeholder="Select a Namespace to browse Workflows…" options=choices.options selected=namespace loading=choices.loading load_error=choices.load_error optional=true select_single=true /></div>
             <section class=PANEL_CLASS>
                 <h2 node_ref=heading tabindex="-1" class="sr-only">"Workflows in Namespace"</h2>
-                <Show when=move || feedback.get().is_some()><p class="text-sm text-crono-muted" role="status">{move || feedback.get().unwrap_or_default()}</p></Show>
-                {move || if choices.loading.get() { view! { <p class="text-sm text-crono-muted">"Loading Namespaces…"</p> }.into_any() }
-                else if namespace.get().is_none() { view! { <EmptyState icon=MaterialSymbol::AccountTree title="Select a Namespace" description="Choose a Namespace to browse its Workflows. Create a Namespace first if none exist." /> }.into_any() }
+                <Show when=move || feedback.get().is_some()><p class="text-sm text-muted-foreground" role="status">{move || feedback.get().unwrap_or_default()}</p></Show>
+                {move || if choices.loading.get() { view! { <p class="text-sm text-muted-foreground">"Loading Namespaces…"</p> }.into_any() }
+                else if namespace.get().is_none() { view! { <EmptyState icon=AppIcon::GitBranch title="Select a Namespace" description="Choose a Namespace to browse its Workflows. Create a Namespace first if none exist." /> }.into_any() }
                 else { view! { <WorkflowResults workflows on_deleted /> }.into_any() }}
-                <div class="flex items-center justify-between border-t border-crono-border pt-3">
+                <div class="flex items-center justify-between border-t border-border pt-3">
                     <button type="button" class=QUIET_ACTION_CLASS disabled=move || previous.get().is_empty() on:click=move |_| { let cursor = previous.get_untracked().last().cloned().flatten(); previous.update(|items| { items.pop(); }); after.set(cursor); }>"Previous"</button>
-                    <span class="text-xs text-crono-muted">{move || format!("Page {}", previous.get().len() + 1)}</span>
+                    <span class="text-xs text-muted-foreground">{move || format!("Page {}", previous.get().len() + 1)}</span>
                     {move || workflows.get().and_then(Result::ok).and_then(|page| page.next_cursor).map(|cursor| view! { <button type="button" class=QUIET_ACTION_CLASS on:click=move |_| { previous.update(|items| items.push(after.get_untracked())); after.set(Some(cursor.clone())); }>"Next"</button> })}
                 </div>
             </section>
@@ -87,15 +87,15 @@ fn WorkflowResults(
     on_deleted: Callback<String>,
 ) -> impl IntoView {
     view! { {move || workflows.map(|result| match result {
-        Ok(page) if page.items.is_empty() => view! { <EmptyState icon=MaterialSymbol::AccountTree title="No workflows yet" description="A Workflow connects Jobs through dependencies such as success, failure and always."><A href="/workflows/new" attr:class=ACTION_CLASS>"Create Workflow"</A></EmptyState> }.into_any(),
+        Ok(page) if page.items.is_empty() => view! { <EmptyState icon=AppIcon::GitBranch title="No workflows yet" description="A Workflow connects Jobs through dependencies such as success, failure and always."><A href="/workflows/new" attr:class=ACTION_CLASS>"Create Workflow"</A></EmptyState> }.into_any(),
         Ok(page) => view! {
             <div class="overflow-x-auto"><table class="w-full text-left text-sm">
-                <thead class="border-b border-crono-border text-xs text-crono-muted"><tr><th class="p-3">"Name"</th><th class="p-3">"Namespace"</th><th class="p-3">"Nodes"</th><th class="p-3">"Dependencies"</th><th class="p-3">"Updated"</th><th class="p-3">"Actions"</th></tr></thead>
-                <tbody class="divide-y divide-crono-border">{page.items.iter().cloned().map(|workflow| view! { <WorkflowRow workflow on_deleted /> }).collect_view()}</tbody>
+                <thead class="border-b border-border text-xs text-muted-foreground"><tr><th class="p-3">"Name"</th><th class="p-3">"Namespace"</th><th class="p-3">"Nodes"</th><th class="p-3">"Dependencies"</th><th class="p-3">"Updated"</th><th class="p-3">"Actions"</th></tr></thead>
+                <tbody class="divide-y divide-border">{page.items.iter().cloned().map(|workflow| view! { <WorkflowRow workflow on_deleted /> }).collect_view()}</tbody>
             </table></div>
         }.into_any(),
         Err(error) => view! { <ApiFailure message=error.message.clone() on_retry=Callback::new(move |()| workflows.refetch()) /> }.into_any(),
-    }).unwrap_or_else(|| view! { <p class="text-sm text-crono-muted">"Loading Workflows…"</p> }.into_any())} }
+    }).unwrap_or_else(|| view! { <p class="text-sm text-muted-foreground">"Loading Workflows…"</p> }.into_any())} }
 }
 
 /// Record links stay in the page; the sidebar contains only static navigation.
@@ -104,7 +104,7 @@ fn WorkflowRow(workflow: WorkflowResource, on_deleted: Callback<String>) -> impl
     let id = workflow.id;
     let displayed_name = workflow.name.clone();
     view! {
-        <tr><td class="p-3 font-medium"><A href=workflow_details_path(id) attr:class="rounded text-crono-primary hover:underline focus-visible:ring-2 focus-visible:ring-crono-primary">{displayed_name}</A></td>
+        <tr><td class="p-3 font-medium"><A href=workflow_details_path(id) attr:class="rounded text-primary hover:underline focus-visible:ring-2 focus-visible:ring-primary">{displayed_name}</A></td>
             <td class="p-3">{workflow.namespace}</td><td class="p-3">{workflow.nodes.len()}</td><td class="p-3">{workflow.edges.len()}</td><td class="whitespace-nowrap p-3" title=workflow.updated_at.clone()>{super::super::runs::display_time(&workflow.updated_at)}</td>
             <td class="p-3"><div class="flex flex-wrap gap-1"><A href=workflow_details_path(id) attr:class=QUIET_ACTION_CLASS>"Open"</A><A href=workflow_launch_path(id) attr:class=QUIET_ACTION_CLASS>"Run"</A><A href=workflow_edit_path(id) attr:class=QUIET_ACTION_CLASS>"Edit"</A><DeleteWorkflow id name=workflow.name on_deleted /></div></td>
         </tr>

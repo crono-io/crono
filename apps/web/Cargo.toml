@@ -19,11 +19,12 @@ crono-execution.workspace = true
 gloo-net.workspace = true
 leptos.workspace = true
 leptos_router.workspace = true
+lucide-leptos.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
-web-sys = { workspace = true, features = ["Headers", "Storage"] }
+wasm-bindgen.workspace = true
+web-sys = { workspace = true, features = ["Clipboard", "DomTokenList", "Headers", "HtmlDocument", "HtmlTextAreaElement", "Navigator", "Storage"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-wasm-bindgen.workspace = true
 wasm-bindgen-test.workspace = true

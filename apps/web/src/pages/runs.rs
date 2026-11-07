@@ -16,7 +16,7 @@ pub use new::RunJobPage;
 
 use crono_api::{RunResource, RunStatus, RunTriggerSource};
 
-pub(super) const ACTION_CLASS: &str = "inline-flex items-center justify-center rounded-md bg-crono-primary px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-crono-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary focus-visible:ring-offset-2";
+pub(super) const ACTION_CLASS: &str = "inline-flex items-center justify-center rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2";
 /// Match Run history and detail controls to the quiet Monitor navigation links.
 pub(super) const RUN_ACTION_CLASS: &str = crate::components::QUIET_ACTION_CLASS;
 
@@ -46,9 +46,9 @@ pub(super) const fn status_class(status: RunStatus) -> &'static str {
         RunStatus::Failed | RunStatus::Dead => "bg-red-100 text-red-800",
         RunStatus::Running => "bg-blue-100 text-blue-800",
         RunStatus::RetryWait => "bg-amber-100 text-amber-800",
-        RunStatus::Cancelled | RunStatus::Skipped => "bg-zinc-200 text-zinc-700",
+        RunStatus::Cancelled | RunStatus::Skipped => "bg-accent text-foreground",
         RunStatus::PendingDispatch | RunStatus::Queued | RunStatus::Unknown => {
-            "bg-crono-primary-soft text-crono-primary"
+            "bg-primary-soft text-primary"
         }
     }
 }

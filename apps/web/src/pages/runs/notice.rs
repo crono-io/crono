@@ -31,8 +31,8 @@ pub(super) fn CreatedRunNotice(notice: RwSignal<Option<Uuid>>) -> impl IntoView 
     move || {
         notice.get().map(|id| view! {
             <div class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800" role="status">
-                <p>"New Run created. "<A href=run_details_path(id) attr:class="font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary">"View new Run →"</A></p>
-                <button type="button" class="rounded-md px-2 py-1 font-medium hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary" on:click=move |_| notice.set(None)>"Dismiss"</button>
+                <p>"New Run created. "<A href=run_details_path(id) attr:class="font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">"View new Run →"</A></p>
+                <button type="button" class="rounded-md px-2 py-1 font-medium hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" on:click=move |_| notice.set(None)>"Dismiss"</button>
             </div>
         })
     }

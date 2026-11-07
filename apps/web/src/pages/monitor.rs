@@ -46,7 +46,7 @@ pub fn MonitorPage() -> impl IntoView {
             <PageHeader title="Monitor" description="Current PostgreSQL and execution-pipeline state for operators.">
                 <button
                     type="button"
-                    class="rounded-md bg-crono-primary px-3 py-2 text-sm font-medium text-white hover:bg-crono-primary-hover disabled:opacity-50"
+                    class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-50"
                     disabled=move || pending.get()
                     on:click=move |_| {
                         if !pending.get_untracked() {
@@ -55,19 +55,19 @@ pub fn MonitorPage() -> impl IntoView {
                     }
                 >{move || if pending.get() { "Refreshing…" } else { "Refresh" }}</button>
             </PageHeader>
-            <p class="text-xs text-crono-muted">
+            <p class="text-xs text-muted-foreground">
                 {if automatic { "Refreshes every 30 seconds while open. Values are snapshots, not historical trends." } else { "Automatic refresh is unavailable; use Refresh for a new snapshot." }}
             </p>
             {move || monitor.map(|result| match result {
                 Ok(snapshot) => snapshot_view(snapshot.clone()).into_any(),
                 Err(error) => view! {
-                    <section role="alert" class="rounded-xl border border-crono-failed/30 bg-crono-surface px-6 py-8">
+                    <section role="alert" class="rounded-xl border border-crono-failed/30 bg-card px-6 py-8">
                         <h2 class="font-semibold text-crono-failed">"Monitor unavailable"</h2>
-                        <p class="mt-2 text-sm text-crono-muted">{error.message.clone()}</p>
+                        <p class="mt-2 text-sm text-muted-foreground">{error.message.clone()}</p>
                     </section>
                 }.into_any(),
             }).unwrap_or_else(|| view! {
-                <section class="rounded-xl border border-crono-border bg-crono-surface px-6 py-8 text-sm text-crono-muted">"Loading system snapshot…"</section>
+                <section class="rounded-xl border border-border bg-card px-6 py-8 text-sm text-muted-foreground">"Loading system snapshot…"</section>
             }.into_any())}
         </div>
     }
@@ -83,38 +83,38 @@ fn snapshot_view(snapshot: MonitorResource) -> impl IntoView {
     let instance = snapshot.instance;
     view! {
         <div class="space-y-6">
-            <p class="text-xs text-crono-muted">"Sampled at "<time datetime=sampled_at.clone()>{sampled_at.clone()}</time></p>
+            <p class="text-xs text-muted-foreground">"Sampled at "<time datetime=sampled_at.clone()>{sampled_at.clone()}</time></p>
             <section aria-label="Service health" class="grid gap-4 sm:grid-cols-2">
                 <StatusTile label="PostgreSQL" available=database_available detail="Control-plane durability" />
                 <StatusTile label="NATS JetStream" available=nats_available detail="This API instance's dispatch transport" />
             </section>
-            <section class="rounded-xl border border-crono-border bg-crono-surface">
-                <header class="border-b border-crono-border px-5 py-4 sm:px-6">
-                    <h2 class="font-semibold text-crono-text">"PostgreSQL"</h2>
-                    <p class="mt-1 text-xs text-crono-muted">"Database size includes all schemas. Pool usage belongs to this API instance."</p>
+            <section class="rounded-xl border border-border bg-card">
+                <header class="border-b border-border px-5 py-4 sm:px-6">
+                    <h2 class="font-semibold text-foreground">"PostgreSQL"</h2>
+                    <p class="mt-1 text-xs text-muted-foreground">"Database size includes all schemas. Pool usage belongs to this API instance."</p>
                 </header>
                 {database_view(database, database_available)}
             </section>
-            <section class="rounded-xl border border-crono-border bg-crono-surface">
-                <header class="border-b border-crono-border px-5 py-4 sm:px-6">
-                    <h2 class="font-semibold text-crono-text">"Schedule and dispatch"</h2>
-                    <p class="mt-1 text-xs text-crono-muted">"Database-backed counts are system-wide. Poll times belong to this API instance."</p>
+            <section class="rounded-xl border border-border bg-card">
+                <header class="border-b border-border px-5 py-4 sm:px-6">
+                    <h2 class="font-semibold text-foreground">"Schedule and dispatch"</h2>
+                    <p class="mt-1 text-xs text-muted-foreground">"Database-backed counts are system-wide. Poll times belong to this API instance."</p>
                 </header>
                 {pipeline_view(pipeline)}
-                <div class="grid gap-4 border-t border-crono-border px-5 py-5 sm:grid-cols-2 sm:px-6">
+                <div class="grid gap-4 border-t border-border px-5 py-5 sm:grid-cols-2 sm:px-6">
                     <MetricTile label="Scheduler DB poll" value=instance.scheduler_last_poll_at.unwrap_or_else(|| "Not observed yet".to_string()) detail="Last successful due-Schedule claim on this API instance" />
                     <MetricTile label="Publisher DB poll" value=instance.publisher_last_poll_at.unwrap_or_else(|| "Not observed yet".to_string()) detail="Last successful outbox claim on this API instance" />
                 </div>
             </section>
             <nav aria-label="Investigate execution" class="flex flex-wrap gap-2">
                 <A href=AppRoute::Schedules.path() attr:class=QUIET_ACTION_CLASS>
-                    <Icon symbol=AppRoute::Schedules.symbol() class="text-lg leading-none" />"View Schedules"
+                    <Icon icon=AppRoute::Schedules.symbol() size=18 />"View Schedules"
                 </A>
                 <A href=AppRoute::Runs.path() attr:class=QUIET_ACTION_CLASS>
-                    <Icon symbol=AppRoute::Runs.symbol() class="text-lg leading-none" />"View Runs"
+                    <Icon icon=AppRoute::Runs.symbol() size=18 />"View Runs"
                 </A>
                 <A href=AppRoute::Workers.path() attr:class=QUIET_ACTION_CLASS>
-                    <Icon symbol=AppRoute::Workers.symbol() class="text-lg leading-none" />"View Workers"
+                    <Icon icon=AppRoute::Workers.symbol() size=18 />"View Workers"
                 </A>
             </nav>
         </div>
@@ -133,7 +133,7 @@ fn database_view(database: Option<DatabaseMonitorResource>, available: bool) -> 
             </div>
         }.into_any(),
         None => view! {
-            <p role="status" class="px-5 py-8 text-sm text-crono-muted sm:px-6">
+            <p role="status" class="px-5 py-8 text-sm text-muted-foreground sm:px-6">
                 {if available { "Database metrics are unavailable. Retry shortly." } else { "PostgreSQL is unavailable; database metrics cannot be sampled." }}
             </p>
         }.into_any(),
@@ -157,7 +157,7 @@ fn pipeline_view(pipeline: Option<PipelineMonitorResource>) -> impl IntoView {
             </div>
         }.into_any(),
         None => view! {
-            <p role="status" class="px-5 py-8 text-sm text-crono-muted sm:px-6">"Pipeline counts are unavailable until PostgreSQL can be sampled."</p>
+            <p role="status" class="px-5 py-8 text-sm text-muted-foreground sm:px-6">"Pipeline counts are unavailable until PostgreSQL can be sampled."</p>
         }.into_any(),
     }
 }
@@ -171,9 +171,9 @@ fn StatusTile(label: &'static str, available: bool, detail: &'static str) -> imp
         ("Unavailable", "bg-red-50 text-crono-failed")
     };
     view! {
-        <div class="rounded-xl border border-crono-border bg-crono-surface p-5">
-            <div class="flex items-center justify-between gap-3"><h2 class="font-semibold text-crono-text">{label}</h2><span class=format!("rounded-full px-2.5 py-1 text-xs font-medium {class}")>{status}</span></div>
-            <p class="mt-2 text-xs text-crono-muted">{detail}</p>
+        <div class="rounded-xl border border-border bg-card p-5">
+            <div class="flex items-center justify-between gap-3"><h2 class="font-semibold text-foreground">{label}</h2><span class=format!("rounded-full px-2.5 py-1 text-xs font-medium {class}")>{status}</span></div>
+            <p class="mt-2 text-xs text-muted-foreground">{detail}</p>
         </div>
     }
 }
@@ -182,10 +182,10 @@ fn StatusTile(label: &'static str, available: bool, detail: &'static str) -> imp
 #[component]
 fn MetricTile(label: &'static str, value: String, detail: &'static str) -> impl IntoView {
     view! {
-        <div class="min-w-0 rounded-lg bg-crono-bg px-4 py-3">
-            <p class="text-xs font-medium text-crono-muted">{label}</p>
-            <p class="mt-1 break-all text-xl font-semibold text-crono-text">{value}</p>
-            <p class="mt-1 text-xs text-crono-muted">{detail}</p>
+        <div class="min-w-0 rounded-lg bg-background px-4 py-3">
+            <p class="text-xs font-medium text-muted-foreground">{label}</p>
+            <p class="mt-1 break-all text-xl font-semibold text-foreground">{value}</p>
+            <p class="mt-1 text-xs text-muted-foreground">{detail}</p>
         </div>
     }
 }

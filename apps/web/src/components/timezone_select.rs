@@ -6,7 +6,7 @@
 //! rules when it calculates future occurrences.
 
 use super::{Icon, forms::INPUT_CLASS};
-use crate::navigation::MaterialSymbol;
+use crate::navigation::AppIcon;
 use chrono::{DateTime, Offset, Utc};
 use chrono_tz::{TZ_VARIANTS, Tz};
 use leptos::prelude::*;
@@ -53,7 +53,7 @@ pub fn TimezoneSelect(selected: RwSignal<String>) -> impl IntoView {
 
     view! {
         <div class="min-w-0">
-            <label for="schedule-timezone" class="block text-sm font-medium text-crono-text">"Timezone"</label>
+            <label for="schedule-timezone" class="block text-sm font-medium text-foreground">"Timezone"</label>
             <div class="relative mt-1.5">
                 <input
                     id="schedule-timezone"
@@ -83,12 +83,12 @@ pub fn TimezoneSelect(selected: RwSignal<String>) -> impl IntoView {
                     on:keydown=move |event| timezone_keydown(&event, filtered, active, open, choose)
                     on:blur=move |_| open.set(false)
                 />
-                <Icon symbol=MaterialSymbol::ExpandMore class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-lg text-crono-muted" />
+                <Icon icon=AppIcon::ChevronDown size=18 class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Show when=move || open.get()>
                     <TimezoneOptions filtered active selected choose />
                 </Show>
             </div>
-            <p id="schedule-timezone-help" class="mt-1.5 text-xs text-crono-muted">
+            <p id="schedule-timezone-help" class="mt-1.5 text-xs text-muted-foreground">
                 "UTC offsets are current; regional daylight saving rules may change them."
             </p>
         </div>
@@ -198,11 +198,11 @@ fn TimezoneOptions(
     choose: Callback<TimezoneOption>,
 ) -> impl IntoView {
     view! {
-        <ul id="schedule-timezone-listbox" role="listbox" class="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-crono-border bg-white py-1 shadow-lg">
+        <ul id="schedule-timezone-listbox" role="listbox" class="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border border-border bg-card py-1 shadow-lg">
             {move || {
                 let visible = filtered.get();
                 if visible.is_empty() {
-                    return view! { <li class="px-3 py-3 text-sm text-crono-muted">"No matching timezones."</li> }.into_any();
+                    return view! { <li class="px-3 py-3 text-sm text-muted-foreground">"No matching timezones."</li> }.into_any();
                 }
                 visible.into_iter().enumerate().map(|(index, option)| {
                     let for_pointer = option.clone();
@@ -212,7 +212,7 @@ fn TimezoneOptions(
                             id=format!("schedule-timezone-option-{index}")
                             role="option"
                             aria-selected=move || (selected.get() == option.id).to_string()
-                            class=move || format!("cursor-pointer px-3 py-2 text-sm hover:bg-crono-primary-soft {}", if active.get() == index { "bg-crono-primary-soft" } else { "" })
+                            class=move || format!("cursor-pointer px-3 py-2 text-sm hover:bg-accent {}", if active.get() == index { "bg-accent" } else { "" })
                             on:pointerdown=move |event| {
                                 event.prevent_default();
                                 choose.run(for_pointer.clone());

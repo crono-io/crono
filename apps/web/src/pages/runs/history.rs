@@ -13,7 +13,7 @@ use super::{
 use crate::{
     api,
     components::{EmptyState, Icon, PageHeader, ResourceSelect, forms::FIELD_CLASS},
-    navigation::{AppRoute, MaterialSymbol, run_details_path},
+    navigation::{AppIcon, AppRoute, run_details_path},
     pages::resource_options,
 };
 use crono_api::{Page, RunResource, RunStatus};
@@ -84,9 +84,9 @@ pub fn RunsPage() -> impl IntoView {
                 <A href=AppRoute::RunsNew.path() attr:class=ACTION_CLASS>"Run a Job"</A>
             </PageHeader>
             <CreatedRunNotice notice=created_run_id />
-            <section class="grid gap-3 rounded-xl border border-crono-border bg-crono-surface p-4 sm:grid-cols-2 lg:grid-cols-5">
+            <section class="grid gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-5">
                 <ResourceSelect id="runs-namespace-filter" label="Namespace" placeholder="All namespaces" options=namespace_choices.options selected=namespace_id loading=namespace_choices.loading load_error=namespace_choices.load_error optional=true />
-                <div><label for="runs-status-filter" class="block text-sm font-medium text-crono-text">"Status"</label>
+                <div><label for="runs-status-filter" class="block text-sm font-medium text-foreground">"Status"</label>
                     <select id="runs-status-filter" class=FIELD_CLASS on:change=move |event| { status.set(parse_status(&event_target_value(&event))); reset_page(); }>
                         <option value="">"All statuses"</option>
                         <option value="pending_dispatch">"Pending dispatch"</option><option value="queued">"Queued"</option>
@@ -100,17 +100,17 @@ pub fn RunsPage() -> impl IntoView {
                 <ResourceSelect id="runs-target-filter" label="Target" placeholder="All Targets" options=target_choices.options selected=target_id loading=target_choices.loading load_error=target_choices.load_error optional=true />
                 <ResourceSelect id="runs-target-set-filter" label="Target Set" placeholder="All Target Sets" options=target_set_choices.options selected=target_set_id loading=target_set_choices.loading load_error=target_set_choices.load_error optional=true />
             </section>
-            <div class="flex justify-end"><button type="button" class=RUN_ACTION_CLASS on:click=move |_| runs.refetch()><Icon symbol=MaterialSymbol::Refresh class="text-lg leading-none" />"Refresh"</button></div>
-            <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface">
+            <div class="flex justify-end"><button type="button" class=RUN_ACTION_CLASS on:click=move |_| runs.refetch()><Icon icon=AppIcon::RefreshCw size=18 />"Refresh"</button></div>
+            <section class="overflow-hidden rounded-xl border border-border bg-card">
                 {move || runs.map(|result| match result {
                     Ok(page) if page.items.is_empty() => view! {
-                        <EmptyState icon=MaterialSymbol::PlayCircle title="No Runs yet" description="No executions match these filters. Start a Job or choose another filter.">
+                        <EmptyState icon=AppIcon::CirclePlay title="No Runs yet" description="No executions match these filters. Start a Job or choose another filter.">
                             <A href=AppRoute::RunsNew.path() attr:class=ACTION_CLASS>"Run a Job"</A>
                         </EmptyState>
                     }.into_any(),
                     Ok(page) => view! { <RunList page=page.clone() on_open=Callback::new(move |()| created_run_id.set(None)) on_created=Callback::new(move |id| { show_created_run(created_run_id, id); runs.refetch(); }) /> }.into_any(),
                     Err(error) => view! { <p class="px-6 py-10 text-center text-sm text-crono-failed" role="alert">{error.message.clone()}</p> }.into_any(),
-                }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Runs…"</p> }.into_any())}
+                }).unwrap_or_else(|| view! { <p class="px-6 py-10 text-center text-sm text-muted-foreground">"Loading Runs…"</p> }.into_any())}
             </section>
             <div class="flex items-center justify-between">
                 <button type="button" class=RUN_ACTION_CLASS disabled=move || page_stack.get().is_empty() on:click=move |_| {
@@ -132,10 +132,10 @@ fn RunList(
     on_created: Callback<Uuid>,
 ) -> impl IntoView {
     view! {
-        <div class="hidden grid-cols-[minmax(0,3fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-x-5 border-b border-crono-border bg-crono-primary-soft px-5 py-3 text-xs font-medium uppercase tracking-wide text-crono-muted sm:px-6 xl:grid">
+        <div class="hidden grid-cols-[minmax(0,3fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_minmax(0,1fr)] gap-x-5 border-b border-border bg-primary-soft px-5 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:px-6 xl:grid">
             <span>"Job / Target"</span><span>"Started"</span><span>"Finished"</span><span>"Status"</span>
         </div>
-        <ul class="divide-y divide-crono-border">{page.items.into_iter().map(|run| view! {
+        <ul class="divide-y divide-border">{page.items.into_iter().map(|run| view! {
             <li class="px-5 py-4 sm:px-6"><RunListItem run on_open on_created /></li>
         }).collect_view()}</ul>
     }
@@ -174,33 +174,33 @@ fn RunListItem(
         <div>
             <div class="grid grid-cols-2 gap-x-4 gap-y-3 xl:grid-cols-[minmax(0,3fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_minmax(0,1fr)] xl:gap-x-5 xl:gap-y-0">
                 <div class="col-span-2 min-w-0 xl:col-span-1">
-                    <h2 class="font-semibold text-crono-text">{run_job_name(&run).to_string()}</h2>
-                    <p class="text-sm text-crono-muted">{format!("{} → {}", run_namespace(&run), destination)}</p>
-                    <p class="mt-1 text-xs text-crono-muted" title=triggered_at.clone()>{format!("Triggered by {} · {}", trigger_label(&run), display_time(&triggered_at))}</p>
-                    <p class="text-xs text-crono-muted">{format!("Queue {queue} · {} {attempts} · Run …{}", run.attempt_count, run.id.simple().to_string().chars().skip(24).collect::<String>())}</p>
+                    <h2 class="font-semibold text-foreground">{run_job_name(&run).to_string()}</h2>
+                    <p class="text-sm text-muted-foreground">{format!("{} → {}", run_namespace(&run), destination)}</p>
+                    <p class="mt-1 text-xs text-muted-foreground" title=triggered_at.clone()>{format!("Triggered by {} · {}", trigger_label(&run), display_time(&triggered_at))}</p>
+                    <p class="text-xs text-muted-foreground">{format!("Queue {queue} · {} {attempts} · Run …{}", run.attempt_count, run.id.simple().to_string().chars().skip(24).collect::<String>())}</p>
                 </div>
                 <div class="min-w-0">
-                    <p class="mb-1 text-xs font-medium uppercase tracking-wide text-crono-muted xl:hidden">"Started"</p>
+                    <p class="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground xl:hidden">"Started"</p>
                     <RunHistoryTime value=started_at />
                 </div>
                 <div class="min-w-0">
-                    <p class="mb-1 text-xs font-medium uppercase tracking-wide text-crono-muted xl:hidden">"Finished"</p>
+                    <p class="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground xl:hidden">"Finished"</p>
                     <RunHistoryTime value=completed_at />
                     {run.duration_ms.map(|duration| view! {
-                        <p class="mt-1 inline-flex items-center gap-1 text-xs text-crono-muted">
-                            <Icon symbol=MaterialSymbol::Timer class="text-base" />
+                        <p class="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
+                            <Icon icon=AppIcon::Timer size=18 />
                             <span>{format!("Elapsed {}", display_duration(Some(duration)))}</span>
                         </p>
                     })}
                 </div>
                 <div class="col-span-2 xl:col-span-1">
-                    <p class="mb-1 text-xs font-medium uppercase tracking-wide text-crono-muted xl:hidden">"Status"</p>
+                    <p class="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground xl:hidden">"Status"</p>
                     <span class=format!("inline-flex rounded-full px-2.5 py-1 text-xs font-medium {}", status_class(run.status))>{status_label(run.status)}</span>
                 </div>
             </div>
             <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                <A href=details_path attr:class=RUN_ACTION_CLASS><Icon symbol=MaterialSymbol::Info class="text-lg" />"Details"</A>
-                <button type="button" class=RUN_ACTION_CLASS aria-expanded=move || output_open.get().to_string() on:click=move |_| output_open.update(|open| *open = !*open)><Icon symbol=MaterialSymbol::Terminal class="text-lg" />{move || if output_open.get() { "Hide output" } else { "Output" }}</button>
+                <A href=details_path attr:class=RUN_ACTION_CLASS><Icon icon=AppIcon::Info size=18 />"Details"</A>
+                <button type="button" class=RUN_ACTION_CLASS aria-expanded=move || output_open.get().to_string() on:click=move |_| output_open.update(|open| *open = !*open)><Icon icon=AppIcon::ScrollText size=18 />{move || if output_open.get() { "Hide output" } else { "Output" }}</button>
                 <Show when=move || rerun_allowed><RerunAction run=rerun_record.clone() on_open on_created /></Show>
             </div>
             <Show when=move || output_open.get()><RunAttemptOutput run_id status=run.status /></Show>
@@ -215,14 +215,16 @@ fn RunHistoryTime(value: Option<String>) -> impl IntoView {
         Some(value) => {
             let (clock, date) = history_time_parts(&value);
             view! {
-                <time datetime=value.clone() title=value class="block text-sm text-crono-text">
+                <time datetime=value.clone() title=value class="block text-sm text-foreground">
                     <span class="block font-medium tabular-nums">{clock}</span>
-                    <span class="block text-xs text-crono-muted tabular-nums">{date}</span>
+                    <span class="block text-xs text-muted-foreground tabular-nums">{date}</span>
                 </time>
             }
             .into_any()
         }
-        None => view! { <span class="text-sm text-crono-muted">"Not recorded"</span> }.into_any(),
+        None => {
+            view! { <span class="text-sm text-muted-foreground">"Not recorded"</span> }.into_any()
+        }
     }
 }
 
@@ -246,16 +248,16 @@ pub(super) fn RerunAction(
         .map(|set| format!("This repeats only {target}, one member of Target Set {set}."));
     view! {
         <div class="contents">
-            <button type="button" class=RUN_ACTION_CLASS aria-expanded=move || confirming.get().to_string() disabled=move || submitting.get() on:click=move |_| { on_open.run(()); request_id.set(Uuid::now_v7()); error.set(None); confirming.set(true); }><Icon symbol=MaterialSymbol::Replay class="text-lg" />"Re-run"</button>
+            <button type="button" class=RUN_ACTION_CLASS aria-expanded=move || confirming.get().to_string() disabled=move || submitting.get() on:click=move |_| { on_open.run(()); request_id.set(Uuid::now_v7()); error.set(None); confirming.set(true); }><Icon icon=AppIcon::RotateCcw size=18 />"Re-run"</button>
             <Show when=move || confirming.get()>
-                <div class="mt-2 w-full basis-full rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-crono-text" role="group" aria-label="Confirm re-run">
+                <div class="mt-2 w-full basis-full rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-foreground" role="group" aria-label="Confirm re-run">
                     <p class="font-semibold">"Run again?"</p>
                     <p class="mt-1">{format!("Job: {job} · Destination: {target}")}</p>
-                    <p class="mt-1 text-crono-muted">"The original saved execution command, inputs, and policy will be reused. Secret values are not shown here."</p>
-                    {set_note.clone().map(|note| view! { <p class="mt-1 text-crono-muted">{note}</p> })}
+                    <p class="mt-1 text-muted-foreground">"The original saved execution command, inputs, and policy will be reused. Secret values are not shown here."</p>
+                    {set_note.clone().map(|note| view! { <p class="mt-1 text-muted-foreground">{note}</p> })}
                     <div class="mt-3 flex flex-wrap gap-3">
-                        <button type="button" class="rounded-md px-3 py-2 font-medium text-crono-muted hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary" on:click=move |_| { confirming.set(false); error.set(None); }>"Cancel"</button>
-                        <button type="button" class="rounded-md bg-crono-primary px-3 py-2 font-semibold text-white hover:bg-crono-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary focus-visible:ring-offset-2 disabled:opacity-50" disabled=move || submitting.get() on:click=move |_| {
+                        <button type="button" class="rounded-md px-3 py-2 font-medium text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" on:click=move |_| { confirming.set(false); error.set(None); }>"Cancel"</button>
+                        <button type="button" class="rounded-md bg-primary px-3 py-2 font-semibold text-primary-foreground hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:opacity-50" disabled=move || submitting.get() on:click=move |_| {
                             submitting.set(true); error.set(None);
                             let request_id = request_id.get_untracked();
                             spawn_local(async move {
@@ -348,10 +350,7 @@ mod browser_tests {
                 .text_content()
                 .is_some_and(|text| text.contains("Re-run"))
         );
-        let icon = trigger
-            .query_selector(".material-symbols-outlined")
-            .ok()
-            .flatten();
+        let icon = trigger.query_selector(".app-icon").ok().flatten();
         assert!(icon.is_some(), "Re-run action should have its icon");
         assert_eq!(
             icon.and_then(|icon| icon.get_attribute("aria-hidden"))

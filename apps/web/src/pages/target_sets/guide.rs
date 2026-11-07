@@ -8,26 +8,26 @@
 use leptos::prelude::*;
 use leptos_router::components::A;
 
-const SUMMARY_CLASS: &str = "cursor-pointer rounded-md px-4 py-3 text-sm font-semibold text-crono-text hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary";
-const INLINE_LINK_CLASS: &str = "rounded-sm font-medium text-crono-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-crono-primary";
+const SUMMARY_CLASS: &str = "cursor-pointer rounded-md px-4 py-3 text-sm font-semibold text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
+const INLINE_LINK_CLASS: &str = "rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
 
 /// Show the authoring sequence and where a saved group is used for execution.
 #[component]
 pub(super) fn TargetSetSteps() -> impl IntoView {
     view! {
-        <section aria-label="How to use a Target Set" class="rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
+        <section aria-label="How to use a Target Set" class="rounded-xl border border-border bg-card p-5 sm:p-6">
             <ol class="grid gap-4 text-sm sm:grid-cols-3 sm:gap-6">
                 <li>
-                    <p class="font-semibold text-crono-text">"1. Choose Targets"</p>
-                    <p class="mt-1 text-crono-muted">"Select existing Targets from one Namespace. Each member supplies its own arguments and inputs."</p>
+                    <p class="font-semibold text-foreground">"1. Choose Targets"</p>
+                    <p class="mt-1 text-muted-foreground">"Select existing Targets from one Namespace. Each member supplies its own arguments and inputs."</p>
                 </li>
                 <li>
-                    <p class="font-semibold text-crono-text">"2. Add shared inputs"</p>
-                    <p class="mt-1 text-crono-muted">"Name the group and add values every member can use. A Target can override a shared value."</p>
+                    <p class="font-semibold text-foreground">"2. Add shared inputs"</p>
+                    <p class="mt-1 text-muted-foreground">"Name the group and add values every member can use. A Target can override a shared value."</p>
                 </li>
                 <li>
-                    <p class="font-semibold text-crono-text">"3. Run a Job"</p>
-                    <p class="mt-1 text-crono-muted">"Save, then choose the set in "<A href="/runs/new" attr:class=INLINE_LINK_CLASS>"Run Job"</A>" or "<A href="/schedules" attr:class=INLINE_LINK_CLASS>"Schedules"</A>". One Job request creates one Run per member."</p>
+                    <p class="font-semibold text-foreground">"3. Run a Job"</p>
+                    <p class="mt-1 text-muted-foreground">"Save, then choose the set in "<A href="/runs/new" attr:class=INLINE_LINK_CLASS>"Run Job"</A>" or "<A href="/schedules" attr:class=INLINE_LINK_CLASS>"Schedules"</A>". One Job request creates one Run per member."</p>
                 </li>
             </ol>
         </section>
@@ -38,15 +38,15 @@ pub(super) fn TargetSetSteps() -> impl IntoView {
 #[component]
 pub(super) fn TargetSetGuide() -> impl IntoView {
     view! {
-        <aside aria-labelledby="target-set-guide-title" class="min-w-0 rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
-            <h2 id="target-set-guide-title" class="font-semibold text-crono-text">"See how it works"</h2>
-            <p class="mt-2 text-sm text-crono-muted">"Illustrative examples. Create your own Jobs and Targets to try them."</p>
+        <aside aria-labelledby="target-set-guide-title" class="min-w-0 rounded-xl border border-border bg-card p-5 sm:p-6">
+            <h2 id="target-set-guide-title" class="font-semibold text-foreground">"See how it works"</h2>
+            <p class="mt-2 text-sm text-muted-foreground">"Illustrative examples. Create your own Jobs and Targets to try them."</p>
             <div class="mt-5 space-y-3">
                 <GreetingExample />
                 <DeploymentExample />
                 <InputPrecedence />
             </div>
-            <p class="mt-4 text-xs text-crono-muted">"Editing membership or inputs affects future Runs. Existing Runs keep the values they were created with."</p>
+            <p class="mt-4 text-xs text-muted-foreground">"Editing membership or inputs affects future Runs. Existing Runs keep the values they were created with."</p>
         </aside>
     }
 }
@@ -56,8 +56,8 @@ pub(super) fn TargetSetGuide() -> impl IntoView {
 fn ExampleValue(label: &'static str, value: &'static str) -> impl IntoView {
     view! {
         <div>
-            <dt class="text-xs font-medium text-crono-muted">{label}</dt>
-            <dd class="mt-1 whitespace-pre-wrap break-words font-mono text-xs leading-5 text-crono-text">{value}</dd>
+            <dt class="text-xs font-medium text-muted-foreground">{label}</dt>
+            <dd class="mt-1 whitespace-pre-wrap break-words font-mono text-xs leading-5 text-foreground">{value}</dd>
         </div>
     }
 }
@@ -66,25 +66,25 @@ fn ExampleValue(label: &'static str, value: &'static str) -> impl IntoView {
 #[component]
 fn GreetingExample() -> impl IntoView {
     view! {
-        <details id="target-set-greeting-example" open class="rounded-lg border border-crono-border">
+        <details id="target-set-greeting-example" open class="rounded-lg border border-border">
             <summary class=SUMMARY_CLASS>"Simple example: greet two people"</summary>
-            <div class="space-y-4 border-t border-crono-border p-4 text-sm">
-                <p class="text-crono-muted">"The Job decides what to run. Each Target supplies a person's name. The Target Set supplies a common greeting."</p>
+            <div class="space-y-4 border-t border-border p-4 text-sm">
+                <p class="text-muted-foreground">"The Job decides what to run. Each Target supplies a person's name. The Target Set supplies a common greeting."</p>
                 <dl class="space-y-3">
                     <ExampleValue label="Process Job: greet" value="Executable: /bin/echo\nArguments: [\"{{ greeting }}\"]\nDefault inputs: {\"greeting\":\"Hi\"}" />
                     <ExampleValue label="Target: ada" value="Arguments: [\"{{ name }}\"]\nInputs: {\"name\":\"Ada\"}" />
                     <ExampleValue label="Target: ben" value="Arguments: [\"{{ name }}\"]\nInputs: {\"name\":\"Ben\",\"greeting\":\"Welcome\"}" />
                     <ExampleValue label="Target Set: greeting-team" value="Members: ada, ben\nShared inputs: {\"greeting\":\"Hello\"}" />
                 </dl>
-                <div class="rounded-md bg-crono-primary-soft p-3">
-                    <p class="font-medium text-crono-text">"Run greet on greeting-team → 2 separate Runs"</p>
+                <div class="rounded-md bg-primary-soft p-3">
+                    <p class="font-medium text-foreground">"Run greet on greeting-team → 2 separate Runs"</p>
                     <dl class="mt-3 space-y-3">
                         <ExampleValue label="Run for ada" value="/bin/echo Hello Ada" />
                         <ExampleValue label="Run for ben" value="/bin/echo Welcome Ben" />
                     </dl>
                 </div>
-                <p class="text-xs text-crono-muted">"Hello replaces the Job's Hi. Ben's Welcome overrides the shared Hello only for his Run. Each Target's arguments follow the Job's arguments."</p>
-                <p class="text-xs text-crono-muted">"To try it, create these resources in the same Namespace. In Run Job, select greet, choose Target Set, then select greeting-team."</p>
+                <p class="text-xs text-muted-foreground">"Hello replaces the Job's Hi. Ben's Welcome overrides the shared Hello only for his Run. Each Target's arguments follow the Job's arguments."</p>
+                <p class="text-xs text-muted-foreground">"To try it, create these resources in the same Namespace. In Run Job, select greet, choose Target Set, then select greeting-team."</p>
             </div>
         </details>
     }
@@ -94,21 +94,21 @@ fn GreetingExample() -> impl IntoView {
 #[component]
 fn DeploymentExample() -> impl IntoView {
     view! {
-        <details id="target-set-deployment-example" class="rounded-lg border border-crono-border">
+        <details id="target-set-deployment-example" class="rounded-lg border border-border">
             <summary class=SUMMARY_CLASS>"Deployment example: two web hosts"</summary>
-            <div class="space-y-4 border-t border-crono-border p-4 text-sm">
-                <p class="text-crono-muted">"Keep the release version in one place while each Target selects its own inventory host."</p>
+            <div class="space-y-4 border-t border-border p-4 text-sm">
+                <p class="text-muted-foreground">"Keep the release version in one place while each Target selects its own inventory host."</p>
                 <dl class="space-y-3">
                     <ExampleValue label="Process Job: deploy-web" value="Executable: /usr/bin/ansible-playbook\nArguments: [\"-i\", \"/etc/ansible/hosts\", \"/srv/playbooks/deploy.yml\", \"--extra-vars\", \"version={{ version }}\"]" />
                     <ExampleValue label="Target: web-01" value="Arguments: [\"--limit\", \"{{ host }}\"]\nInputs: {\"host\":\"web01.example.com\"}" />
                     <ExampleValue label="Target: web-02" value="Arguments: [\"--limit\", \"{{ host }}\"]\nInputs: {\"host\":\"web02.example.com\"}" />
                     <ExampleValue label="Target Set: web-fleet" value="Members: web-01, web-02\nShared inputs: {\"version\":\"2.4.0\"}" />
                 </dl>
-                <div class="rounded-md bg-crono-primary-soft p-3">
-                    <p class="font-medium text-crono-text">"Run deploy-web on web-fleet → 2 separate Runs"</p>
-                    <p class="mt-2 text-xs text-crono-muted">"Both use version 2.4.0. One adds "<code class="break-words font-mono">"--limit web01.example.com"</code>"; the other adds "<code class="break-words font-mono">"--limit web02.example.com"</code>"."</p>
+                <div class="rounded-md bg-primary-soft p-3">
+                    <p class="font-medium text-foreground">"Run deploy-web on web-fleet → 2 separate Runs"</p>
+                    <p class="mt-2 text-xs text-muted-foreground">"Both use version 2.4.0. One adds "<code class="break-words font-mono">"--limit web01.example.com"</code>"; the other adds "<code class="break-words font-mono">"--limit web02.example.com"</code>"."</p>
                 </div>
-                <p class="text-xs text-crono-muted">"The worker running this Job needs Ansible, the inventory and playbook files, and access to the hosts. The Job's program handles the connection to each host."</p>
+                <p class="text-xs text-muted-foreground">"The worker running this Job needs Ansible, the inventory and playbook files, and access to the hosts. The Job's program handles the connection to each host."</p>
             </div>
         </details>
     }
@@ -118,11 +118,11 @@ fn DeploymentExample() -> impl IntoView {
 #[component]
 fn InputPrecedence() -> impl IntoView {
     view! {
-        <details id="target-set-input-precedence" class="rounded-lg border border-crono-border">
+        <details id="target-set-input-precedence" class="rounded-lg border border-border">
             <summary class=SUMMARY_CLASS>"Which input value wins?"</summary>
-            <div class="space-y-3 border-t border-crono-border p-4 text-sm text-crono-muted">
+            <div class="space-y-3 border-t border-border p-4 text-sm text-muted-foreground">
                 <p>"Inputs are applied in this order. Later layers override matching values:"</p>
-                <ol class="list-inside list-decimal space-y-2 text-crono-text">
+                <ol class="list-inside list-decimal space-y-2 text-foreground">
                     <li>"Job default inputs"</li>
                     <li>"Target Set shared inputs"</li>
                     <li>"Target inputs"</li>

@@ -40,6 +40,7 @@ futures-util = "0.3.34"
 gloo-net = "0.7"
 leptos = { version = "0.8", default-features = false, features = ["csr"] }
 leptos_router = "0.8"
+lucide-leptos = { version = "3.63", default-features = false, features = ["accessibility", "account", "arrows", "development", "files", "gaming", "layout", "multimedia", "notifications", "text", "time", "weather"] }
 nkeys = { version = "0.4", default-features = false }
 opentelemetry = { version = "0.33", default-features = false, features = ["trace"] }
 opentelemetry-otlp = { version = "0.33", default-features = false, features = ["trace", "grpc-tonic", "gzip-tonic", "tls-ring", "tls-webpki-roots"] }

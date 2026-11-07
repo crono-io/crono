@@ -16,7 +16,7 @@ use crate::{
     api,
     components::resource_dialogs::DELETE_ACTION_CLASS,
     components::{Icon, Modal, QUIET_ACTION_CLASS},
-    navigation::{MaterialSymbol, workflow_details_path},
+    navigation::{AppIcon, workflow_details_path},
     pages::resource_options,
 };
 use crono_api::{ExecutionTarget, WorkflowRunResource, WorkflowRunState};
@@ -85,9 +85,9 @@ pub fn WorkflowRunDetailsPage() -> impl IntoView {
         }
     });
     view! { <div class="space-y-6">
-        <header class="flex flex-wrap items-center justify-between gap-3"><h1 class="text-3xl font-bold text-crono-text">"Workflow run"</h1><button type="button" class=QUIET_ACTION_CLASS disabled=move || pending.get() on:click=move |_| refresh.run(())><Icon symbol=MaterialSymbol::Refresh class="text-lg" />{move || if pending.get() { "Refreshing…" } else { "Refresh" }}</button></header>
+        <header class="flex flex-wrap items-center justify-between gap-3"><h1 class="text-3xl font-bold text-foreground">"Workflow run"</h1><button type="button" class=QUIET_ACTION_CLASS disabled=move || pending.get() on:click=move |_| refresh.run(())><Icon icon=AppIcon::RefreshCw size=18 />{move || if pending.get() { "Refreshing…" } else { "Refresh" }}</button></header>
         <Show when=move || error.get().is_some()><p class="rounded-lg bg-red-50 p-4 text-sm text-crono-failed" role="alert">{move || format!("{}{}", error.get().unwrap_or_default(), if snapshot.get().is_some() { " Displaying the last successful snapshot; it may be out of date." } else { " Use Refresh to retry." })}</p></Show>
-        <Show when=move || snapshot.get().is_some() fallback=move || view! { <p class="text-sm text-crono-muted">{move || if pending.get() { "Loading Workflow run…" } else { "Workflow run unavailable." }}</p> }><Invocation snapshot /></Show>
+        <Show when=move || snapshot.get().is_some() fallback=move || view! { <p class="text-sm text-muted-foreground">{move || if pending.get() { "Loading Workflow run…" } else { "Workflow run unavailable." }}</p> }><Invocation snapshot /></Show>
         <CancelWorkflow snapshot refresh pending busy=mutating />
     </div> }
 }
@@ -128,14 +128,14 @@ fn InvocationHeader(
     let target = value.target;
     let name = value.workflow.name.clone();
     view! {
-        <section class=PANEL_CLASS><div class="flex flex-wrap items-center justify-between gap-3"><A href=workflow_details_path(value.workflow.id) attr:class="break-words text-xl font-semibold text-crono-primary hover:underline">{name}</A><StateBadge state=workflow_state(value.state) /></div>
-            <p class="break-all text-xs text-crono-muted">{format!("WorkflowRun {} · definition revision {}", value.id, value.workflow.revision)}</p>
+        <section class=PANEL_CLASS><div class="flex flex-wrap items-center justify-between gap-3"><A href=workflow_details_path(value.workflow.id) attr:class="break-words text-xl font-semibold text-primary hover:underline">{name}</A><StateBadge state=workflow_state(value.state) /></div>
+            <p class="break-all text-xs text-muted-foreground">{format!("WorkflowRun {} · definition revision {}", value.id, value.workflow.revision)}</p>
             <div class="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4"><p>"Started (UTC): "{value.started_at.as_deref().map_or_else(|| "Not started".to_string(), super::super::runs::display_time)}</p><p>"Finished (UTC): "{value.finished_at.as_deref().map_or_else(|| "—".to_string(), super::super::runs::display_time)}</p><p>"Duration: "{duration(value.started_at.as_deref(), value.finished_at.as_deref())}</p><p class="break-all">{move || {
                 let (id, kind, choices) = match target { ExecutionTarget::Target { id } => (id, "Target", targets.options.get()), ExecutionTarget::TargetSet { id } => (id, "Target Set", sets.options.get()) };
                 format!("{kind}: {}", choices.iter().find(|choice| choice.id == id).map_or_else(|| id.to_string(), |choice| choice.label.clone()))
             }}</p></div>
-            <p class="text-xs text-crono-muted">{if is_active(value.state) { "Refreshes every 5 seconds while active. This graph uses the launch snapshot; later definition edits do not change it." } else { "This Workflow run is terminal. Automatic refresh has stopped." }}</p>
-            {value.cancellation_requested.then(|| view! { <p role="status" class="text-sm text-crono-muted">"Cancellation requested. No further Jobs will start; active child Runs will finish normally."</p> })}
+            <p class="text-xs text-muted-foreground">{if is_active(value.state) { "Refreshes every 5 seconds while active. This graph uses the launch snapshot; later definition edits do not change it." } else { "This Workflow run is terminal. Automatic refresh has stopped." }}</p>
+            {value.cancellation_requested.then(|| view! { <p role="status" class="text-sm text-muted-foreground">"Cancellation requested. No further Jobs will start; active child Runs will finish normally."</p> })}
         </section>
     }
 }
@@ -184,7 +184,7 @@ fn CancelWorkflow(
     view! {
         <Show when=move || allowed.get()><button type="button" class=DELETE_ACTION_CLASS disabled=move || pending.get() || busy.get() on:click=move |_| { error.set(None); open.set(true); }>"Cancel Workflow run"</button></Show>
         <Modal id="workflow-run-cancellation" open busy title=Signal::derive(|| "Cancel Workflow run?".to_string())>
-            <p class="text-sm text-crono-muted">"Pending Jobs will not start. Active child Runs finish normally because Crono does not yet expose safe Run cancellation. The Workflow becomes cancelled after those Runs terminate."</p>
+            <p class="text-sm text-muted-foreground">"Pending Jobs will not start. Active child Runs finish normally because Crono does not yet expose safe Run cancellation. The Workflow becomes cancelled after those Runs terminate."</p>
             <Show when=move || error.get().is_some()><p role="alert" class="text-sm text-crono-failed">{move || error.get().unwrap_or_default()}</p></Show>
             <div class="flex flex-wrap justify-end gap-3"><button type="button" class=QUIET_ACTION_CLASS autofocus disabled=move || busy.get() on:click=move |_| open.set(false)>"Keep running"</button><button type="button" class=DELETE_ACTION_CLASS disabled=move || busy.get() || pending.get() || !allowed.get() on:click=confirm>"Cancel Workflow run"</button></div>
         </Modal>

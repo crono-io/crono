@@ -4,12 +4,23 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#fafafa">
+    <!-- Resolve the theme before first paint (stored choice, else the OS
+         preference) so a dark-mode visitor never sees a light flash. Must stay
+         in sync with STORAGE_KEY in src/theme.rs. -->
+    <script>
+      (function () {
+        var theme = null;
+        try { theme = localStorage.getItem("crono-theme"); } catch (e) {}
+        if (theme !== "light" && theme !== "dark") {
+          theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        var root = document.documentElement;
+        root.classList.toggle("dark", theme === "dark");
+        var meta = document.querySelector('meta[name="theme-color"]');
+        if (meta) meta.setAttribute("content", theme === "dark" ? "#09090b" : "#fafafa");
+      })();
+    </script>
     <title>Crono</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&display=block"
-      rel="stylesheet">
     <!-- Match wasm-opt's enabled instructions to current Rust WASM output. -->
     <link data-trunk rel="rust" data-bin="crono-web" data-wasm-opt="z"
       data-wasm-opt-params="--enable-bulk-memory-opt --enable-nontrapping-float-to-int">

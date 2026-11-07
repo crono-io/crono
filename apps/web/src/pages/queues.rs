@@ -140,12 +140,12 @@ fn queue_page(state: QueuePageState) -> impl IntoView {
                 title="Queues"
                 description="Queues route Jobs to worker pools. Names are editable; UUID routing keeps existing relationships stable."
             />
-            <section class="rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
-                <h2 class="text-base font-semibold text-crono-text">"Create Queue"</h2>
+            <section class="rounded-xl border border-border bg-card p-5 sm:p-6">
+                <h2 class="text-base font-semibold text-foreground">"Create Queue"</h2>
                 <form class="mt-5 space-y-4" on:submit=move |event| state.submit.run(event) novalidate>
                     <ResourceNameInput id="queue-name" label="Name" value=state.name error=state.name_error />
                     <div>
-                        <label for="queue-description" class="block text-sm font-medium text-crono-text">"Description"</label>
+                        <label for="queue-description" class="block text-sm font-medium text-foreground">"Description"</label>
                         <textarea
                             id="queue-description"
                             class=FIELD_CLASS
@@ -155,24 +155,24 @@ fn queue_page(state: QueuePageState) -> impl IntoView {
                             prop:value=move || state.description.get()
                             on:input=move |event| state.description.set(event_target_value(&event))
                         ></textarea>
-                        <p class="mt-1.5 text-xs text-crono-muted">"Optional. Maximum 500 characters."</p>
+                        <p class="mt-1.5 text-xs text-muted-foreground">"Optional. Maximum 500 characters."</p>
                         <p class="mt-1 text-sm text-crono-failed" role="alert">{move || state.description_error.get().unwrap_or_default()}</p>
                     </div>
                     <FormActions submit_label="Create Queue" disabled=state.disabled on_cancel=state.reset />
                 </form>
 
             </section>
-            <section class="overflow-hidden rounded-xl border border-crono-border bg-crono-surface">
-                <header class="border-b border-crono-border px-5 py-4 sm:px-6">
-                    <h2 node_ref=state.heading tabindex="-1" class="font-semibold text-crono-text">"Worker Queues"</h2>
+            <section class="overflow-hidden rounded-xl border border-border bg-card">
+                <header class="border-b border-border px-5 py-4 sm:px-6">
+                    <h2 node_ref=state.heading tabindex="-1" class="font-semibold text-foreground">"Worker Queues"</h2>
                 </header>
-                <p class="px-5 text-sm text-crono-muted sm:px-6" role="status">{move || state.deleted.get().unwrap_or_default()}</p>
+                <p class="px-5 text-sm text-muted-foreground sm:px-6" role="status">{move || state.deleted.get().unwrap_or_default()}</p>
                 {move || state.queues.map(|result| match result {
                     Ok(page) if page.items.is_empty() => view! {
-                        <p class="px-6 py-10 text-center text-sm text-crono-muted">"No Queues exist yet."</p>
+                        <p class="px-6 py-10 text-center text-sm text-muted-foreground">"No Queues exist yet."</p>
                     }.into_any(),
                     Ok(page) => view! {
-                        <ul class="divide-y divide-crono-border">
+                        <ul class="divide-y divide-border">
                             {page.items.clone().into_iter().map(|queue| view! {
                                 <QueueRow queue=queue on_changed=state.changed on_deleted=state.on_deleted feedback=state.feedback />
                             }).collect_view()}
@@ -182,7 +182,7 @@ fn queue_page(state: QueuePageState) -> impl IntoView {
                         <p class="px-6 py-10 text-center text-sm text-crono-failed">{error.message.clone()}</p>
                     }.into_any(),
                 }).unwrap_or_else(|| view! {
-                    <p class="px-6 py-10 text-center text-sm text-crono-muted">"Loading Queues…"</p>
+                    <p class="px-6 py-10 text-center text-sm text-muted-foreground">"Loading Queues…"</p>
                 }.into_any())}
             </section>
             <ResourceFeedbackModal id="queue-save-result" resource="Queue" plural="Queues" feedback=state.feedback on_view=Callback::new(move |()| focus_heading(state.heading)) />
@@ -267,7 +267,7 @@ fn QueueRow(
     });
     let delete_control = move || {
         view! {
-            <Show when=move || !system fallback=|| view! { <span class="self-center text-xs text-crono-muted">"Protected system Queue"</span> }>
+            <Show when=move || !system fallback=|| view! { <span class="self-center text-xs text-muted-foreground">"Protected system Queue"</span> }>
                 <DeleteControl id=format!("delete-queue-{id}") resource="Queue" name=original_name.get_value() description="This permanently removes the Queue and cannot be undone. Queues referenced by Jobs, Run history, or worker presence cannot be deleted." open=confirming_delete busy error=delete_error on_confirm />
             </Show>
         }
@@ -281,15 +281,15 @@ fn QueueRow(
                     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div class="min-w-0">
                             <div class="flex items-center gap-2">
-                                <span class="font-medium text-crono-text">{move || name.get()}</span>
-                                <span class=move || format!("rounded-full px-2 py-0.5 text-xs font-medium {}", if enabled.get() { "bg-emerald-50 text-emerald-700" } else { "bg-zinc-100 text-zinc-600" })>
+                                <span class="font-medium text-foreground">{move || name.get()}</span>
+                                <span class=move || format!("rounded-full px-2 py-0.5 text-xs font-medium {}", if enabled.get() { "bg-emerald-50 text-emerald-700" } else { "bg-muted text-muted-foreground" })>
                                     {move || if enabled.get() { "Enabled" } else { "Disabled" }}
                                 </span>
                                 <Show when=move || system>
-                                    <span class="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">"System"</span>
+                                    <span class="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">"System"</span>
                                 </Show>
                             </div>
-                            <p class="mt-1 text-sm text-crono-muted">{move || {
+                            <p class="mt-1 text-sm text-muted-foreground">{move || {
                                 let value = description.get();
                                 if value.is_empty() { "No description".to_string() } else { value }
                             }}</p>
@@ -300,17 +300,17 @@ fn QueueRow(
             >
                 <div class="space-y-4">
                     <div>
-                        <label for=format!("queue-edit-name-{id}") class="block text-sm font-medium text-crono-text">"Name"</label>
+                        <label for=format!("queue-edit-name-{id}") class="block text-sm font-medium text-foreground">"Name"</label>
                         <input id=format!("queue-edit-name-{id}") class=FIELD_CLASS type="text" disabled=system prop:value=move || name.get() on:input=move |event| name.set(event_target_value(&event)) on:blur=move |_| trim_structured_field(name) />
                         <Show when=move || system>
-                            <p class="mt-1.5 text-xs text-crono-muted">"The system default Queue name is fixed."</p>
+                            <p class="mt-1.5 text-xs text-muted-foreground">"The system default Queue name is fixed."</p>
                         </Show>
                     </div>
                     <div>
-                        <label for=format!("queue-edit-description-{id}") class="block text-sm font-medium text-crono-text">"Description"</label>
+                        <label for=format!("queue-edit-description-{id}") class="block text-sm font-medium text-foreground">"Description"</label>
                         <textarea id=format!("queue-edit-description-{id}") class=FIELD_CLASS rows="2" maxlength="500" prop:value=move || description.get() on:input=move |event| description.set(event_target_value(&event))></textarea>
                     </div>
-                    <label class="flex items-center gap-2 text-sm font-medium text-crono-text">
+                    <label class="flex items-center gap-2 text-sm font-medium text-foreground">
                         <input type="checkbox" disabled=system prop:checked=move || enabled.get() on:change=move |event| enabled.set(event_target_checked(&event)) />
                         "Enabled for new Jobs"
                     </label>
@@ -318,7 +318,7 @@ fn QueueRow(
                     <div class="flex flex-wrap justify-between gap-3">
                         {delete_control()}
                         <div class="flex gap-3">
-                            <button type="button" class="rounded-md border border-crono-border px-3 py-2 text-sm font-medium text-crono-text hover:bg-zinc-50" disabled=move || busy.get() on:click=move |_| {
+                            <button type="button" class="rounded-md border border-border px-3 py-2 text-sm font-medium text-foreground hover:bg-accent" disabled=move || busy.get() on:click=move |_| {
                                 name.set(original_name.get_value());
                                 description.set(original_description.get_value());
                                 enabled.set(original_enabled);
@@ -326,7 +326,7 @@ fn QueueRow(
                                 confirming_delete.set(false);
                                 error.set(None);
                             }>"Cancel"</button>
-                            <button type="button" class="rounded-md bg-crono-primary px-3 py-2 text-sm font-medium text-white hover:bg-crono-primary-hover disabled:opacity-50" disabled=move || busy.get() on:click=save>"Save"</button>
+                            <button type="button" class="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-50" disabled=move || busy.get() on:click=save>"Save"</button>
                         </div>
                     </div>
                 </div>

@@ -42,7 +42,7 @@ pub fn Modal(
             aria-labelledby=label_id
             aria-modal="true"
             aria-busy=move || busy.get().to_string()
-            class="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-xl border border-crono-border bg-crono-surface p-5 text-crono-text shadow-xl backdrop:bg-zinc-950/40 sm:p-6"
+            class="fixed inset-0 m-auto max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-xl border border-border bg-card p-5 text-foreground shadow-xl backdrop:bg-zinc-950/40 sm:p-6"
             on:cancel=move |event: leptos::ev::Event| {
                 event.prevent_default();
                 if !busy.get_untracked() {

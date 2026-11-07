@@ -90,7 +90,7 @@ pub fn RunJobPage() -> impl IntoView {
             <PageHeader title="Run a Job" description="Start a manual execution from a Job and a Target or Target Set.">
                 <A href=AppRoute::Runs.path() attr:class=RUN_ACTION_CLASS>"← All Runs"</A>
             </PageHeader>
-            <section class="rounded-xl border border-crono-border bg-crono-surface p-5 sm:p-6">
+            <section class="rounded-xl border border-border bg-card p-5 sm:p-6">
                 <form class="space-y-4" on:submit=submit novalidate>
                     <ResourceSelect id="run-namespace" label="Namespace" placeholder="Search/select namespace…" options=namespace_choices.options selected=namespace_id loading=namespace_choices.loading load_error=namespace_choices.load_error field_error=namespace_error select_single=true />
                     <div class="grid gap-4 md:grid-cols-2">
@@ -99,15 +99,15 @@ pub fn RunJobPage() -> impl IntoView {
                     </div>
                     <JsonObjectInput id="run-inputs" label="Invocation inputs" value=inputs error=input_error />
                     <Show when=move || namespace_id.get().is_some() && !job_choices.loading.get() && job_choices.options.get().is_empty() && job_choices.load_error.get().is_none()>
-                        <p class="rounded-md bg-zinc-50 p-3 text-sm text-crono-muted">"No Jobs exist in this Namespace. Create a Job before starting a Run."</p>
+                        <p class="rounded-md bg-muted p-3 text-sm text-muted-foreground">"No Jobs exist in this Namespace. Create a Job before starting a Run."</p>
                     </Show>
                     <Show when=move || namespace_id.get().is_some() && !target_choices.loading.get() && target_choices.options.get().is_empty() && target_choices.load_error.get().is_none()>
-                        <p class="rounded-md bg-zinc-50 p-3 text-sm text-crono-muted">"No Targets exist in this Namespace. Create a Target before starting a Run."</p>
+                        <p class="rounded-md bg-muted p-3 text-sm text-muted-foreground">"No Targets exist in this Namespace. Create a Target before starting a Run."</p>
                     </Show>
                     <FormActions submit_label="Run Job" disabled=disabled on_cancel=reset />
                 </form>
                 <div class="mt-4 flex items-center gap-3">
-                    <p class="text-sm text-crono-muted" role="status">{move || feedback.get().unwrap_or_default()}</p>
+                    <p class="text-sm text-muted-foreground" role="status">{move || feedback.get().unwrap_or_default()}</p>
                     {move || created_id.get().map(|id| view! { <A href=crate::navigation::run_details_path(id) attr:class=ACTION_CLASS>"View Run"</A> })}
                 </div>
             </section>
