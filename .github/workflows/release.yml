@@ -178,12 +178,11 @@ jobs:
       - name: Install Trunk
         run: cargo install trunk --version 0.21.14 --locked
 
-      # Trunk downloads wasm-bindgen, tailwindcss and wasm-opt from GitHub releases; a
-      # cache means a build after the first one does not depend on those downloads.
+      # Trunk downloads wasm-bindgen and wasm-opt (and Tailwind when asked) from GitHub
+      # releases; a cache means a build after the first one does not depend on those
+      # downloads, on a hosted or a self-hosted runner alike.
       - name: Cache Trunk's downloaded tools
         uses: ./.github/actions/trunk-cache
-        with:
-          trunk-version: 0.21.14
 
       - name: Build web client
         working-directory: apps/web
