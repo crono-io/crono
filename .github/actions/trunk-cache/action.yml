@@ -1,0 +1,31 @@
+name: Trunk tool cache
+description: >-
+  Cache the tools Trunk downloads from GitHub releases at build time (wasm-bindgen,
+  tailwindcss and wasm-opt), so a build after the first one does not depend on those
+  downloads. The key names the wasm-bindgen version from Cargo.lock and the Tailwind
+  version from apps/web/Trunk.toml; Trunk's own version is part of it because it picks
+  the wasm-opt version. Expects the repository to be checked out.
+inputs:
+  trunk-version:
+    description: The Trunk version the job installs.
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: versions
+      shell: bash
+      run: |
+        set -euo pipefail
+        wasm_bindgen="$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/[^0-9.]/, "", $0); print; exit}' Cargo.lock)"
+        if [[ -z "${wasm_bindgen}" ]]; then
+          echo "::error::Cargo.lock has no wasm-bindgen package."
+          exit 1
+        fi
+        echo "wasm-bindgen=${wasm_bindgen}" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache@v6
+      with:
+        path: ~/.cache/trunk
+        key: trunk-tools-${{ runner.os }}-trunk-${{ inputs.trunk-version }}-wasm-bindgen-${{ steps.versions.outputs.wasm-bindgen }}-${{ hashFiles('apps/web/Trunk.toml') }}
+        restore-keys: |
+          trunk-tools-${{ runner.os }}-trunk-${{ inputs.trunk-version }}-
