@@ -175,14 +175,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      # Trunk 0.22 retries its tool downloads (wasm-bindgen, wasm-opt) on HTTP 5xx with
+      # backoff; 0.21 failed on the first 504 from GitHub's release CDN. The release
+      # builds from source with no tool cache, so nothing another run wrote is executed.
       - name: Install Trunk
-        run: cargo install trunk --version 0.21.14 --locked
-
-      # Trunk downloads wasm-bindgen and wasm-opt (and Tailwind when asked) from GitHub
-      # releases; a cache means a build after the first one does not depend on those
-      # downloads, on a hosted or a self-hosted runner alike.
-      - name: Cache Trunk's downloaded tools
-        uses: ./.github/actions/trunk-cache
+        run: cargo install trunk --version 0.22.1 --locked
 
       - name: Build web client
         working-directory: apps/web

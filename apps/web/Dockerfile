@@ -60,7 +60,7 @@ FROM docker.io/library/rust:1.99.1-slim-trixie@sha256:b8e062b1c3a80183df83d9ba18
 ENV TRUNK_SKIP_VERSION_CHECK=true
 RUN rustup target add wasm32-unknown-unknown \
     && cargo install cargo-chef --version 0.1.78 --locked \
-    && cargo install trunk --version 0.21.14 --locked \
+    && cargo install trunk --version 0.22.1 --locked \
     && rm -rf "${CARGO_HOME}/registry"
 WORKDIR /src
 
