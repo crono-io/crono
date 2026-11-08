@@ -494,8 +494,10 @@ Work, including dependency updates, lands on `sandbox`.
    value (`just openapi` regenerates it). The reviewer checks that the bump is complete.
 2. When **Test & Build** is green on `sandbox`, fast-forward `develop` to that commit and
    push. `CI OK` is a check on the commit, so the run that passed on `sandbox` already
-   counts; there is no need to wait for `develop`'s own run.
-3. Run `just release`. It starts the Release workflow on `develop` and follows the run.
+   counts for the release guard and you can run `just release` at once.
+3. Run `just release`. It starts the Release workflow on `develop`, follows the run and,
+   once `develop`'s own Test & Build has finished, fast-forwards `main` (a protected
+   branch refuses an update while a `CI OK` check of that commit is pending).
 
 ```
 Release workflow (workflow_dispatch on develop)
@@ -510,7 +512,7 @@ Release workflow (workflow_dispatch on develop)
                release (this creates the tag at the tested commit) and a final check that
                the tag and the assets are right
  then          the tested image digests get the version, `X.Y` and `latest` tags, crono-helm
-               is notified, the API reference goes to Pages, and `main` is fast-forwarded
+               is notified and the API reference goes to Pages; `just release` then moves `main`
 ```
 
 The images are built from the `prebuilt` stage of their Dockerfiles, so they hold exactly

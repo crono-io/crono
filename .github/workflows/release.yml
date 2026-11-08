@@ -5,10 +5,11 @@ name: Release
 # passed on develop; this workflow bumps and commits nothing. It builds that commit once
 # (the native binaries for four targets, the web client, the Linux packages and the two
 # multi-platform images pushed under `sha-<commit>`), publishes the GitHub release (which
-# creates the tag), then tags the tested image digests, notifies crono-helm, publishes
-# the API reference and fast-forwards `main` to the released commit. A failed job is
-# fixed with "Re-run failed jobs"; nothing is published before every build job has
-# succeeded.
+# creates the tag), then tags the tested image digests, notifies crono-helm and publishes
+# the API reference. `main` is moved by `just release` once this run has succeeded and
+# develop's own Test & Build has finished (a still-pending `CI OK` blocks protected-branch
+# updates). A failed job is fixed with "Re-run failed jobs"; nothing is published before
+# every build job has succeeded.
 on:
   workflow_dispatch:
 
@@ -716,20 +717,3 @@ jobs:
         id: deploy
         if: steps.latest.outputs.latest == 'true'
         uses: actions/deploy-pages@v5
-
-  # main only ever holds released commits. force=false: the API refuses anything but a
-  # fast-forward.
-  main:
-    name: Fast-forward main
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: release
-    permissions:
-      contents: write
-    steps:
-      - name: Move main to the released commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/heads/main" \
-            -f sha="${GITHUB_SHA}" -F force=false

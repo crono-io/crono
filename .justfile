@@ -323,12 +323,23 @@ db-verify admin-url="postgres://postgres@localhost:5432/postgres":
 
 # Releases run .github/workflows/release.yml on develop: it checks that the commit passed
 # Test & Build and that the version (Cargo.toml, Cargo.lock and the OpenAPI contract's
-# info.version) is new, builds and publishes everything, and fast-forwards main. The
-# operator bumps the version beforehand, as the last commit of the work. See README
-# "Releasing".
+# info.version) is new, then builds and publishes everything. `main` is moved here, after
+# the run, because a protected branch refuses an update while a `CI OK` check of the same
+# commit is still pending (develop's own Test & Build). The operator bumps the version
+# beforehand, as the last commit of the work. See README "Releasing".
 
-[doc("Release develop: start the Release workflow and follow it.")]
+[doc("Release develop: start the Release workflow, follow it, then fast-forward main.")]
+[script("bash")]
 release:
+  set -euo pipefail
   gh workflow run release.yml --ref develop
   sleep 5
-  gh run watch "$(gh run list --workflow release.yml --branch develop --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+  run="$(gh run list --workflow release.yml --branch develop --limit 1 --json databaseId --jq '.[0].databaseId')"
+  gh run watch "${run}" --exit-status
+  sha="$(gh run view "${run}" --json headSha --jq .headSha)"
+  ci="$(gh run list --workflow build.yml --branch develop --commit "${sha}" --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+  if [[ -n "${ci}" ]]; then
+    echo "Waiting for develop's Test & Build (run ${ci}) before moving main..."
+    gh run watch "${ci}" > /dev/null
+  fi
+  git push origin "${sha}:refs/heads/main"
