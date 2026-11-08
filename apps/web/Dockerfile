@@ -41,11 +41,15 @@ LABEL org.opencontainers.image.title="crono-web" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.created="${CREATED}"
 
+# The pinned base is rebuilt by nginx only on its own releases, so Alpine fixes (musl and
+# zlib HIGH findings the CI scan rejects) reach the image through an upgrade here.
+#
 # BuildKit applies `COPY --chmod` to parent directories it creates, which left
 # /etc/nginx/snippets as 0444 and unsearchable for uid 101 in published images
 # (nginx then fails to open security-headers.conf). Create it 0755 first.
 USER 0
-RUN install -d -m 0755 /etc/nginx/snippets
+RUN apk upgrade --no-cache \
+    && install -d -m 0755 /etc/nginx/snippets
 
 # The base image's nginx user and group; its entrypoint and command stay.
 USER 101:101
