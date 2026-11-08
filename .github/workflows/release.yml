@@ -1,190 +1,98 @@
 ---
 name: Release
 
+# Run manually on `develop` (`just release`). The commit is the one Test & Build already
+# passed on develop; this workflow bumps and commits nothing. It builds that commit once
+# (the native binaries for four targets, the web client, the Linux packages and the two
+# multi-platform images pushed under `sha-<commit>`), publishes the GitHub release (which
+# creates the tag), then tags the tested image digests, notifies crono-helm, publishes
+# the API reference and fast-forwards `main` to the released commit. A failed job is
+# fixed with "Re-run failed jobs"; nothing is published before every build job has
+# succeeded.
 on:
-  push:
-    tags:
-      - '*'
   workflow_dispatch:
-    inputs:
-      publish:
-        description: >-
-          Recovery: an existing X.Y.Z tag whose publishing failed. Run on main; it checks
-          the tag like its own run would and publishes the tag's candidate artifacts.
-        required: false
-        default: ''
 
-# Runs of the same ref (recovery runs on main, candidate runs on release) wait in order;
-# `queue: max` keeps every pending run instead of replacing the pending one.
+# One release at a time; a second dispatch waits instead of replacing or cancelling it.
 concurrency:
-  group: release-${{ github.workflow }}-${{ github.ref_name }}
+  group: release
   cancel-in-progress: false
-  queue: max
 
 # Read-only by default; jobs that publish ask for more.
 permissions:
   contents: read
 
 jobs:
-  # Classifies the run for the jobs below.
-  # - `candidate`: a manual (workflow_dispatch) run on a branch, which `just deploy`
-  #   starts on the release candidate before any tag exists. It runs the whole
-  #   pipeline (tests, every binary, package, web bundle and image) and keeps the files
-  #   plus a manifest of their SHA-256 sums and the image digests. It publishes nothing
-  #   but the images, pushed only as `sha-<commit>` with their SBOM, provenance and
-  #   attestation.
-  # - `release`: a pushed X.Y.Z tag. It builds nothing. The signed tag names its
-  #   candidate run; the guard checks that run and the tag's commit, and the jobs
-  #   below publish exactly the manifest's files and image digests, so what ships is
-  #   what was tested.
-  # - `recover`: a manual run on main with `publish: X.Y.Z`, for a tag whose publishing
-  #   failed in a way re-running its jobs cannot fix (a bug in the publish steps of the
-  #   tagged workflow, or GitHub's 30-day re-run limit). It applies the same checks to
-  #   that tag and publishes its candidate artifacts with main's workflow; the tag
-  #   itself never changes.
-  # - `test-tag`: any other tag, or a manual run on a tag: tests and builds only,
-  #   images included, pushing nothing.
-  # A tag may only be published when its commit is on main, carries the tag's version
-  # and passed Test & Build and its candidate run; a hand-pushed or stray tag stops here.
+  # Everything that can be known before building: the branch, the version, that no
+  # release of it exists, that the commit passed Test & Build, and that the committed API
+  # contract already carries the version (the bump touches Cargo.toml, Cargo.lock and the
+  # OpenAPI contract's info.version).
   guard:
     name: Release guard
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       actions: read
     outputs:
-      kind: ${{ steps.classify.outputs.kind }}
-      version: ${{ steps.classify.outputs.version }}
-      tag: ${{ steps.classify.outputs.tag }}
-      commit: ${{ steps.release.outputs.commit }}
-      candidate_run: ${{ steps.release.outputs.candidate_run }}
+      version: ${{ steps.check.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Classify the run
-        id: classify
+      - name: Check the commit can be released
+        id: check
         shell: bash
-        env:
-          EVENT: ${{ github.event_name }}
-          PUBLISH: ${{ inputs.publish }}
-        run: |
-          set -euo pipefail
-          version="$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
-          tag=""
-          if [[ "${EVENT}" == workflow_dispatch && -n "${PUBLISH:-}" ]]; then
-            if [[ "${GITHUB_REF}" != refs/heads/main || ! "${PUBLISH}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "::error::A recovery run needs an X.Y.Z tag in 'publish' and must run on main."
-              exit 1
-            fi
-            kind=recover
-            tag="${PUBLISH}"
-            version="${PUBLISH}"
-          elif [[ "${EVENT}" == workflow_dispatch && "${GITHUB_REF}" == refs/heads/* ]]; then
-            kind=candidate
-          elif [[ "${EVENT}" == push && "${GITHUB_REF}" == refs/tags/* && "${GITHUB_REF_NAME}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            kind=release
-            tag="${GITHUB_REF_NAME}"
-          else
-            kind=test-tag
-            # Test builds are named after the ref; only safe characters reach file names.
-            version="test"
-            if [[ "${GITHUB_REF_NAME}" =~ ^[A-Za-z0-9._-]+$ ]]; then
-              version="${GITHUB_REF_NAME}"
-            fi
-          fi
-          if [[ "${kind}" != test-tag && ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Cargo.toml has no X.Y.Z version (found '${version}')."
-            exit 1
-          fi
-          {
-            echo "kind=${kind}"
-            echo "version=${version}"
-            echo "tag=${tag}"
-          } >> "$GITHUB_OUTPUT"
-          echo "${EVENT} on ${GITHUB_REF} classified as ${kind} (version ${version}${tag:+, tag ${tag}})."
-
-      # Everything is read through the API, so it holds for any tag, however far main
-      # has moved on since.
-      - name: Require the tag's commit, version, Test & Build run and candidate run
-        id: release
-        if: steps.classify.outputs.kind == 'release' || steps.classify.outputs.kind == 'recover'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.classify.outputs.tag }}
-          KIND: ${{ steps.classify.outputs.kind }}
-        shell: bash
         run: |
           set -euo pipefail
-          repo="${GITHUB_REPOSITORY}"
-          # The signed tag names the candidate run whose artifacts it releases.
-          read -r type object <<<"$(gh api "repos/${repo}/git/ref/tags/${TAG}" --jq '"\(.object.type) \(.object.sha)"')"
-          if [[ "${type}" != tag ]]; then
-            echo "::error::${TAG} is not an annotated tag; refusing to release."
+          if [[ "${GITHUB_REF}" != refs/heads/develop ]]; then
+            echo "::error::Run the release on develop (got ${GITHUB_REF})."
             exit 1
           fi
-          read -r verified commit <<<"$(gh api "repos/${repo}/git/tags/${object}" --jq '"\(.verification.verified) \(.object.sha)"')"
-          message="$(gh api "repos/${repo}/git/tags/${object}" --jq '.message')"
-          if [[ "${verified}" != true ]]; then
-            echo "::error::The signature of tag ${TAG} is not verified by GitHub; refusing to release."
+          version="$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Cargo.toml has no X.Y.Z workspace version (found '${version}')."
             exit 1
           fi
-          if [[ "${KIND}" == release && "${commit}" != "${GITHUB_SHA}" ]]; then
-            echo "::error::Tag ${TAG} points at ${commit}, but this run is for ${GITHUB_SHA}."
+          if git rev-parse -q --verify "refs/tags/${version}" >/dev/null; then
+            echo "::error::${version} is already tagged; bump the version on develop first."
             exit 1
           fi
-          status="$(gh api "repos/${repo}/compare/${commit}...main" --jq '.status')"
-          if [[ "${status}" != identical && "${status}" != ahead ]]; then
-            echo "::error::Tag ${TAG} points at ${commit}, which is not on main (${status}); refusing to release."
+          latest="$(git tag --list '[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n 1)"
+          if [[ -n "${latest}" && "$(printf '%s\n%s\n' "${latest}" "${version}" | sort -V | tail -n 1)" != "${version}" ]]; then
+            echo "::error::${version} is below the latest release ${latest}; bump to a higher version."
             exit 1
           fi
-          # awk reads to the end: exiting early would SIGPIPE base64 and, under
-          # pipefail, fail the guard ("base64: Broken pipe", the 0.1.9 tag run).
-          version="$(gh api "repos/${repo}/contents/Cargo.toml?ref=${commit}" --jq '.content' | base64 -d | awk -F'"' '!found && /^version = /{print $2; found=1}')"
-          if [[ "${version}" != "${TAG}" ]]; then
-            echo "::error::Tag ${TAG} does not match the package version ${version} at ${commit}; refusing to release."
+          found="$(jq -r .info.version docs/openapi/crono-server.json)"
+          if [[ "${found}" != "${version}" ]]; then
+            echo "::error::docs/openapi/crono-server.json is for ${found}, not ${version}; run just openapi and commit it with the bump."
             exit 1
           fi
-          passed="$(gh run list --repo "${repo}" --workflow build.yml \
-            --commit "${commit}" --event push --status success --limit 1 \
-            --json databaseId --jq '.[0].databaseId // empty')"
-          if [[ -z "${passed}" ]]; then
-            echo "::error::${commit} has no successful Test & Build run; refusing to release ${TAG}."
+          if ! git merge-base --is-ancestor origin/main "${GITHUB_SHA}"; then
+            echo "::error::main has commits that develop does not; merge main into develop first."
             exit 1
           fi
-          candidate_run="$(sed -n 's/^Candidate run: \([0-9][0-9]*\)$/\1/p' <<<"${message}" | head -n 1)"
-          if [[ -z "${candidate_run}" ]]; then
-            echo "::error::Tag ${TAG} names no candidate run; refusing to publish untested artifacts."
+          # `CI OK` is Test & Build's aggregate of every gating job; it must have
+          # succeeded on exactly this commit (a non-gating job, such as coverage, failing
+          # does not block the release).
+          passed="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?check_name=CI%20OK&status=completed" \
+            --jq '[.check_runs[] | select(.conclusion == "success")] | length')"
+          if [[ "${passed}" -lt 1 ]]; then
+            echo "::error::${GITHUB_SHA} has no successful CI OK check; wait for Test & Build to pass on develop."
             exit 1
           fi
-          read -r head_sha event conclusion path <<<"$(gh api "repos/${repo}/actions/runs/${candidate_run}" \
-            --jq '"\(.head_sha) \(.event) \(.conclusion) \(.path)"')"
-          if [[ "${head_sha}" != "${commit}" || "${event}" != workflow_dispatch || "${conclusion}" != success || "${path}" != .github/workflows/release.yml* ]]; then
-            echo "::error::Run ${candidate_run} is not a successful candidate run of ${commit} (${head_sha} ${event} ${conclusion} ${path})."
-            exit 1
-          fi
-          {
-            echo "commit=${commit}"
-            echo "candidate_run=${candidate_run}"
-          } >> "$GITHUB_OUTPUT"
-          echo "Tag ${TAG}: ${commit} is on main, passed Test & Build (run ${passed}) and candidate run ${candidate_run}."
-
-  # ----- Candidate runs and test tags: test, build and package; nothing is published -----
-
-  test:
-    needs: guard
-    if: needs.guard.outputs.kind == 'candidate' || needs.guard.outputs.kind == 'test-tag'
-    uses: ./.github/workflows/test.yml
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${version} from ${GITHUB_SHA} (CI OK passed)."
 
   build:
     name: Build (${{ matrix.target }})
-    needs:
-      - guard
-      - test
-    if: needs.guard.outputs.kind == 'candidate' || needs.guard.outputs.kind == 'test-tag'
+    needs: guard
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -252,11 +160,9 @@ jobs:
 
   frontend-build:
     name: Build web client
-    needs:
-      - guard
-      - test
-    if: needs.guard.outputs.kind == 'candidate' || needs.guard.outputs.kind == 'test-tag'
+    needs: guard
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -292,16 +198,15 @@ jobs:
 
   # Container images for Kubernetes: crono-server and crono-web, each a
   # multi-platform linux/amd64 + linux/arm64 index built from the binaries and
-  # bundle above rather than recompiled. A candidate run pushes each only as
-  # `sha-<commit>`, with SBOM, provenance and a GitHub artifact attestation, and records
-  # its digest; the release tags exactly that digest. Test tags build without pushing.
+  # bundle above rather than recompiled. Each is pushed only as `sha-<commit>`, with
+  # SBOM, provenance and a GitHub artifact attestation, and its digest is recorded; the
+  # release tags exactly that digest.
   images:
     name: Image (${{ matrix.image }})
     needs:
       - guard
       - build
       - frontend-build
-    if: needs.guard.outputs.kind == 'candidate' || needs.guard.outputs.kind == 'test-tag'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -320,7 +225,6 @@ jobs:
             dockerfile: apps/web/Dockerfile
             description: Crono web client served by unprivileged nginx
     env:
-      PUSH: ${{ needs.guard.outputs.kind == 'candidate' }}
       IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
     steps:
       - name: Checkout
@@ -370,15 +274,14 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
-        if: env.PUSH == 'true'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The only tag the candidate pushes is sha-<commit>; the release adds the version,
-      # X.Y and latest tags to its digest. The version label is the release's already.
+      # The only tag pushed here is sha-<commit>; the release adds the version, X.Y and
+      # latest tags to its digest.
       - name: Resolve image tags and labels
         id: meta
         uses: docker/metadata-action@v6
@@ -410,7 +313,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           target: prebuilt
           platforms: linux/amd64,linux/arm64
-          push: ${{ env.PUSH == 'true' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
@@ -418,14 +321,13 @@ jobs:
             SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
           cache-from: type=gha,scope=release-${{ matrix.image }}
           cache-to: type=gha,scope=release-${{ matrix.image }},mode=max
-          provenance: ${{ env.PUSH == 'true' && 'mode=max' || 'false' }}
-          sbom: ${{ env.PUSH == 'true' }}
+          provenance: mode=max
+          sbom: true
 
-      # A vulnerable image stops here: its digest is never recorded, so the manifest
-      # job fails and no release can promote it. Each platform of the index is
-      # scanned; accepted findings go in the root .trivyignore with their reason.
+      # A vulnerable image stops here: its digest is never recorded, so the release job
+      # fails and nothing is published. Each platform of the index is scanned; accepted
+      # findings go in the root .trivyignore with their reason.
       - name: Scan image (linux/amd64)
-        if: env.PUSH == 'true'
         uses: aquasecurity/trivy-action@v0.36.0
         env:
           TRIVY_PLATFORM: linux/amd64
@@ -437,7 +339,6 @@ jobs:
           exit-code: '1'
 
       - name: Scan image (linux/arm64)
-        if: env.PUSH == 'true'
         uses: aquasecurity/trivy-action@v0.36.0
         env:
           TRIVY_PLATFORM: linux/arm64
@@ -449,16 +350,14 @@ jobs:
           exit-code: '1'
 
       - name: Attest image provenance
-        if: env.PUSH == 'true'
         uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
-      # The manifest job collects one digest per image from these small artifacts.
+      # The tagging job collects one digest per image from these small artifacts.
       - name: Record the digest
-        if: env.PUSH == 'true'
         shell: bash
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
@@ -473,7 +372,6 @@ jobs:
           echo "${NAME} ${DIGEST}" > "image-digest/${NAME}"
 
       - name: Upload the digest
-        if: env.PUSH == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: image-${{ matrix.image }}
@@ -487,7 +385,6 @@ jobs:
     needs:
       - guard
       - build
-    if: needs.guard.outputs.kind == 'candidate' || needs.guard.outputs.kind == 'test-tag'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -530,189 +427,93 @@ jobs:
             release-artifacts/*.rpm
           if-no-files-found: error
 
-  # The candidate's manifest: the SHA-256 of every release file, the image digests, the
-  # version, the commit and the artifacts the release needs. `just deploy` checks it and
-  # those artifacts before tagging, and the release publishes exactly what it lists.
-  manifest:
-    name: Release manifest
+  # The GitHub release gets exactly the built files and no others. Publishing creates the
+  # tag at the tested commit.
+  release:
+    name: GitHub release
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs:
       - guard
       - build
       - frontend-build
       - packages
       - images
-    if: needs.guard.outputs.kind == 'candidate'
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    steps:
-      - name: Download this run's release files
-        uses: actions/download-artifact@v8
-        with:
-          pattern: dist-*
-          path: artifacts
-
-      - name: Download this run's image digests
-        uses: actions/download-artifact@v8
-        with:
-          pattern: image-*
-          path: images
-          merge-multiple: true
-
-      # Every expected artifact must be here with all its files, so a lost artifact can
-      # never produce a partial release. Keep this in step with the build jobs.
-      - name: Check the inventory
-        shell: bash
-        env:
-          EXPECTED: dist-native-x86_64-unknown-linux-musl=4 dist-native-aarch64-unknown-linux-musl=4 dist-native-x86_64-apple-darwin=4 dist-native-aarch64-apple-darwin=4 dist-web=1 dist-packages=12
-        run: |
-          set -euo pipefail
-          for entry in ${EXPECTED}; do
-            name="${entry%=*}"
-            count="$(find "artifacts/${name}" -maxdepth 1 -type f 2>/dev/null | wc -l)"
-            if [[ "${count}" -ne "${entry#*=}" ]]; then
-              echo "::error::Artifact ${name} has ${count} files, expected ${entry#*=}."
-              exit 1
-            fi
-          done
-          actual="$(find artifacts -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | tr '\n' ' ')"
-          wanted="$(for entry in ${EXPECTED}; do echo "${entry%=*}"; done | sort | tr '\n' ' ')"
-          if [[ "${actual}" != "${wanted}" ]]; then
-            echo "::error::Found artifacts ${actual}, expected ${wanted}."
-            exit 1
-          fi
-
-      - name: Write the manifest
-        shell: bash
-        env:
-          VERSION: ${{ needs.guard.outputs.version }}
-          EXPECTED: dist-native-x86_64-unknown-linux-musl=4 dist-native-aarch64-unknown-linux-musl=4 dist-native-x86_64-apple-darwin=4 dist-native-aarch64-apple-darwin=4 dist-web=1 dist-packages=12
-          IMAGES: crono-server crono-web
-        run: |
-          set -euo pipefail
-          mkdir dist manifest
-          find artifacts -type f -exec cp -n {} dist/ \;
-          (cd dist && sha256sum -- *) > manifest/SHA256SUMS
-          total=0
-          for entry in ${EXPECTED}; do total=$((total + ${entry#*=})); done
-          if [[ "$(wc -l < manifest/SHA256SUMS)" -ne "${total}" ]]; then
-            echo "::error::Expected ${total} release files (a name collision?), got $(wc -l < manifest/SHA256SUMS)."
-            exit 1
-          fi
-          for image in ${IMAGES}; do
-            read -r name digest < "images/${image}"
-            if [[ "${name}" != "${image}" || ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "::error::Image ${image} has no valid digest (got '${name} ${digest}')."
-              exit 1
-            fi
-            echo "${image} ${digest}"
-          done > manifest/IMAGES
-          {
-            echo "VERSION=${VERSION}"
-            echo "COMMIT=${GITHUB_SHA}"
-          } > manifest/release.env
-          # The artifacts the release publishes from; just deploy checks they all remain.
-          for entry in ${EXPECTED}; do echo "${entry%=*}"; done > manifest/ARTIFACTS
-          cat manifest/*
-
-      - name: Upload the manifest
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-manifest
-          path: manifest/*
-          if-no-files-found: error
-
-      # A signed statement that this run built exactly these files (the images carry
-      # their own attestations); the release publishes the same bytes, so
-      # `gh attestation verify <file> --repo crono-io/crono --signer-workflow
-      # crono-io/crono/.github/workflows/release.yml` works on downloads.
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: dist/*
-
-  # ----- Release tags and recovery runs: publish only, nothing is built -----
-
-  # Only release tags (X.Y.Z) that passed the guard publish, and only the files of
-  # their candidate run's manifest: nothing is rebuilt after CI. Safe to re-run: the
-  # release is updated in place, existing assets are overwritten and stray ones removed;
-  # it is GitHub's Latest release only when the tag is the highest promoted release at
-  # that moment, so a late or recovered older tag never takes the Latest flag.
-  release:
-    name: GitHub release
-    runs-on: ubuntu-latest
-    needs: guard
-    if: needs.guard.outputs.kind == 'release' || needs.guard.outputs.kind == 'recover'
-    concurrency:
-      group: crono-production-release
-      cancel-in-progress: false
-      queue: max
     permissions:
       contents: write
-      actions: read
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.guard.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
     steps:
-      # Full history and tags: the release notes list the commits since the previous
-      # release.
+      # Full history and tags: the release notes list the commits since the previous release.
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Download the candidate run's manifest
+      - name: Download the release files
         uses: actions/download-artifact@v8
         with:
-          run-id: ${{ needs.guard.outputs.candidate_run }}
-          github-token: ${{ github.token }}
-          name: release-manifest
-          path: ${{ runner.temp }}/manifest
-
-      - name: Download the candidate run's assets
-        uses: actions/download-artifact@v8
-        with:
-          run-id: ${{ needs.guard.outputs.candidate_run }}
-          github-token: ${{ github.token }}
           pattern: dist-*
           merge-multiple: true
-          path: ${{ runner.temp }}/dist
+          path: dist
 
-      - name: Check the assets against the manifest
+      # A release cannot be completed later, so the file set is checked first. Keep this
+      # in step with the build jobs: a missing or extra file stops the release.
+      - name: Check the release files
         shell: bash
-        env:
-          TAG_VERSION: ${{ needs.guard.outputs.version }}
-          TAG_COMMIT: ${{ needs.guard.outputs.commit }}
         run: |
           set -euo pipefail
-          cd "${RUNNER_TEMP}"
-          . manifest/release.env
-          if [[ "${VERSION}" != "${TAG_VERSION}" || "${COMMIT}" != "${TAG_COMMIT}" ]]; then
-            echo "::error::The candidate manifest is for ${VERSION} at ${COMMIT}, not ${TAG_VERSION} at ${TAG_COMMIT}."
+          expected="$(
+            {
+              for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin; do
+                for binary in crono-server crono-server-openapi crono-worker crono; do
+                  echo "${binary}-${VERSION}-${target}.tar.gz"
+                done
+              done
+              echo "crono-web-${VERSION}.tar.gz"
+            } | sort
+          )"
+          actual="$(ls dist | grep -vE '\.(deb|rpm)$' | sort)"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "::error::The built files differ from the expected set."
+            diff <(echo "${expected}") <(echo "${actual}") || true
             exit 1
           fi
-          listed="$(awk '{print $2}' manifest/SHA256SUMS | sort)"
-          present="$(find dist -maxdepth 1 -type f -printf '%f\n' | sort)"
-          if [[ "${listed}" != "${present}" ]]; then
-            echo "::error::The downloaded assets do not match the manifest."
-            diff <(echo "${listed}") <(echo "${present}") || true
+          # 2 architectures x 3 programs x deb and rpm.
+          packages="$(ls dist | grep -cE '\.(deb|rpm)$' || true)"
+          if [[ "${packages}" -ne 12 ]]; then
+            echo "::error::Expected 12 .deb and .rpm packages, found ${packages}."
             exit 1
           fi
-          (cd dist && sha256sum -c ../manifest/SHA256SUMS)
-          cp manifest/SHA256SUMS dist/
 
-      # The notes are the commit subjects since the previous release (the version bump
-      # itself left out), so they need no hand-kept changelog and every re-run writes the
-      # same text.
+      - name: Write the checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      # A signed statement that this run built exactly these files (the images carry
+      # their own attestations): `gh attestation verify <file> --repo crono-io/crono
+      # --signer-workflow crono-io/crono/.github/workflows/release.yml` works on downloads.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*
+
+      # The notes are the commit subjects since the previous release (version bumps left
+      # out), so no changelog is kept by hand and every re-run writes the same text.
       - name: Write the release notes
         shell: bash
-        env:
-          TAG: ${{ needs.guard.outputs.tag }}
         run: |
           set -euo pipefail
-          previous="$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*' "refs/tags/${TAG}^" 2>/dev/null || true)"
-          range="refs/tags/${TAG}"
-          [[ -z "${previous}" ]] || range="${previous}..refs/tags/${TAG}"
+          previous="$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*' "${GITHUB_SHA}" 2>/dev/null || true)"
+          range="${GITHUB_SHA}"
+          [[ -z "${previous}" ]] || range="${previous}..${GITHUB_SHA}"
           changes="$(git log --no-merges --format='- %s (%h)' "${range}" | grep -vE '^- bump version to [0-9]+\.[0-9]+\.[0-9]+ ' || true)"
           {
             echo "## Changes"
@@ -720,7 +521,7 @@ jobs:
             echo "${changes:-- Only the version bump.}"
             if [[ -n "${previous}" ]]; then
               echo
-              echo "**Full changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${previous}...${TAG}"
+              echo "**Full changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${previous}...${VERSION}"
             fi
             echo
             echo "## Verify a download"
@@ -732,60 +533,59 @@ jobs:
           } > "${RUNNER_TEMP}/notes.md"
           cat "${RUNNER_TEMP}/notes.md"
 
-      - name: Is this the latest release
-        id: latest
-        uses: ./.github/actions/release-is-latest
-        with:
-          tag: ${{ needs.guard.outputs.tag }}
-          token: ${{ github.token }}
-
-      - name: Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ needs.guard.outputs.tag }}
-          draft: false
-          make_latest: ${{ steps.latest.outputs.latest }}
-          body_path: ${{ runner.temp }}/notes.md
-          fail_on_unmatched_files: true
-          files: ${{ runner.temp }}/dist/*
-
-      - name: Keep exactly the manifest's files on the release
+      # Assets go on a draft first, so a failed upload never leaves a public half release.
+      # A draft left by a failed run is replaced; a published release is left alone. The
+      # guard made this the highest version, so it is GitHub's Latest release.
+      - name: Create the release
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.guard.outputs.tag }}
         run: |
           set -euo pipefail
-          expected="$(find "${RUNNER_TEMP}/dist" -maxdepth 1 -type f -printf '%f\n' | sort)"
-          while read -r asset; do
-            [[ -n "${asset}" ]] || continue
-            if ! grep -qxF "${asset}" <<<"${expected}"; then
-              echo "Removing ${asset}, which is not in the candidate manifest."
-              gh release delete-asset "${TAG}" "${asset}" --repo "${GITHUB_REPOSITORY}" --yes
+          if state="$(gh release view "${VERSION}" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            if [[ "${state}" == false ]]; then
+              echo "Release ${VERSION} is already published."
+              exit 0
             fi
-          done < <(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name')
-          actual="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name' | sort)"
-          if [[ "${actual}" != "${expected}" ]]; then
-            echo "::error::Release ${TAG} holds $(tr '\n' ' ' <<<"${actual}"), expected $(tr '\n' ' ' <<<"${expected}")."
+            gh release delete "${VERSION}" --yes
+          fi
+          gh release create "${VERSION}" dist/* \
+            --draft \
+            --target "${GITHUB_SHA}" \
+            --title "${VERSION}" \
+            --notes-file "${RUNNER_TEMP}/notes.md"
+          gh release edit "${VERSION}" --draft=false --latest
+
+      # What a user can download must be exactly what was built, and the tag must sit on
+      # the tested commit. This also runs when a re-run finds the release already published.
+      - name: Check the published release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${VERSION}" --jq '.object.sha')"
+          if [[ "${tag_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "::error::Tag ${VERSION} points at ${tag_sha}, not at the tested commit ${GITHUB_SHA}."
             exit 1
           fi
+          expected="$(ls dist | sort)"
+          actual="$(gh release view "${VERSION}" --json assets --jq '.assets[].name' | sort)"
+          if [[ "${actual}" != "${expected}" ]]; then
+            echo "::error::Release ${VERSION} holds: $(tr '\n' ' ' <<<"${actual}"); expected: $(tr '\n' ' ' <<<"${expected}")."
+            exit 1
+          fi
+          echo "Release ${VERSION} is on ${GITHUB_SHA} with $(wc -l <<<"${actual}") files."
 
-  # Add the version tag, and `X.Y` and `latest` while the tag is the highest promoted
-  # release of its line and overall, to the candidate's image digests. skopeo copies
-  # within the same repository with the digest preserved, so the tested index, its SBOM,
-  # provenance and attestation are what the tags name; re-running is a no-op. The
-  # promoted digests and the latest-release answer are outputs for the crono-helm job.
+  # Add the version tag, and `X.Y` and `latest` while the version is the highest release
+  # of its line and overall, to the tested image digests. skopeo copies within the same
+  # repository with the digest preserved, so the tested index, its SBOM, provenance and
+  # attestation are what the tags name; re-running is a no-op. The promoted digests and
+  # the latest-release answer are outputs for the crono-helm job.
   images-publish:
     name: Tag images
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs:
       - guard
+      - images
       - release
-    if: needs.guard.outputs.kind == 'release' || needs.guard.outputs.kind == 'recover'
-    concurrency:
-      group: crono-production-images
-      cancel-in-progress: false
-      queue: max
     outputs:
       latest: ${{ steps.latest.outputs.latest }}
       server_digest: ${{ steps.tag.outputs.crono-server }}
@@ -804,16 +604,15 @@ jobs:
         id: latest
         uses: ./.github/actions/release-is-latest
         with:
-          tag: ${{ needs.guard.outputs.tag }}
+          tag: ${{ needs.guard.outputs.version }}
           token: ${{ github.token }}
 
-      - name: Download the candidate run's manifest
+      - name: Download the image digests
         uses: actions/download-artifact@v8
         with:
-          run-id: ${{ needs.guard.outputs.candidate_run }}
-          github-token: ${{ github.token }}
-          name: release-manifest
-          path: ${{ runner.temp }}/manifest
+          pattern: image-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/images
 
       - name: Tag the tested digests
         id: tag
@@ -832,8 +631,9 @@ jobs:
           tags=("${VERSION}")
           [[ "${LATEST_MINOR}" != true ]] || tags+=("${VERSION%.*}")
           [[ "${LATEST}" != true ]] || tags+=(latest)
-          while read -r image digest; do
-            [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::Bad digest for ${image}: ${digest}"; exit 1; }
+          for image in crono-server crono-web; do
+            read -r name digest < "${RUNNER_TEMP}/images/${image}"
+            [[ "${name}" == "${image}" && "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::Bad digest for ${image}: ${name} ${digest}"; exit 1; }
             repository="ghcr.io/${OWNER}/${image}"
             source="docker://${repository}@${digest}"
             skopeo inspect --raw "${source}" >/dev/null
@@ -847,12 +647,12 @@ jobs:
               echo "${repository}:${tag} -> ${digest}"
             done
             echo "${image}=${digest}" >> "$GITHUB_OUTPUT"
-          done < "${RUNNER_TEMP}/manifest/IMAGES"
+          done
 
   # Once the images carry the version tag, tell crono-helm to bump its charts to this
-  # release with exactly the digests promoted above. Only the highest promoted release
-  # goes there, so a late or recovered older tag never moves the charts back; without
-  # the crono-helm App configured the dispatch is skipped with a warning.
+  # release with exactly the digests promoted above. Only the highest release goes there,
+  # so a re-run of an older release never moves the charts back; without the crono-helm
+  # App configured the dispatch is skipped with a warning.
   helm:
     name: Notify crono-helm
     needs:
@@ -863,15 +663,15 @@ jobs:
     uses: ./.github/workflows/dispatch-helm-release.yml
     with:
       version: ${{ needs.guard.outputs.version }}
-      source_sha: ${{ needs.guard.outputs.commit }}
+      source_sha: ${{ github.sha }}
       server_digest: ${{ needs.images-publish.outputs.server_digest }}
       web_digest: ${{ needs.images-publish.outputs.web_digest }}
     secrets:
       CRONO_HELM_APP_PRIVATE_KEY: ${{ secrets.CRONO_HELM_APP_PRIVATE_KEY }}
 
-  # Publish the tag's committed API contract to GitHub Pages, only while the tag is the
-  # highest promoted release. It shares the `pages` group with the manual API Docs
-  # workflow, so two deploys never overlap.
+  # Publish the committed API contract to GitHub Pages, only while the version is the
+  # highest release. It shares the `pages` group with the manual API Docs workflow, so
+  # two deploys never overlap.
   docs:
     name: Publish API reference
     runs-on: ubuntu-latest
@@ -879,11 +679,9 @@ jobs:
     needs:
       - guard
       - release
-    if: needs.guard.outputs.kind == 'release' || needs.guard.outputs.kind == 'recover'
     concurrency:
       group: pages
       cancel-in-progress: false
-      queue: max
     permissions:
       contents: read
       pages: write
@@ -901,31 +699,8 @@ jobs:
         id: latest
         uses: ./.github/actions/release-is-latest
         with:
-          tag: ${{ needs.guard.outputs.tag }}
+          tag: ${{ needs.guard.outputs.version }}
           token: ${{ github.token }}
-
-      - name: Checkout the tag's sources
-        if: steps.latest.outputs.latest == 'true'
-        uses: actions/checkout@v7
-        with:
-          ref: refs/tags/${{ needs.guard.outputs.tag }}
-          path: tagged
-          persist-credentials: false
-
-      # The committed contract is published as-is: the drift test in the candidate's
-      # test job already guaranteed it matches the routes.
-      - name: Check the contract carries the release version
-        if: steps.latest.outputs.latest == 'true'
-        shell: bash
-        env:
-          VERSION: ${{ needs.guard.outputs.version }}
-        run: |
-          set -euo pipefail
-          found="$(jq -r .info.version tagged/docs/openapi/crono-server.json)"
-          if [[ "${found}" != "${VERSION}" ]]; then
-            echo "::error::docs/openapi/crono-server.json is for ${found}, not ${VERSION}."
-            exit 1
-          fi
 
       - name: Configure GitHub Pages
         if: steps.latest.outputs.latest == 'true'
@@ -935,9 +710,26 @@ jobs:
         if: steps.latest.outputs.latest == 'true'
         uses: actions/upload-pages-artifact@v5
         with:
-          path: tagged/docs/openapi
+          path: docs/openapi
 
       - name: Deploy to GitHub Pages
         id: deploy
         if: steps.latest.outputs.latest == 'true'
         uses: actions/deploy-pages@v5
+
+  # main only ever holds released commits. force=false: the API refuses anything but a
+  # fast-forward.
+  main:
+    name: Fast-forward main
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: release
+    permissions:
+      contents: write
+    steps:
+      - name: Move main to the released commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/git/refs/heads/main" \
+            -f sha="${GITHUB_SHA}" -F force=false

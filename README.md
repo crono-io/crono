@@ -480,113 +480,85 @@ On SIGTERM the worker stops fetching and lets its current batch of executions fi
 
 ## Releasing
 
-A release follows one rule: **the commit that is tagged and put on `main` is exactly the
-commit CI tested, and the published files and images are exactly the ones CI built.**
-`just deploy` promotes a commit only after every test, build, package and image passed
-on it, so a release never needs a tag deleted or moved. Branch protection lets onto
-`main` only commits whose **CI OK** check passed, and the Release workflow publishes a
-tag only with the successful candidate run the signed tag names. The flow lives in
-`scripts/release`, `.github/workflows/build.yml` (Test & Build) and
-`.github/workflows/release.yml` (Release); it is the flow documented in full in the
-[RELEASING.md](https://github.com/nbari/cron-when/blob/main/RELEASING.md) of cron-when,
-which is its template.
+A release follows one rule: **the commit that is released is exactly the commit CI tested
+on `develop`, and the published files and images are built from it once.** The Release
+workflow (`.github/workflows/release.yml`) changes nothing in the repository, and a
+release never needs a tag deleted or moved because the tag is created only after every
+build job has succeeded.
 
-Work, including dependency updates, lands on `sandbox`. When its **Test & Build** run is
-green, merge it into `develop` and run `just deploy` from a clean `develop`.
+Work, including dependency updates, lands on `sandbox`.
 
-| Command | What it does |
-|---|---|
-| `just deploy` | Release a patch bump (`deploy-minor`, `deploy-major` for the others); when `develop`'s current version has no tag yet, it releases that version as is instead |
-| `just deploy-current` | Release `develop`'s untagged version as is, explicitly |
-| `just release-status` | Show `develop`, `main`, `sandbox`, the staged candidate and its runs |
-| `just release-preflight` | Run only the checks; changes nothing that lasts |
-| `just release-dry-run` | Build and package the current branch exactly like a candidate (images pushed only as `:sha-<commit>`), with no bump and no tag |
-| `just release-republish X.Y.Z` | Recovery: publish an existing tag again with `main`'s workflow |
-| `just protect-branches` | Apply the branch protection (**CI OK** on `main`, signed commits, linear history and resolved review conversations) and the rule that release tags are never moved or deleted |
+1. As the last commit of the work, the operator bumps the version with a tool of their
+   choice (`cargo set-version --workspace --bump patch`, or `gbump`) in `Cargo.toml` and
+   `Cargo.lock`, and sets `info.version` of `docs/openapi/crono-server.json` to the same
+   value (`just openapi` regenerates it). The reviewer checks that the bump is complete.
+2. When **Test & Build** is green on `sandbox`, fast-forward `develop` to that commit and
+   push. `CI OK` is a check on the commit, so the run that passed on `sandbox` already
+   counts; there is no need to wait for `develop`'s own run.
+3. Run `just release`. It starts the Release workflow on `develop` and follows the run.
 
-`just deploy` checks that `develop` is clean and equal to origin, then bumps the
-workspace version (`Cargo.toml`, `Cargo.lock` and the `info.version` of
-`docs/openapi/crono-server.json`) in a temporary worktree, runs `cargo clean` (its own
-target directory) and `just test` there (formatting, clippy and every test, against a
-throwaway PostgreSQL), and pushes a signed commit "bump version to X" to the scratch
-`release` branch only. On that exact commit, Test & Build runs, and so does a manual run
-of the Release workflow in candidate mode: it tests, builds the static binaries for the
-four targets, the web client, the `.deb` and `.rpm` packages and both images, and keeps
-the files as artifacts with a manifest of their SHA-256 sums and build-provenance
-attestations. The images are built from the `prebuilt` stage of their Dockerfiles, so
-they hold exactly the binaries and bundle of the archives, with the commit time as
-`SOURCE_DATE_EPOCH`. They are pushed only as `ghcr.io/crono-io/<image>:sha-<commit>`,
-with their SBOM, provenance and attestation, and Trivy scans both platforms of each
-pushed digest; only a clean image's digest reaches the manifest. Development images
-from `develop` and `main` are tagged `dev-<commit>` instead, so they never collide
-with a candidate's `sha-` tag on the same commit.
-When both runs pass, the script downloads the manifest and every artifact and checks the
-commit, the version and every checksum, then moves `develop`, `main` and the signed tag
-X together in one atomic push; the tag message names the candidate run.
+```
+Release workflow (workflow_dispatch on develop)
+ guard         develop only; the version is X.Y.Z, above the latest tag and untagged; the
+               API contract carries it; main is an ancestor; `CI OK` passed on this commit
+ build         static binaries for four targets (linux amd64/arm64, macOS x86_64/arm64)
+ web, packages the web client; .deb and .rpm for amd64 and arm64
+ images        crono-server and crono-web (linux/amd64 + linux/arm64), built from the
+               binaries above, pushed only as `sha-<commit>` with SBOM and provenance,
+               Trivy-scanned on both platforms, attested
+ release       exact file set checked, SHA256SUMS, build-provenance attestation, the GitHub
+               release (this creates the tag at the tested commit) and a final check that
+               the tag and the assets are right
+ then          the tested image digests get the version, `X.Y` and `latest` tags, crono-helm
+               is notified, the API reference goes to Pages, and `main` is fast-forwarded
+```
 
-The tag's Release run builds nothing. Its guard checks the tag (GitHub-verified
-signature, commit on `main`, version, Test & Build, the named candidate run); the GitHub
-release gets exactly the manifest's files with notes made from the commit subjects since
-the previous release, and each image
-digest gets the `X.Y.Z` tag with `skopeo copy --preserve-digests`, so the tested index
-and its attestations are what the tag names. The production steps that follow the
-newest release (GitHub's Latest release, the `X.Y` and `latest` image tags, the API
-reference on Pages) first check that the tag is the highest promoted release, so a late,
-re-run or recovered older tag never moves them back.
+The images are built from the `prebuilt` stage of their Dockerfiles, so they hold exactly
+the binaries and bundle of the archives, with the commit time as `SOURCE_DATE_EPOCH`.
+Development images from `develop` and `main` are tagged `dev-<commit>` by Test & Build, so
+they never collide with a release's `sha-` tag.
 
-If anything fails before the atomic push, nothing moved: no tag, `develop` and `main`
-untouched. Re-run the failed jobs in GitHub (a waiting deploy picks the re-run up within
-15 minutes), or fix it on `sandbox` and merge; then run `just deploy` again, which
-resumes the same candidate and runs, replaces a stale one, or says there is nothing new
-to release. A failed publish step in the tag's run is fixed with "Re-run failed jobs";
-when the tagged workflow itself was wrong, fix it, release as usual, and run
-`just release-republish X.Y.Z`. Recovery needs the candidate's artifacts, which GitHub
-keeps for 90 days, and its `sha-` images.
+Nothing is published before every build job has succeeded. If a job fails, fix the cause
+and use "Re-run failed jobs" on the run: a draft release left by a failed run is replaced,
+an already published release is kept, and images are retagged to the same digests. A
+failure after the tag exists (the release is public) cannot be repaired by changing code
+under the same version: bump to the next version and release that. The production steps
+(the `X.Y` and `latest` image tags, crono-helm, Pages) run only while the version is the
+highest release, so a re-run of an older release never moves them back. The tag is created
+by GitHub and is not signed. Releasing needs `just` and `gh` (logged in).
 
-Once the images carry the version tag, and only when the tag is the highest promoted
-release, the Release run calls `.github/workflows/dispatch-helm-release.yml`, which sends
-a `crono-release` repository dispatch to `crono-io/crono-helm` with the version, the
-tagged commit and the exact index digests it just promoted for `crono-server` and
-`crono-web`; crono-helm turns that into its chart bump pull request. The workflow
-validates every value (`X.Y.Z`, a 40-hex commit, `sha256:` digests) before sending, and
-it can be run by hand from the Actions tab to resend a release with the digests from the
-release's run, never ones read back from a mutable tag. It authenticates as a GitHub App:
-create an App in the `crono-io` organization (no webhook; repository permission
-**Contents: Read and write**, which repository dispatches need; nothing else), install it
-on `crono-io/crono-helm` only, then in this repository set the variable
-`CRONO_HELM_APP_ID` to the App's ID and the secret `CRONO_HELM_APP_PRIVATE_KEY` to a
-private key generated for it. Each run mints a short-lived token scoped to crono-helm
-alone. While either value is missing the dispatch step is skipped with a warning and the
-release still succeeds; configure the App and run the workflow by hand to catch up.
+Once the images carry the version tag, and only when the version is the highest release,
+the run calls `.github/workflows/dispatch-helm-release.yml`, which sends a `crono-release`
+repository dispatch to `crono-io/crono-helm` with the version, the released commit and the
+exact index digests it just promoted for `crono-server` and `crono-web`; crono-helm turns
+that into its chart bump pull request. The workflow validates every value (`X.Y.Z`, a
+40-hex commit, `sha256:` digests) before sending, and it can be run by hand from the
+Actions tab to resend a release with the digests from the release's run, never ones read
+back from a mutable tag. It authenticates as a GitHub App: create an App in the
+`crono-io` organization (no webhook; repository permission **Contents: Read and write**,
+which repository dispatches need; nothing else), install it on `crono-io/crono-helm` only,
+then in this repository set the variable `CRONO_HELM_APP_ID` to the App's ID and the
+secret `CRONO_HELM_APP_PRIVATE_KEY` to a private key generated for it. Each run mints a
+short-lived token scoped to crono-helm alone. While either value is missing the dispatch
+step is skipped with a warning and the release still succeeds; configure the App and run
+the workflow by hand to catch up.
 
-The workflows are hardened like the template's: actions are referenced by major version
-tag (Dependabot proposes major upgrades once a week, as one pull request into `sandbox`),
-the Rust toolchain comes
-from `rustup` through `.github/actions/rust-toolchain`, no checkout keeps the token, and
-the "Release tags" ruleset (`just protect-branches`) lets `X.Y.Z` tags be created but
-never moved or deleted. To check a downloaded release file:
+Actions are referenced by major version tag (Dependabot proposes major upgrades once a
+week, as one pull request into `sandbox`), the Rust toolchain comes from `rustup` through
+`.github/actions/rust-toolchain`, no checkout keeps the token, and the "Release tags"
+ruleset lets `X.Y.Z` tags be created but never moved or deleted. To check a downloaded
+release file:
 
 ```sh
 sha256sum --check --ignore-missing SHA256SUMS
 gh attestation verify <file> --repo crono-io/crono --signer-workflow crono-io/crono/.github/workflows/release.yml
 ```
 
-Tags keep the workflows they were created with: dispatching a workflow on an old tag,
-or re-running an old tag's run, executes that old code. For 0.1.0, released before this
-flow, that means rebuilding and pushing `latest`, `0.1` and the Pages docs without any
-of these checks, so never do it; publish a tag again with `just release-republish
-X.Y.Z`, which runs `main`'s workflow, and republish the docs with the API Docs workflow,
-which always publishes the highest promoted release. A version tag created by hand
-outside `just deploy` is never published, since the guard wants its candidate run, but
-the latest-release checks still count it as the highest release until a higher real
-release replaces it.
-
-`RELEASE_POLL_SECONDS` (30), `RELEASE_CI_TIMEOUT` (3600, per attempt) and
-`RELEASE_RERUN_WAIT` (900, after a failed attempt) are in seconds, and
-`RELEASE_NO_WAIT=1` stops once the candidate is staged, or while CI still runs; a later
-`just deploy` finishes. Releasing needs `just`, `jq`, `gh` (logged in), `cargo-edit`, the
-`wasm32-unknown-unknown` target, and a signing key that GitHub knows as a signing key,
-since commits and tags must be signed.
+Tags keep the workflows they were created with: dispatching a workflow on an old tag, or
+re-running an old tag's run, executes that old code. For 0.1.0, released before this flow,
+that means rebuilding and pushing `latest`, `0.1` and the Pages docs without any of these
+checks, so never do it; republish the docs with the API Docs workflow, which always
+publishes the highest release.
 
 ## License
 
