@@ -520,6 +520,11 @@ the binaries and bundle of the archives, with the commit time as `SOURCE_DATE_EP
 Development images from `develop` and `main` are tagged `dev-<commit>` by Test & Build, so
 they never collide with a release's `sha-` tag.
 
+The Rust toolchain is `stable`, resolved once by the guard: every Rust job of the run
+installs exactly that version, a re-run of failed jobs keeps it (the guard's output is
+kept), and the release notes end with "Built with Rust X.Y.Z". Nothing has to be bumped
+when Rust releases a new stable.
+
 Nothing is published before every build job has succeeded. If a job fails, fix the cause
 and use "Re-run failed jobs" on the run: a draft release left by a failed run is replaced,
 an already published release is kept, and images are retagged to the same digests. A
