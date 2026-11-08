@@ -147,13 +147,13 @@ values and credentials are never shown.
 ## Development
 
 Install a stable Rust toolchain, the `wasm32-unknown-unknown` target, and Trunk
-0.21.14. The complete `dev-start` workflow also requires Podman and `curl` for
+0.22.1. The complete `dev-start` workflow also requires Podman and `curl` for
 its local PostgreSQL and NATS containers, and OpenSSL to generate its initial
 development credential:
 
 ```sh
 rustup target add wasm32-unknown-unknown
-cargo install --locked trunk --version 0.21.14
+cargo install --locked trunk --version 0.22.1
 ```
 
 From the workspace root, the development recipe listens on every network
