@@ -27,7 +27,7 @@ crono-execution = { path = "crates/execution" }
 crono-nats = { path = "crates/nats" }
 crono-telemetry = { path = "crates/telemetry", default-features = false }
 anyhow = "1"
-async-nats = { version = "0.50.0", default-features = false, features = ["jetstream", "nkeys", "ring", "server_2_14"] }
+async-nats = { version = "0.52.0", default-features = false, features = ["jetstream", "nkeys", "ring", "server_2_14"] }
 async-trait = "0.1"
 axum = { version = "0.8", features = ["tracing"] }
 built = { version = "0.8", features = ["git2"] }

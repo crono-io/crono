@@ -380,6 +380,7 @@ jobs:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+          create-storage-record: false
 
       # The tagging job collects one digest per image from these small artifacts.
       - name: Record the digest
