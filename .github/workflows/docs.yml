@@ -57,8 +57,8 @@ jobs:
           path: tagged
           persist-credentials: false
 
-      # The committed contract is published as-is: the drift test in the release's
-      # candidate run already guaranteed it matches the routes.
+      # The committed contract is published as-is: the drift test in CI already
+      # guaranteed it matches the routes.
       - name: Check the contract carries the release version
         shell: bash
         env:

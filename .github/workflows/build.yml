@@ -160,8 +160,8 @@ jobs:
           done
 
   # Development images for staging deploys: every push to develop or main pushes
-  # ghcr.io/<owner>/<image>:dev-<commit> (never `sha-`, which names release
-  # candidates, and a release commit is also main's head) with SBOM, provenance and
+  # ghcr.io/<owner>/<image>:dev-<commit> (never `sha-`, which names a release's images,
+  # and a release commit is also main's head) with SBOM, provenance and
   # an attestation, rebuilt from the cache the images job just wrote. Deploy the
   # digest from the job summary, never the tag. Pull requests never reach this job.
   images-publish:
